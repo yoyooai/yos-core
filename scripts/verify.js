@@ -79,6 +79,16 @@ function verifyAudits() {
 }
 
 function verifyReproduciblePack() {
+  const manifestOutput = npm(['pack', '--json', '--dry-run', '--silent'], { capture: true });
+  const [manifest] = JSON.parse(manifestOutput);
+  const blockedEntries = manifest.files
+    .map(file => file.path)
+    .filter(file => file.startsWith('docs/') || file.split('/').includes('node_modules'));
+  if (blockedEntries.length > 0) {
+    throw new Error(`package contains internal or generated files:\n${blockedEntries.join('\n')}`);
+  }
+  console.log(`[verify] package contents ${manifest.entryCount} entries`);
+
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-verify-pack-'));
   try {
     const outputs = [];
