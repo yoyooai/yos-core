@@ -1,0 +1,26 @@
+# YOS Caddyfile Template
+# Used by `yos init` to generate ~/yos/http/Caddyfile
+# Replace {DOMAIN} and {YOS_DIR} with actual values
+
+{DOMAIN} {
+    root * {YOS_DIR}/http/public
+
+    file_server {
+        hide .git .env *.db *.json
+    }
+
+    @markdown path *.md
+    handle @markdown {
+        header Content-Type "text/plain; charset=utf-8"
+    }
+
+    # Component routes are auto-inserted here by `yos add`
+    # using marker comments: # BEGIN/END yos-component:<name>
+
+    log {
+        output file {YOS_DIR}/http/caddy-access.log {
+            roll_size 10mb
+            roll_keep 3
+        }
+    }
+}

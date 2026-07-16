@@ -1,0 +1,68 @@
+# YOS
+
+YOS 是面向长期数字分身和数字员工的 AI Agent 运行引擎。
+
+它让同一个 Agent 能够跨会话、跨渠道持续运行，并提供长期记忆、消息调度、定时任务、健康监控和异常恢复能力。当前工程母版同时保留 Claude Code 与 Codex，后续逐步演进为 Codex 优先架构。
+
+## 当前状态
+
+本仓库是 YOS 正式工程母版，当前可用于开发和内部验证，尚未定为客户正式发布版本。
+
+## 核心能力
+
+- 身份、状态和参考资料的持久记忆
+- 带 SQLite 历史记录的统一消息桥
+- 定时任务和延迟任务
+- 运行状态监控与异常恢复
+- Web Console
+- Claude Code 与 Codex 运行时适配器
+- 安装、组件和升级工具
+
+## 开发环境安装
+
+需要 Node.js 20.20 或更高版本、npm、git 和 tmux。
+
+```bash
+npm ci
+npm install -g .
+yos init
+```
+
+## 常用命令
+
+```bash
+yos init
+yos shell
+yos attach
+yos status
+yos doctor
+yos runtime status
+yos runtime codex
+yos add <component>
+yos list
+```
+
+## 验证
+
+```bash
+npm run verify
+```
+
+统一门禁会运行全部 Jest 测试、Node 测试、依赖安全审计和可复现打包检查。标准 Linux 环境中未通过该命令的版本，不得作为发布版本。
+
+## 当前兼容边界
+
+本阶段只清理产品对外品牌。为了不破坏已经安装的系统，现有运行目录、环境变量和旧执行入口暂时保留，后续通过单独的数据安全迁移阶段处理。
+
+本阶段也明确保留 Claude Code。只有当 Codex 已经独立具备启动、监控、记忆轮转和异常恢复能力后，才重新评估是否移除 Claude。
+
+## 文档
+
+- [Docker 部署](docs/docker.md)
+- [GitHub 认证](docs/github-authentication.md)
+- [自定义会话启动](docs/custom-session-start.md)
+- [Hook 活动跟踪](docs/hook-activity-tracking.md)
+
+## 许可证
+
+YOS 按照 [LICENSE](LICENSE) 中的条款发布。
