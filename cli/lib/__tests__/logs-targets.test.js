@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 
-const { resolveLogTarget, LOG_TYPES } = await import('../../commands/service.js');
+const { resolveLogTarget, runLogTarget, LOG_TYPES } = await import('../../commands/service.js');
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const YOS_DIR = '/tmp/yos-logs-fixture';
@@ -70,5 +71,56 @@ describe('yos logs targets', () => {
     for (const type of LOG_TYPES) {
       assert.notEqual(resolveLogTarget(type, { yosDir: YOS_DIR }), null, `${type} does not resolve`);
     }
+  });
+});
+
+describe('yos logs child process status', () => {
+  it('propagates a failing PM2 exit code', () => {
+    const child = new EventEmitter();
+    const exits = [];
+
+    runLogTarget(
+      { kind: 'pm2', services: ['scheduler'] },
+      {
+        spawnFn: () => child,
+        exitFn: (code) => exits.push(code),
+      },
+    );
+    child.emit('close', 7, null);
+
+    assert.deepEqual(exits, [7]);
+  });
+
+  it('propagates a failing tail exit code', () => {
+    const child = new EventEmitter();
+    const exits = [];
+
+    runLogTarget(
+      { kind: 'file', path: '/tmp/yos-test.log' },
+      {
+        fileExistsFn: () => true,
+        spawnFn: () => child,
+        exitFn: (code) => exits.push(code),
+      },
+    );
+    child.emit('close', 4, null);
+
+    assert.deepEqual(exits, [4]);
+  });
+
+  it('treats a signalled log process as a failure', () => {
+    const child = new EventEmitter();
+    const exits = [];
+
+    runLogTarget(
+      { kind: 'pm2', services: [] },
+      {
+        spawnFn: () => child,
+        exitFn: (code) => exits.push(code),
+      },
+    );
+    child.emit('close', null, 'SIGTERM');
+
+    assert.deepEqual(exits, [1]);
   });
 });

@@ -221,6 +221,35 @@ export function resolveLogTarget(logType, { yosDir = YOS_DIR } = {}) {
   }
 }
 
+function logChildExitCode(code, signal) {
+  if (Number.isInteger(code)) return code;
+  return signal ? 1 : 0;
+}
+
+export function runLogTarget(
+  target,
+  {
+    fileExistsFn = fs.existsSync,
+    spawnFn = spawn,
+    exitFn = process.exit,
+    logFn = console.log,
+  } = {},
+) {
+  if (target.kind === 'file' && !fileExistsFn(target.path)) {
+    logFn(error(`Log file not found: ${dim(target.path)}`));
+    exitFn(1);
+    return;
+  }
+
+  const command = target.kind === 'pm2' ? 'pm2' : 'tail';
+  const commandArgs = target.kind === 'pm2'
+    ? ['logs', ...target.services, '--lines', '50']
+    : ['-f', '-n', '50', target.path];
+  const child = spawnFn(command, commandArgs, { stdio: 'inherit' });
+
+  child.on('close', (code, signal) => exitFn(logChildExitCode(code, signal)));
+}
+
 export function showLogs(args) {
   const logType = args[0] || 'activity';
   const target = resolveLogTarget(logType);
@@ -231,21 +260,7 @@ export function showLogs(args) {
     process.exit(1);
   }
 
-  if (target.kind === 'pm2') {
-    const pm2 = spawn('pm2', ['logs', ...target.services, '--lines', '50'], { stdio: 'inherit' });
-    pm2.on('close', () => process.exit(0));
-    return;
-  }
-
-  const logFile = target.path;
-
-  if (!fs.existsSync(logFile)) {
-    console.log(error(`Log file not found: ${dim(logFile)}`));
-    process.exit(1);
-  }
-
-  const tail = spawn('tail', ['-f', '-n', '50', logFile], { stdio: 'inherit' });
-  tail.on('close', () => process.exit(0));
+  runLogTarget(target);
 }
 
 export function startServices() {
