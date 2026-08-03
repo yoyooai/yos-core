@@ -15,6 +15,17 @@ function withoutReleaseRepo(run) {
   }
 }
 
+function withReleaseRepo(value, run) {
+  const saved = process.env.YOS_RELEASE_REPO;
+  process.env.YOS_RELEASE_REPO = value;
+  try {
+    return run();
+  } finally {
+    if (saved === undefined) delete process.env.YOS_RELEASE_REPO;
+    else process.env.YOS_RELEASE_REPO = saved;
+  }
+}
+
 // Remote self-upgrade is intentionally disabled until YOS_RELEASE_REPO is set,
 // but `yos upgrade --self --check` printed the raw machine token
 // `release_source_not_configured`, which tells the operator nothing about what
@@ -37,5 +48,19 @@ describe('checkForCoreUpdates when no release source is configured', () => {
     // CLI shows changed.
     assert.equal(resolveReleaseRepo({}).error, 'release_source_not_configured');
     assert.equal(resolveReleaseRepo({}).message, 'YOS_RELEASE_REPO is not configured');
+  });
+
+  it('surfaces the operator-facing text for an invalid release source', () => {
+    const invalidRepo = 'https://github.com/example/yos';
+    const sourceResult = resolveReleaseRepo({ YOS_RELEASE_REPO: invalidRepo });
+    const result = withReleaseRepo(invalidRepo, () => checkForCoreUpdates());
+
+    assert.equal(sourceResult.error, 'invalid_release_source');
+    assert.equal(result.success, false);
+    assert.equal(result.error, 'remote_version_failed');
+    assert.equal(result.message, sourceResult.message);
+    assert.notEqual(result.message, sourceResult.error);
+    assert.match(result.message, /YOS_RELEASE_REPO/);
+    assert.match(result.message, /owner\/repository/);
   });
 });
