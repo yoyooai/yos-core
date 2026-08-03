@@ -5,6 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import {
+  findBlockedPackageEntries,
+  packageContentDigest,
+} from './package-policy.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Security verification must not inherit a developer's local mirror, because
@@ -81,13 +85,16 @@ function verifyAudits() {
 function verifyReproduciblePack() {
   const manifestOutput = npm(['pack', '--json', '--dry-run', '--silent'], { capture: true });
   const [manifest] = JSON.parse(manifestOutput);
-  const blockedEntries = manifest.files
-    .map(file => file.path)
-    .filter(file => file.startsWith('docs/') || file.split('/').includes('node_modules'));
+  const packageEntries = manifest.files.map(file => file.path);
+  const trackedFiles = new Set(
+    run('git', ['ls-files', '-z'], { capture: true }).split('\0').filter(Boolean),
+  );
+  const blockedEntries = findBlockedPackageEntries(packageEntries, trackedFiles);
   if (blockedEntries.length > 0) {
-    throw new Error(`package contains internal or generated files:\n${blockedEntries.join('\n')}`);
+    throw new Error(`package contains internal, local, or untracked files:\n${blockedEntries.join('\n')}`);
   }
   console.log(`[verify] package contents ${manifest.entryCount} entries`);
+  console.log(`[verify] package content sha256 ${packageContentDigest(ROOT, packageEntries)}`);
 
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-verify-pack-'));
   try {

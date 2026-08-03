@@ -13,3 +13,7 @@ docs/
 
 # Environment
 .env
+.yos/
+.claude/worktrees/
+test/integration/runtime/*.local.env
+test/integration/runtime/*.local.json
