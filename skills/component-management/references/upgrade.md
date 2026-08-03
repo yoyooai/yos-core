@@ -84,7 +84,7 @@ The JSON output includes:
 
 The CLI executes the post-upgrade hook (if declared) and restarts the service (if it was online) automatically. Check their step results in the JSON output:
 
-1. **Post-upgrade hook**: read the `post_upgrade_hook` step in the `steps` array. If it reports failure, investigate — the upgrade itself succeeded but the hook's config migration may need manual attention.
+1. **Post-upgrade hook**: read the `post_upgrade_hook` step in the `steps` array. If its status is `skipped` and its message contains `hook had issues`, investigate — the upgrade itself succeeded but the hook's config migration may need manual attention. A `skipped` result with `no post-upgrade hook` is normal.
 2. **Service restart**: read the `start_service` step. If it failed, manually restart with `pm2 restart <service-name>` and verify health.
 3. Compare old and new SKILL.md config — if new required config items were added, collect them interactively.
 4. **If `mergeConflicts` exists**: Review each conflict file. Read the backup (local version) and installed (new version), then re-apply local changes using Edit tool.
@@ -208,7 +208,7 @@ Reply "upgrade telegram confirm" to proceed.
 User: `upgrade telegram confirm`
 
 1. Run `yos upgrade telegram --yes --skip-eval --json`
-2. Verify the `post_upgrade_hook` step result — investigate on failure
+2. Verify the `post_upgrade_hook` step result — investigate when its status is `skipped` and its message contains `hook had issues`
 3. Verify the `start_service` step result — manually restart on failure
 4. **If `mergeConflicts` in result**: Review and re-merge backed-up local changes
 5. Reply with version change, merge summary, and any action results
@@ -219,7 +219,7 @@ If the upgrade failed, report the error and rollback status from JSON.
 
 After upgrade succeeds, verify CLI-executed steps from the JSON result:
 
-1. **Post-upgrade hook**: check the `post_upgrade_hook` step result — investigate on failure.
+1. **Post-upgrade hook**: check the `post_upgrade_hook` step result — investigate when its status is `skipped` and its message contains `hook had issues`.
 2. **Service**: check the `start_service` step result — manually restart on failure.
 3. **Config**: If new config items added, inform user.
 4. **Conflicts**: If `mergeConflicts` exists, review and re-merge.
