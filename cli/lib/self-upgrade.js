@@ -102,7 +102,12 @@ export function checkForCoreUpdates({ branch, beta = false } = {}) {
 
   const latest = getLatestVersion({ branch, beta });
   if (!latest.success) {
-    return { success: false, error: 'remote_version_failed', message: latest.error };
+    // Release-source failures carry a machine token in `error` and the operator
+    // facing text in `message`; every other failure keeps its text in `error`.
+    // Surfacing `error` unconditionally printed tokens such as
+    // `release_source_not_configured` to the user, telling them nothing about
+    // what to set. Prefer `message` and fall back only when it is absent.
+    return { success: false, error: 'remote_version_failed', message: latest.message ?? latest.error };
   }
 
   // Use semver comparison (not string inequality) to avoid suggesting downgrades.

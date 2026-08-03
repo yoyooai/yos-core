@@ -1,0 +1,41 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+
+const { checkForCoreUpdates } = await import('../self-upgrade.js');
+const { resolveReleaseRepo } = await import('../release-source.js');
+
+function withoutReleaseRepo(run) {
+  const saved = process.env.YOS_RELEASE_REPO;
+  delete process.env.YOS_RELEASE_REPO;
+  try {
+    return run();
+  } finally {
+    if (saved === undefined) delete process.env.YOS_RELEASE_REPO;
+    else process.env.YOS_RELEASE_REPO = saved;
+  }
+}
+
+// Remote self-upgrade is intentionally disabled until YOS_RELEASE_REPO is set,
+// but `yos upgrade --self --check` printed the raw machine token
+// `release_source_not_configured`, which tells the operator nothing about what
+// to configure. The human text already existed in `message` and was discarded.
+describe('checkForCoreUpdates when no release source is configured', () => {
+  it('surfaces the operator-facing text, not the machine token', () => {
+    const result = withoutReleaseRepo(() => checkForCoreUpdates());
+    const token = resolveReleaseRepo({}).error;
+
+    assert.equal(result.success, false);
+    // The machine token stays available for programmatic callers …
+    assert.equal(result.error, 'remote_version_failed');
+    // … while the text the CLI prints must name what to configure.
+    assert.notEqual(result.message, token);
+    assert.match(result.message, /YOS_RELEASE_REPO/);
+  });
+
+  it('keeps the release-source contract intact for programmatic callers', () => {
+    // The token itself is still part of the library contract; only the text the
+    // CLI shows changed.
+    assert.equal(resolveReleaseRepo({}).error, 'release_source_not_configured');
+    assert.equal(resolveReleaseRepo({}).message, 'YOS_RELEASE_REPO is not configured');
+  });
+});
