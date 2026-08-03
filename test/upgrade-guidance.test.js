@@ -22,6 +22,8 @@ describe('component upgrade guidance', () => {
     expect(guide).not.toMatch(/Execute Post-Upgrade Hook/);
     expect(guide).not.toMatch(/Restart the service: `pm2 restart/);
     expect(guide).not.toMatch(/Run post-upgrade hook if/);
+    expect(guide).not.toMatch(/If it reports failure, investigate/);
+    expect(guide.match(/hook had issues/g) ?? []).toHaveLength(3);
   });
 
   test('documents the actual non-fatal hook failure result', () => {
