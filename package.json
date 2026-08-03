@@ -9,6 +9,7 @@
   },
   "scripts": {
     "postinstall": "node scripts/postinstall.js || true",
+    "prepack": "npm run verify",
     "test": "npm run test:jest && npm run test:node",
     "pretest:jest": "node scripts/install-skill-deps.js",
     "test:jest": "node --experimental-vm-modules node_modules/.bin/jest",

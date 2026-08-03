@@ -83,7 +83,7 @@ function verifyAudits() {
 }
 
 function verifyReproduciblePack() {
-  const manifestOutput = npm(['pack', '--json', '--dry-run', '--silent'], { capture: true });
+  const manifestOutput = npm(['pack', '--json', '--dry-run', '--silent', '--ignore-scripts'], { capture: true });
   const [manifest] = JSON.parse(manifestOutput);
   const packageEntries = manifest.files.map(file => file.path);
   const trackedFiles = new Set(
@@ -102,7 +102,7 @@ function verifyReproduciblePack() {
     for (const name of ['first', 'second']) {
       const destination = path.join(tempRoot, name);
       fs.mkdirSync(destination);
-      npm(['pack', '--silent', '--pack-destination', destination], { capture: true });
+      npm(['pack', '--silent', '--ignore-scripts', '--dry-run=false', '--pack-destination', destination], { capture: true });
       const archives = fs.readdirSync(destination).filter(file => file.endsWith('.tgz'));
       if (archives.length !== 1) {
         throw new Error(`expected one package archive in ${destination}, found ${archives.length}`);
