@@ -95,8 +95,8 @@ describe('split instruction assembler', () => {
     // pins alongside the reviewed content change (issue #722 content redraft).
     const managedHeader = '> **YOS-managed system instructions.** This file is replaced during upgrades. Put all custom instructions in `~/yos/YOS.md`.\n\n';
     const expected = {
-      claude: 'f77e283d3e82b7dfd5be141a6be68234c387955da20ad04a8fef93326af2a9c2',
-      codex: '8bcfbf4ef2b363778879c5b6bb9e94c4def5537b0e237ca78deebfe380b11e05',
+      claude: 'debf01c301f3c382f32c415cf28aefbddb21a6acfbd267d1977aedcb251ef947',
+      codex: '8c366362942880040427a230cf21cf18ef670325bbf30fbad9351bb25671a06c',
     };
     for (const runtime of ['claude', 'codex']) {
       const content = fs.readFileSync(path.join(TEMPLATES_DIR, `${runtime}-system.md`), 'utf8');
