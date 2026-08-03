@@ -193,27 +193,51 @@ export async function showStatus() {
   }
 }
 
+export const LOG_TYPES = ['activity', 'scheduler', 'caddy', 'pm2'];
+
+/**
+ * Resolve a `yos logs <type>` target.
+ *
+ * Only services that write their own log file have one under YOS_DIR: the
+ * activity monitor writes `activity-monitor/activity.log` and Caddy writes
+ * `http/caddy-access.log` (see skills/http/Caddyfile.template). The four core
+ * services started from ecosystem.config.cjs declare no `out_file`, so PM2 owns
+ * their output and those types must be read through `pm2 logs`.
+ *
+ * @returns {{kind:'file',path:string}|{kind:'pm2',services:string[]}|null}
+ */
+export function resolveLogTarget(logType, { yosDir = YOS_DIR } = {}) {
+  switch (logType) {
+    case 'activity':
+      return { kind: 'file', path: path.join(yosDir, 'activity-monitor', 'activity.log') };
+    case 'caddy':
+      return { kind: 'file', path: path.join(yosDir, 'http', 'caddy-access.log') };
+    case 'scheduler':
+      return { kind: 'pm2', services: ['scheduler'] };
+    case 'pm2':
+      return { kind: 'pm2', services: [] };
+    default:
+      return null;
+  }
+}
+
 export function showLogs(args) {
   const logType = args[0] || 'activity';
+  const target = resolveLogTarget(logType);
 
-  const logFiles = {
-    activity: path.join(YOS_DIR, 'activity-log.txt'),
-    scheduler: path.join(YOS_DIR, 'scheduler-log.txt'),
-    caddy: path.join(YOS_DIR, 'http', 'caddy-access.log'),
-  };
+  if (!target) {
+    console.error(error(`Unknown log type: ${logType}`));
+    console.log(dim(`Available: ${LOG_TYPES.join(', ')}`));
+    process.exit(1);
+  }
 
-  if (logType === 'pm2') {
-    const pm2 = spawn('pm2', ['logs', '--lines', '50'], { stdio: 'inherit' });
+  if (target.kind === 'pm2') {
+    const pm2 = spawn('pm2', ['logs', ...target.services, '--lines', '50'], { stdio: 'inherit' });
     pm2.on('close', () => process.exit(0));
     return;
   }
 
-  const logFile = logFiles[logType];
-  if (!logFile) {
-    console.error(error(`Unknown log type: ${logType}`));
-    console.log(dim('Available: activity, scheduler, caddy, pm2'));
-    process.exit(1);
-  }
+  const logFile = target.path;
 
   if (!fs.existsSync(logFile)) {
     console.log(error(`Log file not found: ${dim(logFile)}`));

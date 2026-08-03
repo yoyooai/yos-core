@@ -4,6 +4,10 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
+### Fixed
+
+- `yos logs activity` and `yos logs scheduler` resolved to `activity-log.txt` and `scheduler-log.txt`, which no service ever writes, so the default `yos logs` always reported "Log file not found". `activity` now reads the activity monitor's own log and `scheduler` reads the output PM2 captures for it.
+
 ## [0.1.0-alpha.1] - 2026-08-03
 
 This is an internal engineering milestone for continued YOS development, not a customer release.
