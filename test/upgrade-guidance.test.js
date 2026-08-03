@@ -10,6 +10,18 @@ const UPGRADE_GUIDE = path.join(
   ROOT,
   'skills/component-management/references/upgrade.md',
 );
+const HOOK_GUIDANCE = 'Post-upgrade hooks never report `failed`. Treat a `skipped` result with `no post-upgrade hook` as normal. Investigate every other `skipped` result, including `hook had issues`, `hook not found`, and `hook path escapes skill directory`, because the declared config migration did not complete.';
+
+function makeSkillDir(frontmatter) {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-upgrade-guidance-'));
+  const skillDir = path.join(tempRoot, 'demo');
+  fs.mkdirSync(skillDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(skillDir, 'SKILL.md'),
+    `---\nname: demo\n${frontmatter}---\n`,
+  );
+  return { tempRoot, skillDir };
+}
 
 describe('component upgrade guidance', () => {
   test('treats lifecycle hooks and service restart as CLI-owned steps', () => {
@@ -23,32 +35,49 @@ describe('component upgrade guidance', () => {
     expect(guide).not.toMatch(/Restart the service: `pm2 restart/);
     expect(guide).not.toMatch(/Run post-upgrade hook if/);
     expect(guide).not.toMatch(/If it reports failure, investigate/);
-    expect(guide.match(/hook had issues/g) ?? []).toHaveLength(3);
+    expect(guide.split(HOOK_GUIDANCE)).toHaveLength(4);
   });
 
-  test('documents the actual non-fatal hook failure result', () => {
-    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-upgrade-guidance-'));
-    const skillDir = path.join(tempRoot, 'demo');
-    const hookPath = path.join(skillDir, 'hooks', 'post-upgrade.js');
-    fs.mkdirSync(path.dirname(hookPath), { recursive: true });
-    fs.writeFileSync(
-      path.join(skillDir, 'SKILL.md'),
-      '---\nname: demo\nlifecycle:\n  hooks:\n    post-upgrade: hooks/post-upgrade.js\n---\n',
-    );
-    fs.writeFileSync(hookPath, 'process.exit(1);\n');
+  test('documents every skipped hook result returned by the product contract', () => {
+    const fixtures = [
+      makeSkillDir(''),
+      makeSkillDir('lifecycle:\n  hooks:\n    post-upgrade: hooks/post-upgrade.js\n'),
+      makeSkillDir('lifecycle:\n  hooks:\n    post-upgrade: ../outside.js\n'),
+      makeSkillDir('lifecycle:\n  hooks:\n    post-upgrade: hooks/post-upgrade.js\n'),
+    ];
+    const failingHookPath = path.join(fixtures[3].skillDir, 'hooks', 'post-upgrade.js');
+    fs.mkdirSync(path.dirname(failingHookPath), { recursive: true });
+    fs.writeFileSync(failingHookPath, 'process.exit(1);\n');
 
     try {
-      const result = step7_runPostUpgradeHook(
-        { component: 'demo', skillDir, jsonOutput: true },
-        { spawnSync: () => ({ status: 1, stdout: '', stderr: 'migration failed\n' }) },
-      );
+      const results = [
+        step7_runPostUpgradeHook({ component: 'demo', skillDir: fixtures[0].skillDir }),
+        step7_runPostUpgradeHook({ component: 'demo', skillDir: fixtures[1].skillDir }),
+        step7_runPostUpgradeHook({ component: 'demo', skillDir: fixtures[2].skillDir }),
+        step7_runPostUpgradeHook(
+          { component: 'demo', skillDir: fixtures[3].skillDir, jsonOutput: true },
+          { spawnSync: () => ({ status: 1, stdout: '', stderr: 'migration failed\n' }) },
+        ),
+      ];
+      const messages = results.map((result) => result.message);
       const guide = fs.readFileSync(UPGRADE_GUIDE, 'utf8');
 
-      expect(result.status).toBe('skipped');
-      expect(result.message).toMatch(/hook had issues/);
-      expect(guide).toMatch(/status is `skipped` and its message contains `hook had issues`/);
+      expect(results.every((result) => result.status === 'skipped')).toBe(true);
+      expect(messages).toEqual([
+        'no post-upgrade hook',
+        'hook not found: hooks/post-upgrade.js',
+        'hook path escapes skill directory: ../outside.js',
+        expect.stringMatching(/^hook had issues \(non-fatal\):/),
+      ]);
+      expect(guide.split(HOOK_GUIDANCE)).toHaveLength(4);
+      expect(HOOK_GUIDANCE).toContain('no post-upgrade hook` as normal');
+      for (const prefix of ['hook had issues', 'hook not found', 'hook path escapes skill directory']) {
+        expect(HOOK_GUIDANCE).toContain(`\`${prefix}\``);
+      }
     } finally {
-      fs.rmSync(tempRoot, { recursive: true, force: true });
+      for (const fixture of fixtures) {
+        fs.rmSync(fixture.tempRoot, { recursive: true, force: true });
+      }
     }
   });
 });
