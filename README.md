@@ -52,7 +52,9 @@ The verification gate runs the complete Jest and Node test suites, dependency au
 
 ## Current Compatibility Boundary
 
-This phase changes only the product-facing brand. Existing runtime paths, environment variables and the legacy executable remain temporarily available so installed systems keep working. Their migration is a separate, data-safe stage.
+This release installs fresh only. The rename is complete rather than layered: the sole executable is `yos`, the default runtime directory is `~/yos`, and configuration is read from `YOS_*` variables. The pre-rename executable, home directory and `ZYLOS_*` variables are not recognised, and the in-place instruction-migration path was retired — so an existing upstream or early-YOS install cannot be upgraded in place. Install fresh and carry data over deliberately.
+
+Every deliberate departure from upstream is recorded in [Authorized deviations](docs/authorized-deviations.md).
 
 Claude Code support is intentionally retained during this phase. Removing a runtime adapter before Codex has independent startup, monitoring, memory rotation and recovery coverage would create unnecessary product risk.
 
