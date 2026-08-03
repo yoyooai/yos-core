@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
@@ -10,8 +11,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 // always report legacy support. It is the only self-exclusion.
 const SELF = path.join('cli', 'lib', '__tests__', 'readme-compatibility-claims.test.js');
 
-const SCAN_ROOTS = ['cli', 'skills', 'scripts'];
-const SCAN_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.json', '.sh', '.cjs']);
+const SCAN_ROOTS = ['cli', 'skills', 'scripts', 'templates'];
+const SCAN_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.json', '.sh']);
 const LEGACY_ENV_PREFIX = 'ZYLOS_';
 const RETIRED_MIGRATION_MODULES = [
   path.join('cli', 'commands', 'migrate-instructions.js'),
@@ -63,25 +64,25 @@ function walk(dir, files = []) {
 }
 
 /** Files still referencing the pre-rename environment prefix. */
-function filesReferencingLegacyEnv() {
-  return SCAN_ROOTS.flatMap((root) => walk(path.join(ROOT, root)))
-    .map((file) => path.relative(ROOT, file))
+function filesReferencingLegacyEnv(root = ROOT) {
+  return SCAN_ROOTS.flatMap((scanRoot) => walk(path.join(root, scanRoot)))
+    .map((file) => path.relative(root, file))
     .filter((rel) => rel !== SELF)
-    .filter((rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8').includes(LEGACY_ENV_PREFIX));
+    .filter((rel) => fs.readFileSync(path.join(root, rel), 'utf8').includes(LEGACY_ENV_PREFIX));
 }
 
 /** What the code actually supports, computed fresh rather than restated. */
-function detectLegacySupport() {
-  const bin = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).bin ?? {};
-  const legacyEnvFiles = filesReferencingLegacyEnv();
+function detectLegacySupport(root = ROOT) {
+  const bin = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).bin ?? {};
+  const legacyEnvFiles = filesReferencingLegacyEnv(root);
   const migrationModules = RETIRED_MIGRATION_MODULES.filter((rel) =>
-    fs.existsSync(path.join(ROOT, rel)),
+    fs.existsSync(path.join(root, rel)),
   );
   const reasons = [
     ...Object.keys(bin)
       .filter((name) => name === 'zylos')
       .map((name) => `package.json bin declares "${name}"`),
-    ...(fs.existsSync(path.join(ROOT, 'cli', 'zylos.js')) ? ['cli/zylos.js exists'] : []),
+    ...(fs.existsSync(path.join(root, 'cli', 'zylos.js')) ? ['cli/zylos.js exists'] : []),
     ...legacyEnvFiles.map((rel) => `${rel} references ${LEGACY_ENV_PREFIX}`),
     ...migrationModules.map((rel) => `${rel} exists`),
   ];
@@ -149,6 +150,27 @@ describe('README compatibility claims match the code', () => {
         legacy.supported,
         `${rel} came back, so detectLegacySupport() must report backward compatibility.`,
       );
+    }
+  });
+
+  it('detects legacy runtime variables in executable templates', () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-compat-'));
+    try {
+      fs.mkdirSync(path.join(fixtureRoot, 'templates', 'pm2'), { recursive: true });
+      fs.writeFileSync(
+        path.join(fixtureRoot, 'package.json'),
+        JSON.stringify({ bin: { yos: './cli/yos.js' } }),
+      );
+      fs.writeFileSync(
+        path.join(fixtureRoot, 'templates', 'pm2', 'ecosystem.config.cjs'),
+        'module.exports = { env: { value: process.env.ZYLOS_DIR } };\n',
+      );
+
+      const detected = detectLegacySupport(fixtureRoot);
+      assert.equal(detected.supported, true);
+      assert.match(detected.reasons.join('\n'), /templates\/pm2\/ecosystem\.config\.cjs/);
+    } finally {
+      fs.rmSync(fixtureRoot, { recursive: true, force: true });
     }
   });
 });
