@@ -4,7 +4,7 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
-## [0.1.0-alpha.1] - 2026-07-16
+## [0.1.0-alpha.1] - 2026-08-03
 
 This is an internal engineering milestone for continued YOS development, not a customer release.
 
