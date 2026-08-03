@@ -44,8 +44,11 @@ function npm(args, options = {}) {
   return run(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, options);
 }
 
-function gitStatus() {
-  return run('git', ['status', '--porcelain=v1', '--untracked-files=all'], { capture: true });
+function gitStatus(root = ROOT) {
+  return run('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
+    cwd: root,
+    capture: true,
+  });
 }
 
 function findLockRoots(dir, roots = []) {
@@ -65,36 +68,39 @@ function sha256(filePath) {
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
 
-function verifyVersions() {
-  const packageVersion = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
-  const fileVersion = fs.readFileSync(path.join(ROOT, 'VERSION'), 'utf8').trim();
+function verifyVersions(root = ROOT) {
+  const packageVersion = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
+  const fileVersion = fs.readFileSync(path.join(root, 'VERSION'), 'utf8').trim();
   if (packageVersion !== fileVersion) {
     throw new Error(`version mismatch: package.json=${packageVersion}, VERSION=${fileVersion}`);
   }
   console.log(`[verify] version ${packageVersion}`);
 }
 
-function verifyAudits() {
-  const lockRoots = findLockRoots(ROOT).sort();
+function verifyAudits(root = ROOT) {
+  const lockRoots = findLockRoots(root).sort();
   for (const lockRoot of lockRoots) {
     npm(['audit', '--audit-level=low', `--registry=${REGISTRY}`], { cwd: lockRoot });
   }
   console.log(`[verify] audited ${lockRoots.length} dependency roots`);
 }
 
-function verifyReproduciblePack() {
-  const manifestOutput = npm(['pack', '--json', '--dry-run', '--silent', '--ignore-scripts'], { capture: true });
+function verifyReproduciblePack(root = ROOT) {
+  const manifestOutput = npm(['pack', '--json', '--dry-run', '--silent', '--ignore-scripts'], {
+    cwd: root,
+    capture: true,
+  });
   const [manifest] = JSON.parse(manifestOutput);
   const packageEntries = manifest.files.map(file => file.path);
   const trackedFiles = new Set(
-    run('git', ['ls-files', '-z'], { capture: true }).split('\0').filter(Boolean),
+    run('git', ['ls-files', '-z'], { cwd: root, capture: true }).split('\0').filter(Boolean),
   );
   const blockedEntries = findBlockedPackageEntries(packageEntries, trackedFiles);
   if (blockedEntries.length > 0) {
     throw new Error(`package contains internal, local, or untracked files:\n${blockedEntries.join('\n')}`);
   }
   console.log(`[verify] package contents ${manifest.entryCount} entries`);
-  console.log(`[verify] package content sha256 ${packageContentDigest(ROOT, packageEntries)}`);
+  console.log(`[verify] package content sha256 ${packageContentDigest(root, packageEntries)}`);
 
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-verify-pack-'));
   try {
@@ -102,7 +108,10 @@ function verifyReproduciblePack() {
     for (const name of ['first', 'second']) {
       const destination = path.join(tempRoot, name);
       fs.mkdirSync(destination);
-      npm(['pack', '--silent', '--ignore-scripts', '--dry-run=false', '--pack-destination', destination], { capture: true });
+      npm(
+        ['pack', '--silent', '--ignore-scripts', '--dry-run=false', '--pack-destination', destination],
+        { cwd: root, capture: true },
+      );
       const archives = fs.readdirSync(destination).filter(file => file.endsWith('.tgz'));
       if (archives.length !== 1) {
         throw new Error(`expected one package archive in ${destination}, found ${archives.length}`);
@@ -119,31 +128,40 @@ function verifyReproduciblePack() {
   }
 }
 
-const statusBefore = gitStatus();
-let failed = false;
+export function runVerification({ root = ROOT, runPrerequisites = true } = {}) {
+  const statusBefore = gitStatus(root);
+  let failed = false;
 
-try {
-  verifyVersions();
-  npm(['test']);
-  verifyAudits();
-  verifyReproduciblePack();
-} catch (error) {
-  failed = true;
-  console.error(`\n[verify] FAILED: ${error.message}`);
-}
-
-try {
-  const statusAfter = gitStatus();
-  if (statusAfter !== statusBefore) {
+  try {
+    if (runPrerequisites) {
+      verifyVersions(root);
+      npm(['test'], { cwd: root });
+      verifyAudits(root);
+    }
+    verifyReproduciblePack(root);
+  } catch (error) {
     failed = true;
-    console.error('\n[verify] FAILED: verification changed the working tree');
-    console.error('[verify] before:\n' + (statusBefore || '(clean)'));
-    console.error('[verify] after:\n' + (statusAfter || '(clean)'));
+    console.error(`\n[verify] FAILED: ${error.message}`);
   }
-} catch (error) {
-  failed = true;
-  console.error(`\n[verify] FAILED to inspect working tree: ${error.message}`);
+
+  try {
+    const statusAfter = gitStatus(root);
+    if (statusAfter !== statusBefore) {
+      failed = true;
+      console.error('\n[verify] FAILED: verification changed the working tree');
+      console.error('[verify] before:\n' + (statusBefore || '(clean)'));
+      console.error('[verify] after:\n' + (statusAfter || '(clean)'));
+    }
+  } catch (error) {
+    failed = true;
+    console.error(`\n[verify] FAILED to inspect working tree: ${error.message}`);
+  }
+
+  if (!failed) console.log('\n[verify] PASS');
+  return !failed;
 }
 
-if (failed) process.exit(1);
-console.log('\n[verify] PASS');
+const invokedPath = process.argv[1] ? fs.realpathSync(process.argv[1]) : '';
+if (invokedPath === fs.realpathSync(fileURLToPath(import.meta.url))) {
+  if (!runVerification()) process.exit(1);
+}
