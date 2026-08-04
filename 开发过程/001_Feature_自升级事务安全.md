@@ -75,6 +75,8 @@
 - macOS Node 24.10.0 / npm 11.6.0 双构建 SHA-256 均为 `108b767fb9ece12367abc06018efbb09824ddc84fc88e33503997c38b70bd680`，`npm run verify` PASS，工作区干净。
 - A1/A2/A3/A6 真实升级故障场景需使用独立 Linux Docker 台架 `workspace/yos-upgrade-probe-20260803/` 复验；该台架不在开发机，本记录不把自动化单测替代为真机结论。
 - 2026-08-04 收官回归：Jest `194/194`，Node `1064/1064`，6 个依赖根 0 漏洞，包 383 项，内容摘要 `86f8622bc49f9370752629811a45eeb41117552e8f7a7af5492e48f7f50fca77`，macOS 双构建 SHA-256 `08b09cd805204ed3d8413f4df1558b9a4f04ebca31b07203c9c27aa154938b90`，`npm run verify` PASS。
+- 旧核心首次升级兼容回归：error 字段同时携带失败原因和 RECOVERY 恢复说明，覆盖“已尝试但未完成”、实际/期望核心版本、Core Skills 状态、混装状态、失败服务、备份目录和恢复命令；当前 formatter 检测同一说明后不重复输出。
+- 本轮开发侧整仓门禁：Jest 195/195、Node 1065/1065、6 个依赖根 0 漏洞、包 383 项，内容摘要 f405d10a11a38c5b8d4266062644cbb8d21becacae4996d303003137f5f4a2aa，macOS 双构建 SHA-256 e562ba1a29ca5586e91c83fa5492d1c3c1a24620786a540cb955d8a7493848e7，npm run verify PASS。
 
 ## 影响范围
 
