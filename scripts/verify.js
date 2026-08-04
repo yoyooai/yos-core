@@ -110,8 +110,7 @@ function verifyAudits(root = ROOT) {
   console.log(`[verify] audited ${lockRoots.length} dependency roots`);
 }
 
-function verifyExecutedTests(root = ROOT) {
-  const baselines = loadApprovedTestBaselines(path.join(root, 'scripts', 'test-baselines.json'));
+function verifyExecutedTests(root = ROOT, baselines = loadApprovedTestBaselines(path.join(root, 'scripts', 'test-baselines.json'))) {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-test-results-'));
   try {
     const jestOutput = path.join(tempRoot, 'jest-results.json');
@@ -122,9 +121,20 @@ function verifyExecutedTests(root = ROOT) {
     const nodeOutput = npmCaptured(['run', 'test:node', '--', '--test-reporter=tap'], { cwd: root });
     const nodePassed = verifyNodeTapResult(nodeOutput, baselines.node);
     console.log(`[verify] executed tests: Jest ${jestPassed}, Node ${nodePassed}`);
+    return { jest: jestPassed, node: nodePassed };
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
+}
+
+export function verifyExecutedTestCounts(counts, baselines) {
+  for (const name of ['jest', 'node']) {
+    const passed = counts?.[name];
+    if (!Number.isInteger(passed) || passed < baselines[name].minimumPassed) {
+      throw new Error(`${name} executed-test count is missing or below approved minimum ${baselines[name].minimumPassed}`);
+    }
+  }
+  return counts;
 }
 
 function verifyReproduciblePack(root = ROOT) {
@@ -177,6 +187,8 @@ export function runVerification({
   verifyTestPolicyImpl = verifyTestPolicy,
   verifyVersionsImpl = verifyVersions,
   verifyExecutedTestsImpl = verifyExecutedTests,
+  verifyExecutedTestCountsImpl = verifyExecutedTestCounts,
+  testBaselines,
   verifyAuditsImpl = verifyAudits,
   verifyReproduciblePackImpl = verifyReproduciblePack,
 } = {}) {
@@ -193,7 +205,9 @@ export function runVerification({
     verifyTestPolicyImpl({ root });
     if (runPrerequisites) {
       verifyVersionsImpl(root);
-      verifyExecutedTestsImpl(root);
+      const baselines = testBaselines ?? loadApprovedTestBaselines(path.join(root, 'scripts', 'test-baselines.json'));
+      const executedTestCounts = verifyExecutedTestsImpl(root, baselines);
+      verifyExecutedTestCountsImpl(executedTestCounts, baselines);
       verifyAuditsImpl(root);
     }
     verifyReproduciblePackImpl(root);

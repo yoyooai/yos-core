@@ -10,7 +10,11 @@ describe('verification test-policy wiring', () => {
       runPrerequisites: true,
       gitStatusImpl: () => '',
       verifyVersionsImpl: () => calls.push('version'),
-      verifyExecutedTestsImpl: () => calls.push('tests'),
+      verifyExecutedTestsImpl: () => {
+        calls.push('tests');
+        return { jest: 193, node: 1063 };
+      },
+      testBaselines: { jest: { minimumPassed: 186 }, node: { minimumPassed: 1063 } },
       verifyAuditsImpl: () => calls.push('audit'),
       verifyReproduciblePackImpl: () => calls.push('pack'),
     };
@@ -44,6 +48,26 @@ describe('verification test-policy wiring', () => {
         calls.push('tests');
         throw new Error('test count below baseline');
       },
+      testBaselines: { jest: { minimumPassed: 186 }, node: { minimumPassed: 1063 } },
+      verifyAuditsImpl: () => calls.push('audit'),
+      verifyReproduciblePackImpl: () => calls.push('pack'),
+    })).toBe(false);
+    expect(calls).toEqual(['policy', 'version', 'tests']);
+  });
+
+  test('fails closed when executed-test accounting is replaced with a no-op', () => {
+    const calls = [];
+    expect(runVerification({
+      root: '/unused',
+      runPrerequisites: true,
+      gitStatusImpl: () => '',
+      verifyTestPolicyImpl: () => calls.push('policy'),
+      verifyVersionsImpl: () => calls.push('version'),
+      verifyExecutedTestsImpl: () => {
+        calls.push('tests');
+        return undefined;
+      },
+      testBaselines: { jest: { minimumPassed: 186 }, node: { minimumPassed: 1063 } },
       verifyAuditsImpl: () => calls.push('audit'),
       verifyReproduciblePackImpl: () => calls.push('pack'),
     })).toBe(false);
