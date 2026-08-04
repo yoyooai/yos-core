@@ -206,11 +206,13 @@ export function verifyTestBaselineGuard(root) {
   ].join('\n'), baselines.node));
 
   const verifySource = fs.readFileSync(path.join(root, 'scripts', 'verify.js'), 'utf8');
-  const testIndex = verifySource.indexOf('verifyExecutedTestsImpl(root);');
+  const testIndex = verifySource.indexOf('const executedTestCounts = verifyExecutedTestsImpl(root, baselines);');
+  const countIndex = verifySource.indexOf('verifyExecutedTestCountsImpl(executedTestCounts, baselines);');
   const auditIndex = verifySource.indexOf('verifyAuditsImpl(root);');
   const packIndex = verifySource.indexOf('verifyReproduciblePackImpl(root);');
-  if (testIndex < 0) throw new Error('executed-test gate is missing from verification');
-  if (auditIndex < 0 || packIndex < 0 || testIndex > auditIndex || testIndex > packIndex) {
+  if (testIndex < 0 || countIndex < 0) throw new Error('executed-test gate is missing from verification');
+  if (auditIndex < 0 || packIndex < 0 || testIndex > countIndex
+    || countIndex > auditIndex || countIndex > packIndex) {
     throw new Error('executed-test gate must run before audits and packaging');
   }
 }

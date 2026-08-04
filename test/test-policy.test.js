@@ -136,21 +136,26 @@ describe('test policy', () => {
     const verifyPath = path.join(root, 'scripts', 'verify.js');
     const healthy = [
       'verifyTestPolicyImpl({ root });',
-      'verifyExecutedTestsImpl(root);',
+      'const executedTestCounts = verifyExecutedTestsImpl(root, baselines);',
+      'verifyExecutedTestCountsImpl(executedTestCounts, baselines);',
       'verifyAuditsImpl(root);',
       'verifyReproduciblePackImpl(root);',
     ].join('\n');
     write(verifyPath, healthy);
     expect(() => verifyTestBaselineGuard(root)).not.toThrow();
 
-    write(verifyPath, healthy.replace('verifyExecutedTestsImpl(root);', 'console.warn("test counts skipped");'));
+    write(verifyPath, healthy.replace(
+      'const executedTestCounts = verifyExecutedTestsImpl(root, baselines);\nverifyExecutedTestCountsImpl(executedTestCounts, baselines);',
+      'try { verifyExecutedTestsImpl(root, baselines); } catch { console.warn("test counts skipped"); }',
+    ));
     expect(() => verifyTestBaselineGuard(root)).toThrow(/executed-test gate is missing/);
 
     write(verifyPath, [
       'verifyTestPolicyImpl({ root });',
       'verifyAuditsImpl(root);',
       'verifyReproduciblePackImpl(root);',
-      'verifyExecutedTestsImpl(root);',
+      'const executedTestCounts = verifyExecutedTestsImpl(root, baselines);',
+      'verifyExecutedTestCountsImpl(executedTestCounts, baselines);',
     ].join('\n'));
     expect(() => verifyTestBaselineGuard(root)).toThrow(/must run before audits and packaging/);
     fs.rmSync(root, { recursive: true, force: true });
