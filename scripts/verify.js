@@ -137,6 +137,16 @@ export function verifyExecutedTestCounts(counts, baselines) {
   return counts;
 }
 
+export function executeTestGate({
+  root,
+  baselines,
+  verifyExecutedTestsImpl,
+  verifyExecutedTestCountsImpl,
+}) {
+  const counts = verifyExecutedTestsImpl(root, baselines);
+  return verifyExecutedTestCountsImpl(counts, baselines) === counts;
+}
+
 function verifyReproduciblePack(root = ROOT) {
   const manifestOutput = npm(['pack', '--json', '--dry-run', '--silent', '--ignore-scripts'], {
     cwd: root,
@@ -188,6 +198,7 @@ export function runVerification({
   verifyVersionsImpl = verifyVersions,
   verifyExecutedTestsImpl = verifyExecutedTests,
   verifyExecutedTestCountsImpl = verifyExecutedTestCounts,
+  executeTestGateImpl = executeTestGate,
   testBaselines,
   verifyAuditsImpl = verifyAudits,
   verifyReproduciblePackImpl = verifyReproduciblePack,
@@ -200,20 +211,30 @@ export function runVerification({
     return false;
   }
   let failed = false;
+  let countsVerified = !runPrerequisites;
 
   try {
     verifyTestPolicyImpl({ root });
     if (runPrerequisites) {
       verifyVersionsImpl(root);
       const baselines = testBaselines ?? loadApprovedTestBaselines(path.join(root, 'scripts', 'test-baselines.json'));
-      const executedTestCounts = verifyExecutedTestsImpl(root, baselines);
-      verifyExecutedTestCountsImpl(executedTestCounts, baselines);
+      countsVerified = executeTestGateImpl({
+        root,
+        baselines,
+        verifyExecutedTestsImpl,
+        verifyExecutedTestCountsImpl,
+      });
       verifyAuditsImpl(root);
     }
     verifyReproduciblePackImpl(root);
   } catch (error) {
     failed = true;
     console.error(`\n[verify] FAILED: ${error.message}`);
+  }
+
+  if (!failed && runPrerequisites && !countsVerified) {
+    failed = true;
+    console.error('\n[verify] FAILED: executed-test counts were never verified');
   }
 
   try {

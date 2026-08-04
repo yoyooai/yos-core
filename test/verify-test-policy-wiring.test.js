@@ -74,6 +74,30 @@ describe('verification test-policy wiring', () => {
     expect(calls).toEqual(['policy', 'version', 'tests']);
   });
 
+  test('fails closed when an outer wrapper swallows the executed-test failure', () => {
+    const calls = [];
+    expect(runVerification({
+      root: '/unused',
+      runPrerequisites: true,
+      gitStatusImpl: () => '',
+      verifyTestPolicyImpl: () => calls.push('policy'),
+      verifyVersionsImpl: () => calls.push('version'),
+      executeTestGateImpl: () => {
+        calls.push('swallowed-test-gate');
+        try {
+          throw new Error('test command failed');
+        } catch {
+          return false;
+        }
+      },
+      verifyExecutedTestsImpl: () => ({ jest: 194, node: 1064 }),
+      testBaselines: { jest: { minimumPassed: 194 }, node: { minimumPassed: 1064 } },
+      verifyAuditsImpl: () => calls.push('audit'),
+      verifyReproduciblePackImpl: () => calls.push('pack'),
+    })).toBe(false);
+    expect(calls).toEqual(['policy', 'version', 'swallowed-test-gate', 'audit', 'pack']);
+  });
+
   test('fails closed when the working tree cannot be inspected', () => {
     expect(runVerification({
       root: '/unused',
