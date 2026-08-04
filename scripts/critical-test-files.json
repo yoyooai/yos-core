@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "files": [
+    { "path": "test/test-policy.test.js", "minimumTests": 1 },
+    { "path": "scripts/test-policy.js" },
+    { "path": "scripts/test-skip-allowlist.json" },
+    { "path": "scripts/critical-test-files.json" }
+  ]
+}
