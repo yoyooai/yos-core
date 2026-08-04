@@ -36,6 +36,14 @@ function makeFixture({ untrackedFile, blockedTrackedFile } = {}) {
   return root;
 }
 
+function runPackageVerification(root) {
+  return runVerification({
+    root,
+    runPrerequisites: false,
+    verifyTestPolicyImpl: () => {},
+  });
+}
+
 describe('verify package-policy wiring', () => {
   const fixtures = [];
   let logs;
@@ -59,7 +67,7 @@ describe('verify package-policy wiring', () => {
     const fixture = makeFixture();
     fixtures.push(fixture);
 
-    const passed = runVerification({ root: fixture, runPrerequisites: false });
+    const passed = runPackageVerification(fixture);
 
     expect(passed).toBe(true);
     expect(logs).toContain('\n[verify] PASS');
@@ -69,7 +77,7 @@ describe('verify package-policy wiring', () => {
     const fixture = makeFixture({ untrackedFile: 'local-secret.txt' });
     fixtures.push(fixture);
 
-    const passed = runVerification({ root: fixture, runPrerequisites: false });
+    const passed = runPackageVerification(fixture);
 
     expect(passed).toBe(false);
     expect(errors.join('\n')).toContain('local-secret.txt');
@@ -79,7 +87,7 @@ describe('verify package-policy wiring', () => {
     const fixture = makeFixture({ blockedTrackedFile: 'docs/internal.md' });
     fixtures.push(fixture);
 
-    const passed = runVerification({ root: fixture, runPrerequisites: false });
+    const passed = runPackageVerification(fixture);
 
     expect(passed).toBe(false);
     expect(errors.join('\n')).toContain('docs/internal.md');
