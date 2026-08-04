@@ -1589,10 +1589,20 @@ export function recoverSelfUpgrade(backupDir, deps = {}) {
     const state = JSON.parse(fsApi.readFileSync(statePath, 'utf8'));
     let stateBackupDir = '';
     try { stateBackupDir = fsApi.realpathSync(state.backupDir || ''); } catch { /* invalid below */ }
-    const coreRoot = path.join(resolved, 'core');
+    // Compare lexical paths under the already-canonicalized state backup. The
+    // archive may be missing (which rollback must report), so realpath cannot
+    // be required for the archive itself. This also handles /var -> /private/var
+    // aliases on macOS without weakening the traversal boundary.
+    const declaredBackup = path.resolve(state.backupDir);
+    const coreRoot = path.join(declaredBackup, 'core');
     const previousCore = state.previousCorePackage ? path.resolve(state.previousCorePackage) : null;
+    const previousCoreRelative = previousCore ? path.relative(coreRoot, previousCore) : null;
     const previousCoreInsideBackup = !previousCore
-      || previousCore.startsWith(`${coreRoot}${path.sep}`);
+      || (previousCoreRelative !== ''
+        && previousCore.endsWith('.tgz')
+        && !previousCoreRelative.startsWith(`..${path.sep}`)
+        && previousCoreRelative !== '..'
+        && !path.isAbsolute(previousCoreRelative));
     const servicesValid = Array.isArray(state.servicesWereRunning)
       && state.servicesWereRunning.every(name => typeof name === 'string' && /^[A-Za-z0-9._:-]+$/.test(name));
     if (state.schemaVersion !== 1
