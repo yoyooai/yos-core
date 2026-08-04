@@ -1,6 +1,10 @@
 {
   "version": 1,
   "files": [
+    { "path": "cli/lib/__tests__/self-upgrade.test.js", "minimumTests": 1 },
+    { "path": "cli/lib/__tests__/component-self-upgrade.test.js", "minimumTests": 1 },
+    { "path": "cli/lib/__tests__/self-upgrade-rollback-test-guard.test.js", "minimumTests": 1 },
+    { "path": "test/release-pack.test.js", "minimumTests": 1 },
     { "path": "test/test-policy.test.js", "minimumTests": 1 },
     { "path": "scripts/test-policy.js" },
     { "path": "scripts/test-skip-allowlist.json" },

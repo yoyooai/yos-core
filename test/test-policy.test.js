@@ -121,11 +121,15 @@ describe('test policy', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  test('the repository policy lists its own guard', () => {
+  test('the repository policy lists its own guard and release safety tests', () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts', 'critical-test-files.json'), 'utf8'));
     const paths = manifest.files.map((entry) => entry.path);
 
     expect(paths).toEqual(expect.arrayContaining([
+      'cli/lib/__tests__/self-upgrade.test.js',
+      'cli/lib/__tests__/component-self-upgrade.test.js',
+      'cli/lib/__tests__/self-upgrade-rollback-test-guard.test.js',
+      'test/release-pack.test.js',
       'test/test-policy.test.js',
       'scripts/test-policy.js',
       'scripts/critical-test-files.json',
