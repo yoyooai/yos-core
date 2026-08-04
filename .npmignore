@@ -3,6 +3,8 @@
 .github/
 .DS_Store
 docs/
+开发过程/
+publication/
 **/node_modules/
 
 # Logs and databases
