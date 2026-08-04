@@ -4,9 +4,10 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 
 const REQUIRED_TESTS = [
-  'rejects a future finalizer state schema before running post-install steps',
-  'treats a legacy finalizer state as unable to restore the previous core',
-  'treats an unversioned finalizer state as legacy',
+  ['self-upgrade.test.js', 'rejects a future finalizer state schema before running post-install steps'],
+  ['self-upgrade.test.js', 'treats a legacy finalizer state as unable to restore the previous core'],
+  ['self-upgrade.test.js', 'treats an unversioned finalizer state as legacy'],
+  ['component-self-upgrade.test.js', 'reports an incomplete rollback with version, skill, backup, and recovery details'],
 ];
 
 function escapeRegExp(value) {
@@ -15,10 +16,8 @@ function escapeRegExp(value) {
 
 describe('self-upgrade rollback safety test guard', () => {
   it('keeps every rollback safety regression test enabled', () => {
-    const testPath = path.join(import.meta.dirname, 'self-upgrade.test.js');
-    const source = fs.readFileSync(testPath, 'utf8');
-
-    for (const title of REQUIRED_TESTS) {
+    for (const [file, title] of REQUIRED_TESTS) {
+      const source = fs.readFileSync(path.join(import.meta.dirname, file), 'utf8');
       const escaped = escapeRegExp(title);
       assert.match(source, new RegExp(`\\bit\\(['\"]${escaped}['\"]`));
       assert.doesNotMatch(source, new RegExp(`\\bit\\.(?:skip|todo)\\(['\"]${escaped}['\"]`));

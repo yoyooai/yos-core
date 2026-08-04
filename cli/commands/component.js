@@ -57,7 +57,7 @@ export function printStep(step) {
  * Generate a pre-formatted C4 (IM channel) reply from command output.
  * Claude can use this reply directly, independent of SKILL.md version.
  */
-function formatC4Reply(type, data) {
+export function formatC4Reply(type, data) {
   switch (type) {
     case 'check': {
       const { component, hasUpdate, current, latest, changelog, localChanges, evaluation } = data;
@@ -123,11 +123,17 @@ function formatC4Reply(type, data) {
       return r;
     }
     case 'self-upgrade': {
-      const { success, from, to, changelog, failedStep, error, rollback, migrationHints, mergeConflicts, mergedFiles, instructionFilesRebuilt, settingsChanged } = data;
+      const { success, from, to, changelog, failedStep, error, rollback, manualRecovery, migrationHints, mergeConflicts, mergedFiles, instructionFilesRebuilt, settingsChanged } = data;
       if (!success) {
         let r = `yos-core upgrade failed (step ${failedStep}): ${error}`;
-        if (rollback?.performed) {
-          r += '\nRollback: ' + rollback.steps.map(s => `${s.success ? 'OK' : 'FAIL'}: ${s.action}`).join(', ');
+        if (rollback?.attempted || rollback?.performed) {
+          r += `\nRollback ${rollback.performed ? 'completed' : 'incomplete'}: `
+            + rollback.steps.map(s => `${s.success ? 'OK' : 'FAIL'}: ${s.action}`).join(', ');
+        }
+        if (manualRecovery) {
+          r += `\n${manualRecovery.message}`;
+          r += `\nBackup: ${manualRecovery.backupDir}`;
+          r += `\nRun: ${manualRecovery.command}`;
         }
         return r;
       }
@@ -788,8 +794,8 @@ async function handleUpgradeFlow(component, { jsonOutput, skipConfirm, skipEval,
     } else {
       console.log(`\n${error(`Upgrade failed (step ${result.failedStep}): ${result.error}`)}`);
 
-      if (result.rollback?.performed) {
-        console.log(`\n${bold('Auto-rollback performed:')}`);
+      if (result.rollback?.attempted || result.rollback?.performed) {
+        console.log(`\n${bold(result.rollback.performed ? 'Auto-rollback completed:' : 'Auto-rollback attempted:')}`);
         for (const r of result.rollback.steps) {
           if (r.success) {
             console.log(`  ${success(r.action)}`);
@@ -1248,6 +1254,7 @@ async function upgradeSelfCore({ branch, beta = false, mode = 'merge' } = {}) {
       }
       if (result.manualRecovery) {
         console.log(`\n${warn('Automatic recovery was incomplete.')}`);
+        console.log(`  ${result.manualRecovery.message}`);
         console.log(`  Backup: ${result.manualRecovery.backupDir}`);
         console.log(`  Run: ${result.manualRecovery.command}`);
       }
