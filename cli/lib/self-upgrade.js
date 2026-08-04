@@ -1729,20 +1729,47 @@ function buildManualRecovery(ctx, rollbackResults) {
   const expectedCoreVersion = versionCheck?.expectedVersion || ctx.from || null;
   const actualCoreVersion = versionCheck?.actualVersion || ctx.to || null;
   const coreSkillsRestored = skillRestore?.success === true;
-  const coreMessage = expectedCoreVersion && actualCoreVersion && expectedCoreVersion !== actualCoreVersion
+  const rollbackPerformed = rollbackResults.length > 0 && rollbackResults.every(result => result.success);
+  const recoveryCommand = `yos upgrade --self --recover ${JSON.stringify(ctx.backupDir)}`;
+  const failedServices = new Set();
+  for (const result of rollbackResults.filter(item => !item.success)) {
+    if (result.action?.startsWith('restart_')) failedServices.add(result.action.slice('restart_'.length));
+    const offline = /services not online:\s*(.+)/i.exec(result.error || '');
+    if (offline) {
+      for (const name of offline[1].split(',').map(item => item.trim()).filter(Boolean)) failedServices.add(name);
+    }
+  }
+  const coreSkillsVersion = coreSkillsRestored ? expectedCoreVersion : null;
+  const mixedInstall = !rollbackPerformed && (
+    !coreSkillsRestored
+    || (actualCoreVersion && coreSkillsVersion && actualCoreVersion !== coreSkillsVersion)
+  );
+  const coreState = expectedCoreVersion && actualCoreVersion && expectedCoreVersion !== actualCoreVersion
     ? `Core remains at ${actualCoreVersion}; it was not rolled back to ${expectedCoreVersion}.`
     : `Core rollback to ${expectedCoreVersion || 'the previous version'} could not be fully verified.`;
-  const skillsMessage = coreSkillsRestored
+  const skillsState = coreSkillsRestored
     ? 'Core Skills were restored from the transaction backup.'
     : 'Core Skills restoration could not be verified.';
+  const summary = [
+    `Rollback was attempted but ${rollbackPerformed ? 'completed' : 'incomplete'}.`,
+    coreState,
+    skillsState,
+    `Core version: ${actualCoreVersion || 'unknown'}.`,
+    `Core Skills version: ${coreSkillsVersion || 'unknown'}.`,
+    `Mixed installation: ${mixedInstall ? 'yes' : 'no'}.`,
+    `Backup: ${ctx.backupDir}.`,
+    `Recovery command: ${recoveryCommand}.`,
+  ];
+  if (failedServices.size > 0) summary.push(`Services not online: ${[...failedServices].join(', ')}.`);
 
   return {
     backupDir: ctx.backupDir,
-    command: `yos upgrade --self --recover ${JSON.stringify(ctx.backupDir)}`,
+    command: recoveryCommand,
     expectedCoreVersion,
     actualCoreVersion,
     coreSkillsRestored,
-    message: `${coreMessage} ${skillsMessage}`,
+    failedServices: [...failedServices],
+    message: summary.join(' '),
   };
 }
 

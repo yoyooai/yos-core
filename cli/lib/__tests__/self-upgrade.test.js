@@ -573,15 +573,17 @@ describe('self-upgrade backup and rollback', () => {
     const skillsDir = path.join(tmpDir, 'skills');
     const previousCorePackage = path.join(backupDir, 'core', 'yos-old.tgz');
     fs.mkdirSync(path.dirname(previousCorePackage), { recursive: true });
+    fs.mkdirSync(path.join(backupDir, 'skills', 'comm-bridge'), { recursive: true });
     fs.mkdirSync(skillsDir, { recursive: true });
     fs.writeFileSync(previousCorePackage, 'old core');
+    fs.writeFileSync(path.join(backupDir, 'skills', 'comm-bridge', 'SKILL.md'), '# old\n');
 
     const result = runSelfUpgradeFinalize({
       schemaVersion: 2,
       backupDir,
       previousCorePackage,
       coreInstallAttempted: true,
-      servicesWereRunning: [],
+      servicesWereRunning: ['c4-dispatcher'],
       from: '0.4.12',
       to: '0.4.13',
     }, {
@@ -592,6 +594,8 @@ describe('self-upgrade backup and rollback', () => {
         skillsDir,
         installPreviousCore: () => {},
         restoreSkillDependencies: () => ({ installed: 0, failed: [] }),
+        restartManagedProcess: () => { throw new Error('restart failed'); },
+        verifyServices: () => ({ success: false, offline: ['c4-dispatcher'] }),
         getInstalledCoreVersion: () => ({ success: true, version: '0.4.13' }),
       },
     });
@@ -600,6 +604,13 @@ describe('self-upgrade backup and rollback', () => {
     assert.equal(result.rollback.performed, false);
     assert.equal(result.machineState, 'recovery_required');
     assert.equal(result.manualRecovery.actualCoreVersion, '0.4.13');
+    assert.match(result.manualRecovery.message, /Rollback was attempted but incomplete/);
+    assert.match(result.manualRecovery.message, /Core version: 0\.4\.13/);
+    assert.match(result.manualRecovery.message, /Core Skills version: 0\.4\.12/);
+    assert.match(result.manualRecovery.message, /Mixed installation: yes/);
+    assert.match(result.manualRecovery.message, /Backup:/);
+    assert.match(result.manualRecovery.message, /yos upgrade --self --recover/);
+    assert.match(result.manualRecovery.message, /c4-dispatcher/);
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
