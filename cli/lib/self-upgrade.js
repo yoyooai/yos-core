@@ -1651,6 +1651,29 @@ function classifyFinalizeState(state) {
   return 'unsupported';
 }
 
+function buildManualRecovery(ctx, rollbackResults) {
+  const versionCheck = rollbackResults.find(result => result.action === 'verify_restored_core_version');
+  const skillRestore = rollbackResults.find(result => result.action === 'restore_core_skills');
+  const expectedCoreVersion = versionCheck?.expectedVersion || ctx.from || null;
+  const actualCoreVersion = versionCheck?.actualVersion || ctx.to || null;
+  const coreSkillsRestored = skillRestore?.success === true;
+  const coreMessage = expectedCoreVersion && actualCoreVersion && expectedCoreVersion !== actualCoreVersion
+    ? `Core remains at ${actualCoreVersion}; it was not rolled back to ${expectedCoreVersion}.`
+    : `Core rollback to ${expectedCoreVersion || 'the previous version'} could not be fully verified.`;
+  const skillsMessage = coreSkillsRestored
+    ? 'Core Skills were restored from the transaction backup.'
+    : 'Core Skills restoration could not be verified.';
+
+  return {
+    backupDir: ctx.backupDir,
+    command: `yos upgrade --self --recover ${JSON.stringify(ctx.backupDir)}`,
+    expectedCoreVersion,
+    actualCoreVersion,
+    coreSkillsRestored,
+    message: `${coreMessage} ${skillsMessage}`,
+  };
+}
+
 function buildSelfUpgradeResult(ctx, failedStep, rollbackResults = null, rollbackPerformed = Boolean(rollbackResults)) {
   if (failedStep) {
     const rollbackComplete = rollbackPerformed
@@ -1671,14 +1694,15 @@ function buildSelfUpgradeResult(ctx, failedStep, rollbackResults = null, rollbac
       failedStep: failedStep.step,
       error: failedStep.error,
       steps: ctx.steps,
-      rollback: { performed: rollbackPerformed, steps: rollbackResults || [] },
+      rollback: {
+        attempted: rollbackPerformed,
+        performed: rollbackComplete,
+        steps: rollbackResults || [],
+      },
       backupDir: ctx.backupDir,
       machineState,
       ...(machineState === 'recovery_required' && ctx.backupDir ? {
-        manualRecovery: {
-          backupDir: ctx.backupDir,
-          command: `yos upgrade --self --recover ${JSON.stringify(ctx.backupDir)}`,
-        },
+        manualRecovery: buildManualRecovery(ctx, rollbackResults || []),
       } : {}),
     };
   }

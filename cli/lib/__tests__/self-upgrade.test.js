@@ -103,7 +103,17 @@ describe('self-upgrade finalizer handoff', () => {
           previousCorePackage: ctx.previousCorePackage,
           handoffState: ctx.handoffState,
         });
-        return [{ action: 'restore_core_skills', success: true }];
+        return [
+          { action: 'restore_previous_core', success: false, error: 'previous core package backup is missing' },
+          { action: 'restore_core_skills', success: true },
+          {
+            action: 'verify_restored_core_version',
+            success: false,
+            expectedVersion: '0.4.12',
+            actualVersion: '0.4.13',
+            error: 'installed core version 0.4.13 does not match expected 0.4.12',
+          },
+        ];
       },
     });
 
@@ -113,6 +123,15 @@ describe('self-upgrade finalizer handoff', () => {
       handoffState: 'legacy',
     }]);
     assert.equal(result.success, false);
+    assert.equal(result.rollback.attempted, true);
+    assert.equal(result.rollback.performed, false);
+    assert.equal(result.machineState, 'recovery_required');
+    assert.equal(result.manualRecovery.expectedCoreVersion, '0.4.12');
+    assert.equal(result.manualRecovery.actualCoreVersion, '0.4.13');
+    assert.equal(result.manualRecovery.coreSkillsRestored, true);
+    assert.match(result.manualRecovery.message, /Core remains at 0\.4\.13/);
+    assert.match(result.manualRecovery.message, /not rolled back to 0\.4\.12/);
+    assert.match(result.manualRecovery.message, /Core Skills were restored/);
   });
 
   it('treats an unversioned finalizer state as legacy', () => {
@@ -198,6 +217,7 @@ describe('self-upgrade finalizer handoff', () => {
     assert.equal(result.error, 'sync failed');
     assert.deepEqual(rollbackCalls, ['/tmp/backup/core/yos-old.tgz']);
     assert.deepEqual(result.rollback, {
+      attempted: true,
       performed: true,
       steps: [{ action: 'restore_previous_core', success: true }],
     });
