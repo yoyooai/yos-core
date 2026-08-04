@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { execSync, spawnSync } from 'node:child_process';
+import { execFileSync, execSync, spawnSync } from 'node:child_process';
 import { SKILLS_DIR, YOS_DIR, getYosConfig } from './config.js';
 import { downloadArchive, downloadBranch } from './download.js';
 import { generateManifest, saveMergeBaseline } from './manifest.js';
@@ -469,8 +469,130 @@ export function generateMigrationHints(templatesDir, deps = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// 11-step self-upgrade pipeline
+// 13-step self-upgrade pipeline
 // ---------------------------------------------------------------------------
+
+const MIN_SELF_UPGRADE_FREE_BYTES = 512 * 1024 * 1024;
+
+function npmExecutable() {
+  return process.platform === 'win32' ? 'npm.cmd' : 'npm';
+}
+
+function availableBytes(targetPath, fsApi = fs) {
+  const stats = fsApi.statfsSync(targetPath);
+  return Number(stats.bavail) * Number(stats.bsize);
+}
+
+function assertSelfUpgradeDiskSpace(ctx, deps = {}) {
+  const readAvailableBytes = deps.availableBytes ?? ((target) => availableBytes(target, deps.fs ?? fs));
+  const freeBytes = readAvailableBytes(ctx.tempDir);
+  if (!Number.isFinite(freeBytes) || freeBytes < MIN_SELF_UPGRADE_FREE_BYTES) {
+    const freeMiB = Number.isFinite(freeBytes) ? Math.floor(freeBytes / 1024 / 1024) : 'unknown';
+    throw new Error(`insufficient disk space for upgrade preparation (${freeMiB} MiB available; 512 MiB required)`);
+  }
+}
+
+function assertSelfUpgradeNpmAvailable(deps = {}) {
+  const execFile = deps.execFileSync ?? execFileSync;
+  execFile(npmExecutable(), ['--version'], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 10000,
+  });
+}
+
+function prepareSkillDependencies(ctx, deps = {}) {
+  const fsApi = deps.fs ?? fs;
+  const execFile = deps.execFileSync ?? execFileSync;
+  const skillsSource = path.join(ctx.tempDir, 'skills');
+  if (!fsApi.existsSync(skillsSource)) return;
+
+  const preparationDir = ctx.preparationDir;
+  const dependencyRoot = path.join(preparationDir, 'skill-dependencies');
+  fsApi.mkdirSync(dependencyRoot, { recursive: true });
+
+  for (const entry of fsApi.readdirSync(skillsSource, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const sourceDir = path.join(skillsSource, entry.name);
+    const packagePath = path.join(sourceDir, 'package.json');
+    if (!fsApi.existsSync(packagePath)) continue;
+
+    const pkg = JSON.parse(fsApi.readFileSync(packagePath, 'utf8'));
+    if (!pkg.dependencies || Object.keys(pkg.dependencies).length === 0) continue;
+
+    const targetDir = path.join(dependencyRoot, entry.name);
+    fsApi.mkdirSync(targetDir, { recursive: true });
+    fsApi.copyFileSync(packagePath, path.join(targetDir, 'package.json'));
+    const lockPath = path.join(sourceDir, 'package-lock.json');
+    if (fsApi.existsSync(lockPath)) {
+      fsApi.copyFileSync(lockPath, path.join(targetDir, 'package-lock.json'));
+    }
+    execFile(npmExecutable(), ['install', '--omit=dev'], {
+      cwd: targetDir,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 120000,
+    });
+  }
+}
+
+function packUpgradeCandidate(ctx, deps = {}) {
+  const execFile = deps.execFileSync ?? execFileSync;
+  const output = execFile(npmExecutable(), [
+    'pack',
+    '--ignore-scripts',
+    '--pack-destination',
+    ctx.preparationDir,
+  ], {
+    cwd: ctx.tempDir,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 120000,
+  }).trim();
+  const archiveName = path.basename(output.split('\n').at(-1));
+  const archivePath = path.join(ctx.preparationDir, archiveName);
+  if (!fs.existsSync(archivePath)) throw new Error('candidate package was not created');
+  return archivePath;
+}
+
+function cleanupSelfUpgradePreparation(ctx, fsApi = fs) {
+  if (!ctx.preparationDir) return;
+  fsApi.rmSync(ctx.preparationDir, { recursive: true, force: true });
+  ctx.preparationDir = null;
+  ctx.preparedPackage = null;
+}
+
+export function prepareSelfUpgrade(ctx, deps = {}) {
+  const startTime = Date.now();
+  const fsApi = deps.fs ?? fs;
+  try {
+    if (!ctx.tempDir || !fsApi.existsSync(ctx.tempDir)) {
+      throw new Error('Temp directory not available');
+    }
+    ctx.preparationDir = deps.preparationDir
+      ?? fsApi.mkdtempSync(path.join(getWritableTmpBase('yos-core-preflight-probe-'), 'yos-core-preflight-'));
+    (deps.assertDiskSpace ?? assertSelfUpgradeDiskSpace)(ctx, deps);
+    (deps.assertNpmAvailable ?? assertSelfUpgradeNpmAvailable)(deps);
+    (deps.prepareSkillDependencies ?? prepareSkillDependencies)(ctx, deps);
+    ctx.preparedPackage = (deps.packCandidate ?? packUpgradeCandidate)(ctx, deps);
+    return {
+      step: 0,
+      name: 'prepare_upgrade',
+      status: 'done',
+      message: 'candidate package and skill dependencies prepared',
+      duration: Date.now() - startTime,
+    };
+  } catch (err) {
+    cleanupSelfUpgradePreparation(ctx, fsApi);
+    return {
+      step: 0,
+      name: 'prepare_upgrade',
+      status: 'failed',
+      error: err.message,
+      duration: Date.now() - startTime,
+    };
+  }
+}
 
 /**
  * Create self-upgrade context.
@@ -485,6 +607,10 @@ function createContext({ tempDir, newVersion, mode } = {}) {
     mode: mode || 'merge',
     // State tracking
     backupDir: null,
+    previousCorePackage: null,
+    preparationDir: null,
+    preparedPackage: null,
+    coreInstallAttempted: false,
     servicesStopped: [],
     servicesWereRunning: [],
     mergeConflicts: [],
@@ -510,9 +636,14 @@ export function step1_backupCoreSkills(ctx, deps = {}) {
   const skillsDir = deps.skillsDir ?? SKILLS_DIR;
   const copyTreeFn = deps.copyTree ?? copyTree;
   const fsApi = deps.fs ?? fs;
+  const packCurrentCoreFn = deps.packCurrentCore ?? packCurrentCore;
 
   try {
-    fsApi.mkdirSync(backupDir, { recursive: true });
+    fsApi.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    fsApi.chmodSync(backupDir, 0o700);
+    // Record the transaction directory immediately so a partial backup remains
+    // visible and recoverable if a later backup operation fails.
+    ctx.backupDir = backupDir;
 
     // Backup the skills directory (include .yos manifests — needed for correct rollback)
     if (fsApi.existsSync(skillsDir)) {
@@ -526,11 +657,33 @@ export function step1_backupCoreSkills(ctx, deps = {}) {
       fsApi.copyFileSync(ecosystemSrc, path.join(backupPm2Dir, 'ecosystem.config.cjs'));
     }
 
-    ctx.backupDir = backupDir;
+    ctx.previousCorePackage = packCurrentCoreFn(ctx, backupDir, deps);
+
     return { step: 1, name: 'backup_core_skills', status: 'done', duration: Date.now() - startTime };
   } catch (err) {
     return { step: 1, name: 'backup_core_skills', status: 'failed', error: err.message, duration: Date.now() - startTime };
   }
+}
+
+function packCurrentCore(ctx, backupDir, deps = {}) {
+  const fsApi = deps.fs ?? fs;
+  const execFile = deps.execFileSync ?? execFileSync;
+  const coreBackupDir = path.join(backupDir, 'core');
+  fsApi.mkdirSync(coreBackupDir, { recursive: true });
+  const output = execFile(npmExecutable(), [
+    'pack',
+    '--ignore-scripts',
+    '--pack-destination',
+    coreBackupDir,
+  ], {
+    cwd: ctx.coreDir,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 120000,
+  }).trim();
+  const archive = path.join(coreBackupDir, path.basename(output.split('\n').at(-1)));
+  if (!fsApi.existsSync(archive)) throw new Error('previous core package backup was not created');
+  return archive;
 }
 
 /**
@@ -604,40 +757,50 @@ function step3_stopCoreServices(ctx, deps = {}) {
 }
 
 /**
- * Step 4: npm pack + npm install -g tarball
- *
- * Using `npm install -g <folder>` creates a symlink to the folder.
- * Since we install from a temp dir that gets cleaned up, the symlink breaks.
- * Instead: npm pack (creates a .tgz copy) → npm install -g <tgz> (copies files).
+ * Step 4: install the tarball prepared before services were stopped.
  */
 function step4_npmInstallGlobal(ctx, deps = {}) {
   const startTime = Date.now();
-  const execSyncFn = deps.execSync ?? execSync;
+  const execFile = deps.execFileSync ?? execFileSync;
+  const fsApi = deps.fs ?? fs;
 
-  if (!ctx.tempDir || !fs.existsSync(ctx.tempDir)) {
-    return { step: 4, name: 'npm_install_global', status: 'failed', error: 'Temp directory not available', duration: Date.now() - startTime };
+  if (!ctx.preparedPackage || !fsApi.existsSync(ctx.preparedPackage)) {
+    return { step: 4, name: 'npm_install_global', status: 'failed', error: 'Prepared candidate package not available', duration: Date.now() - startTime };
   }
 
   try {
-    // Pack first — creates a .tgz tarball (copies, not symlinks)
-    const tarballName = execSyncFn('npm pack --pack-destination .', {
-      cwd: ctx.tempDir,
+    ctx.coreInstallAttempted = true;
+    persistRollbackState(ctx, deps);
+    execFile(npmExecutable(), ['install', '-g', ctx.preparedPackage], {
       encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
-
-    const tarballPath = path.join(ctx.tempDir, tarballName);
-
-    // Install from tarball — npm copies files into global node_modules
-    execSyncFn(`npm install -g "${tarballPath}"`, {
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, YOS_SKIP_POSTINSTALL: '1' },  // Skip postinstall — we sync skills ourselves
+      timeout: 120000,
     });
     return { step: 4, name: 'npm_install_global', status: 'done', duration: Date.now() - startTime };
   } catch (err) {
-    return { step: 4, name: 'npm_install_global', status: 'failed', error: err.stderr?.trim() || err.message, duration: Date.now() - startTime };
+    return { step: 4, name: 'npm_install_global', status: 'failed', error: err.stderr?.toString().trim() || err.message, duration: Date.now() - startTime };
+  } finally {
+    cleanupSelfUpgradePreparation(ctx, fsApi);
   }
+}
+
+function persistRollbackState(ctx, deps = {}) {
+  if (!ctx.backupDir) throw new Error('transaction backup is unavailable');
+  const fsApi = deps.fs ?? fs;
+  const statePath = path.join(ctx.backupDir, 'rollback-state.json');
+  const state = {
+    schemaVersion: 1,
+    backupDir: ctx.backupDir,
+    previousCorePackage: ctx.previousCorePackage,
+    coreInstallAttempted: ctx.coreInstallAttempted,
+    servicesWereRunning: ctx.servicesWereRunning,
+    from: ctx.from,
+  };
+  fsApi.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`, {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
 }
 
 /**
@@ -698,23 +861,36 @@ export function step5_syncCoreSkills(ctx, deps = {}) {
  */
 function step6_installSkillDeps(ctx) {
   const startTime = Date.now();
-  const entries = fs.readdirSync(SKILLS_DIR, { withFileTypes: true });
+  const { installed, failed } = installSkillDependencies(SKILLS_DIR);
+
+  const msg = `${installed} installed${failed.length ? `, ${failed.length} failed: ${failed.join(', ')}` : ''}`;
+  if (failed.length > 0) {
+    return { step: 6, name: 'install_skill_deps', status: 'failed', error: msg, duration: Date.now() - startTime };
+  }
+  return { step: 6, name: 'install_skill_deps', status: 'done', message: msg, duration: Date.now() - startTime };
+}
+
+function installSkillDependencies(skillsRoot, deps = {}) {
+  const fsApi = deps.fs ?? fs;
+  const execFile = deps.execFileSync ?? execFileSync;
+  const entries = fsApi.readdirSync(skillsRoot, { withFileTypes: true });
   let installed = 0;
   const failed = [];
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    const skillDir = path.join(SKILLS_DIR, entry.name);
+    const skillDir = path.join(skillsRoot, entry.name);
     const pkgPath = path.join(skillDir, 'package.json');
-    if (!fs.existsSync(pkgPath)) continue;
+    if (!fsApi.existsSync(pkgPath)) continue;
 
     try {
-      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+      const pkg = JSON.parse(fsApi.readFileSync(pkgPath, 'utf8'));
       if (!pkg.dependencies || Object.keys(pkg.dependencies).length === 0) continue;
 
-      execSync('npm install --omit=dev', {
+      execFile(npmExecutable(), ['install', '--omit=dev'], {
         cwd: skillDir,
-        stdio: 'pipe',
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
         timeout: 120000,
       });
       installed++;
@@ -722,12 +898,7 @@ function step6_installSkillDeps(ctx) {
       failed.push(entry.name);
     }
   }
-
-  const msg = `${installed} installed${failed.length ? `, ${failed.length} failed: ${failed.join(', ')}` : ''}`;
-  if (failed.length > 0) {
-    return { step: 6, name: 'install_skill_deps', status: 'failed', error: msg, duration: Date.now() - startTime };
-  }
-  return { step: 6, name: 'install_skill_deps', status: 'done', message: msg, duration: Date.now() - startTime };
+  return { installed, failed };
 }
 
 function step7Result(startTime, { status = 'done', message, error }) {
@@ -1273,6 +1444,20 @@ export function rollbackSelf(ctx, deps = {}) {
   const skillsDir = deps.skillsDir ?? SKILLS_DIR;
   const ecosystemPath = deps.ecosystemPath ?? getCoreEcosystemPath();
 
+  if (ctx.coreInstallAttempted || ctx.previousCorePackage) {
+    if (!ctx.previousCorePackage) {
+      results.push({ action: 'restore_previous_core', success: false, error: 'previous core package backup is missing' });
+    } else {
+      try {
+        const installPreviousCoreFn = deps.installPreviousCore ?? installPreviousCore;
+        installPreviousCoreFn(ctx.previousCorePackage, deps);
+        results.push({ action: 'restore_previous_core', success: true });
+      } catch (err) {
+        results.push({ action: 'restore_previous_core', success: false, error: err.message });
+      }
+    }
+  }
+
   // Restore Core Skills from backup (include .yos manifests to keep them in sync with files)
   if (ctx.backupDir && fsApi.existsSync(path.join(ctx.backupDir, 'skills'))) {
     try {
@@ -1281,6 +1466,22 @@ export function rollbackSelf(ctx, deps = {}) {
     } catch (err) {
       results.push({ action: 'restore_core_skills', success: false, error: err.message });
     }
+  }
+
+  try {
+    const restoreSkillDependenciesFn = deps.restoreSkillDependencies ?? installSkillDependencies;
+    const dependencyResult = restoreSkillDependenciesFn(skillsDir, deps);
+    if (dependencyResult.failed?.length) {
+      results.push({
+        action: 'restore_skill_dependencies',
+        success: false,
+        error: `failed skills: ${dependencyResult.failed.join(', ')}`,
+      });
+    } else {
+      results.push({ action: 'restore_skill_dependencies', success: true });
+    }
+  } catch (err) {
+    results.push({ action: 'restore_skill_dependencies', success: false, error: err.message });
   }
 
   if (ctx.backupDir) {
@@ -1310,7 +1511,108 @@ export function rollbackSelf(ctx, deps = {}) {
     }
   }
 
+  if (ctx.servicesWereRunning.length > 0) {
+    try {
+      const verifyServicesFn = deps.verifyServices ?? verifyServicesOnline;
+      const verification = verifyServicesFn(ctx.servicesWereRunning, deps);
+      if (!verification.success) {
+        results.push({
+          action: 'verify_restored_services',
+          success: false,
+          error: `services not online: ${(verification.offline || []).join(', ')}`,
+        });
+      } else {
+        results.push({ action: 'verify_restored_services', success: true });
+      }
+    } catch (err) {
+      results.push({ action: 'verify_restored_services', success: false, error: err.message });
+    }
+  }
+
   return results;
+}
+
+function installPreviousCore(archivePath, deps = {}) {
+  const execFile = deps.execFileSync ?? execFileSync;
+  execFile(npmExecutable(), ['install', '-g', archivePath], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, YOS_SKIP_POSTINSTALL: '1' },
+    timeout: 120000,
+  });
+}
+
+function verifyServicesOnline(serviceNames, deps = {}) {
+  const exec = deps.execSync ?? execSync;
+  const sleep = deps.sleep ?? (() => {
+    try { exec('sleep 2', { stdio: 'pipe' }); } catch { /* polling continues */ }
+  });
+  const timeoutMs = deps.verifyTimeoutMs ?? 30000;
+  const startedAt = Date.now();
+  let offline = [...serviceNames];
+
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const processes = JSON.parse(exec('pm2 jlist 2>/dev/null', { encoding: 'utf8', stdio: 'pipe' }));
+      offline = serviceNames.filter(name => {
+        const process = processes.find(candidate => candidate.name === name);
+        return !process || process.pm2_env?.status !== 'online';
+      });
+      if (offline.length === 0) return { success: true, offline: [] };
+    } catch {
+      offline = [...serviceNames];
+    }
+    sleep();
+  }
+  return { success: false, offline };
+}
+
+export function recoverSelfUpgrade(backupDir, deps = {}) {
+  const fsApi = deps.fs ?? fs;
+  try {
+    if (!backupDir || !fsApi.existsSync(backupDir)) {
+      return { action: 'self_upgrade_recovery', success: false, error: 'invalid_recovery_backup' };
+    }
+    const resolved = fsApi.realpathSync(backupDir);
+    const allowedRoots = (deps.allowedTmpRoots ?? getAllowedTmpRoots()).map(root => {
+      try { return fsApi.realpathSync(root); } catch { return path.resolve(root); }
+    });
+    const underAllowedRoot = allowedRoots.some(root => resolved.startsWith(`${root}${path.sep}`));
+    if (!underAllowedRoot || !path.basename(resolved).startsWith('yos-core-backup-')) {
+      return { action: 'self_upgrade_recovery', success: false, error: 'invalid_recovery_backup' };
+    }
+
+    const statePath = path.join(resolved, 'rollback-state.json');
+    if (!fsApi.existsSync(statePath)) {
+      return { action: 'self_upgrade_recovery', success: false, error: 'recovery_state_missing' };
+    }
+    const state = JSON.parse(fsApi.readFileSync(statePath, 'utf8'));
+    let stateBackupDir = '';
+    try { stateBackupDir = fsApi.realpathSync(state.backupDir || ''); } catch { /* invalid below */ }
+    const coreRoot = path.join(resolved, 'core');
+    const previousCore = state.previousCorePackage ? path.resolve(state.previousCorePackage) : null;
+    const previousCoreInsideBackup = !previousCore
+      || previousCore.startsWith(`${coreRoot}${path.sep}`);
+    const servicesValid = Array.isArray(state.servicesWereRunning)
+      && state.servicesWereRunning.every(name => typeof name === 'string' && /^[A-Za-z0-9._:-]+$/.test(name));
+    if (state.schemaVersion !== 1
+      || stateBackupDir !== resolved
+      || !previousCoreInsideBackup
+      || !servicesValid) {
+      return { action: 'self_upgrade_recovery', success: false, error: 'invalid_recovery_state' };
+    }
+
+    const rollbackFn = deps.rollbackSelf ?? rollbackSelf;
+    const steps = rollbackFn(state, deps.rollback);
+    return {
+      action: 'self_upgrade_recovery',
+      success: steps.length > 0 && steps.every(step => step.success),
+      backupDir: resolved,
+      steps,
+    };
+  } catch {
+    return { action: 'self_upgrade_recovery', success: false, error: 'recovery_failed' };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1331,6 +1633,16 @@ const POST_INSTALL_STEPS = [
 
 function buildSelfUpgradeResult(ctx, failedStep, rollbackResults = null, rollbackPerformed = Boolean(rollbackResults)) {
   if (failedStep) {
+    const rollbackComplete = rollbackPerformed
+      && (rollbackResults || []).every(result => result.success);
+    const machineUnchanged = !rollbackPerformed
+      && !ctx.coreInstallAttempted
+      && ctx.servicesStopped.length === 0;
+    const machineState = rollbackComplete
+      ? 'restored'
+      : machineUnchanged
+        ? 'unchanged'
+        : 'recovery_required';
     return {
       action: 'self_upgrade',
       success: false,
@@ -1340,6 +1652,14 @@ function buildSelfUpgradeResult(ctx, failedStep, rollbackResults = null, rollbac
       error: failedStep.error,
       steps: ctx.steps,
       rollback: { performed: rollbackPerformed, steps: rollbackResults || [] },
+      backupDir: ctx.backupDir,
+      machineState,
+      ...(machineState === 'recovery_required' && ctx.backupDir ? {
+        manualRecovery: {
+          backupDir: ctx.backupDir,
+          command: `yos upgrade --self --recover ${JSON.stringify(ctx.backupDir)}`,
+        },
+      } : {}),
     };
   }
 
@@ -1373,6 +1693,8 @@ function buildSelfUpgradeResult(ctx, failedStep, rollbackResults = null, rollbac
     migrationHints,
     instructionFilesRebuilt,
     settingsChanged,
+    warnings: ctx.warnings?.length ? ctx.warnings : null,
+    retainBackup: Boolean(ctx.retainBackup),
     mergeConflicts: ctx.mergeConflicts.length > 0 ? ctx.mergeConflicts : null,
     mergedFiles: ctx.mergedFiles.length > 0 ? ctx.mergedFiles : null,
   };
@@ -1383,6 +1705,8 @@ export function createFinalizeState(ctx) {
     schemaVersion: 1,
     tempDir: ctx.tempDir,
     backupDir: ctx.backupDir,
+    previousCorePackage: ctx.previousCorePackage,
+    coreInstallAttempted: ctx.coreInstallAttempted,
     servicesWereRunning: ctx.servicesWereRunning,
     from: ctx.from,
     to: ctx.to,
@@ -1452,6 +1776,8 @@ export function runSelfUpgradeFinalize(state = {}, deps = {}) {
     mode: state.mode,
   });
   ctx.backupDir = state.backupDir || null;
+  ctx.previousCorePackage = state.previousCorePackage || null;
+  ctx.coreInstallAttempted = Boolean(state.coreInstallAttempted);
   ctx.servicesWereRunning = Array.isArray(state.servicesWereRunning) ? [...state.servicesWereRunning] : [];
   ctx.from = state.from || null;
   ctx.to = state.to || state.newVersion || null;
@@ -1473,10 +1799,25 @@ export function runSelfUpgradeFinalize(state = {}, deps = {}) {
   }
 
   if (failedStep) {
-    return buildSelfUpgradeResult(ctx, failedStep, null, false);
+    if (failedStep.step === 13) {
+      ctx.warnings = [{
+        step: failedStep.step,
+        name: failedStep.name,
+        message: failedStep.error,
+      }];
+      ctx.retainBackup = true;
+      return buildSelfUpgradeResult(ctx, null);
+    }
+    const rollbackFn = deps.rollbackSelf ?? rollbackSelf;
+    const rollbackResults = rollbackFn(ctx, deps.rollback);
+    return buildSelfUpgradeResult(ctx, failedStep, rollbackResults, true);
   }
 
-  return buildSelfUpgradeResult(ctx, null);
+  const result = buildSelfUpgradeResult(ctx, null);
+  if (ctx.backupDir) {
+    (deps.cleanupBackup ?? cleanupBackup)(ctx.backupDir);
+  }
+  return result;
 }
 
 /**
@@ -1497,6 +1838,27 @@ export function runSelfUpgrade({ tempDir, newVersion, mode, onStep } = {}, deps 
     ctx.from = current.version;
   }
   ctx.to = newVersion || null;
+
+  const prepareFn = deps.prepareSelfUpgrade ?? prepareSelfUpgrade;
+  let preflight;
+  try {
+    preflight = prepareFn(ctx, deps.preflight);
+  } catch (err) {
+    preflight = {
+      step: 0,
+      name: 'prepare_upgrade',
+      status: 'failed',
+      error: err.message,
+      duration: 0,
+    };
+  }
+  preflight.total = 13;
+  ctx.steps.push(preflight);
+  if (onStep) onStep(preflight);
+  if (preflight.status === 'failed') {
+    ctx.error = preflight.error;
+    return buildSelfUpgradeResult(ctx, preflight, null, false);
+  }
 
   const preInstallSteps = deps.preInstallSteps ?? [
     (stepCtx) => step1_backupCoreSkills(stepCtx, deps.step1),
@@ -1522,8 +1884,9 @@ export function runSelfUpgrade({ tempDir, newVersion, mode, onStep } = {}, deps 
   }
 
   if (failedStep) {
+    cleanupSelfUpgradePreparation(ctx, deps.fs ?? fs);
     const rollbackFn = deps.rollbackSelf ?? rollbackSelf;
-    const rollbackResults = rollbackFn(ctx);
+    const rollbackResults = rollbackFn(ctx, deps.rollback);
     return buildSelfUpgradeResult(ctx, failedStep, rollbackResults);
   }
 
@@ -1553,7 +1916,9 @@ export function runSelfUpgrade({ tempDir, newVersion, mode, onStep } = {}, deps 
     };
     ctx.steps.push(failedStep);
     if (onStep) onStep(failedStep);
-    return buildSelfUpgradeResult(ctx, failedStep, null, false);
+    const rollbackFn = deps.rollbackSelf ?? rollbackSelf;
+    const rollbackResults = rollbackFn(ctx, deps.rollback);
+    return buildSelfUpgradeResult(ctx, failedStep, rollbackResults, true);
   }
 }
 
