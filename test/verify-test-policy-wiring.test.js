@@ -7,8 +7,11 @@ describe('verification test-policy wiring', () => {
     const calls = [];
     const common = {
       root: '/unused',
-      runPrerequisites: false,
+      runPrerequisites: true,
       gitStatusImpl: () => '',
+      verifyVersionsImpl: () => calls.push('version'),
+      verifyExecutedTestsImpl: () => calls.push('tests'),
+      verifyAuditsImpl: () => calls.push('audit'),
       verifyReproduciblePackImpl: () => calls.push('pack'),
     };
 
@@ -16,7 +19,7 @@ describe('verification test-policy wiring', () => {
       ...common,
       verifyTestPolicyImpl: () => calls.push('policy'),
     })).toBe(true);
-    expect(calls).toEqual(['policy', 'pack']);
+    expect(calls).toEqual(['policy', 'version', 'tests', 'audit', 'pack']);
 
     calls.length = 0;
     expect(runVerification({
@@ -27,6 +30,24 @@ describe('verification test-policy wiring', () => {
       },
     })).toBe(false);
     expect(calls).toEqual(['policy']);
+  });
+
+  test('fails closed when executed-test accounting fails before audits and packaging', () => {
+    const calls = [];
+    expect(runVerification({
+      root: '/unused',
+      runPrerequisites: true,
+      gitStatusImpl: () => '',
+      verifyTestPolicyImpl: () => calls.push('policy'),
+      verifyVersionsImpl: () => calls.push('version'),
+      verifyExecutedTestsImpl: () => {
+        calls.push('tests');
+        throw new Error('test count below baseline');
+      },
+      verifyAuditsImpl: () => calls.push('audit'),
+      verifyReproduciblePackImpl: () => calls.push('pack'),
+    })).toBe(false);
+    expect(calls).toEqual(['policy', 'version', 'tests']);
   });
 
   test('fails closed when the working tree cannot be inspected', () => {

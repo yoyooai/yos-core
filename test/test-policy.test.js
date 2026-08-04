@@ -131,8 +131,11 @@ describe('test policy', () => {
       'cli/lib/__tests__/self-upgrade-rollback-test-guard.test.js',
       'test/release-pack.test.js',
       'test/test-policy.test.js',
+      'test/test-baseline-policy.test.js',
       'test/verify-test-policy-wiring.test.js',
       'scripts/test-policy.js',
+      'scripts/test-baseline-policy.js',
+      'scripts/test-baselines.json',
       'scripts/critical-test-files.json',
     ]));
   });

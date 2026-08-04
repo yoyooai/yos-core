@@ -4,6 +4,11 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const ROOT = process.cwd();
+const REPORTER_ARGS = process.argv.slice(2);
+if (REPORTER_ARGS.some((arg) => arg !== '--test-reporter=tap')) {
+  console.error('Unsupported test-runner argument.');
+  process.exit(1);
+}
 const TEST_ROOTS = [
   path.join(ROOT, 'cli', 'lib', '__tests__'),
   path.join(ROOT, 'cli', 'lib', 'runtime', '__tests__'),
@@ -45,7 +50,12 @@ if (testFiles.length === 0) {
 }
 
 console.log(`Running ${testFiles.length} Node test files`);
-const result = spawnSync(process.execPath, ['--experimental-test-module-mocks', '--test', ...testFiles], {
+const result = spawnSync(process.execPath, [
+  '--experimental-test-module-mocks',
+  '--test',
+  ...REPORTER_ARGS,
+  ...testFiles,
+], {
   stdio: 'inherit',
 });
 

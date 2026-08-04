@@ -10,6 +10,11 @@ import {
   packageContentDigest,
 } from './package-policy.js';
 import { verifyTestPolicy } from './test-policy.js';
+import {
+  loadApprovedTestBaselines,
+  verifyJestResult,
+  verifyNodeTapResult,
+} from './test-baseline-policy.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Security verification must not inherit a developer's local mirror, because
@@ -43,6 +48,25 @@ function npm(args, options = {}) {
     return run(process.execPath, [process.env.npm_execpath, ...args], options);
   }
   return run(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, options);
+}
+
+function runCaptured(command, args, { cwd = ROOT } = {}) {
+  console.log(`\n[verify] ${printable(command, args)} (${path.relative(ROOT, cwd) || '.'})`);
+  const result = spawnSync(command, args, { cwd, encoding: 'utf8', stdio: 'pipe' });
+  if (result.error || result.status !== 0) {
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    if (result.error) throw result.error;
+    throw new Error(`${command} exited with status ${result.status}`);
+  }
+  return `${result.stdout || ''}\n${result.stderr || ''}`;
+}
+
+function npmCaptured(args, options = {}) {
+  if (process.env.npm_execpath) {
+    return runCaptured(process.execPath, [process.env.npm_execpath, ...args], options);
+  }
+  return runCaptured(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, options);
 }
 
 function gitStatus(root = ROOT) {
@@ -84,6 +108,23 @@ function verifyAudits(root = ROOT) {
     npm(['audit', '--audit-level=low', `--registry=${REGISTRY}`], { cwd: lockRoot });
   }
   console.log(`[verify] audited ${lockRoots.length} dependency roots`);
+}
+
+function verifyExecutedTests(root = ROOT) {
+  const baselines = loadApprovedTestBaselines(path.join(root, 'scripts', 'test-baselines.json'));
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-test-results-'));
+  try {
+    const jestOutput = path.join(tempRoot, 'jest-results.json');
+    npm(['run', 'test:jest', '--', '--json', `--outputFile=${jestOutput}`], { cwd: root });
+    if (!fs.existsSync(jestOutput)) throw new Error('Jest did not write its result file');
+    const jestPassed = verifyJestResult(JSON.parse(fs.readFileSync(jestOutput, 'utf8')), baselines.jest);
+
+    const nodeOutput = npmCaptured(['run', 'test:node', '--', '--test-reporter=tap'], { cwd: root });
+    const nodePassed = verifyNodeTapResult(nodeOutput, baselines.node);
+    console.log(`[verify] executed tests: Jest ${jestPassed}, Node ${nodePassed}`);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
 }
 
 function verifyReproduciblePack(root = ROOT) {
@@ -134,6 +175,9 @@ export function runVerification({
   runPrerequisites = true,
   gitStatusImpl = gitStatus,
   verifyTestPolicyImpl = verifyTestPolicy,
+  verifyVersionsImpl = verifyVersions,
+  verifyExecutedTestsImpl = verifyExecutedTests,
+  verifyAuditsImpl = verifyAudits,
   verifyReproduciblePackImpl = verifyReproduciblePack,
 } = {}) {
   let statusBefore;
@@ -148,9 +192,9 @@ export function runVerification({
   try {
     verifyTestPolicyImpl({ root });
     if (runPrerequisites) {
-      verifyVersions(root);
-      npm(['test'], { cwd: root });
-      verifyAudits(root);
+      verifyVersionsImpl(root);
+      verifyExecutedTestsImpl(root);
+      verifyAuditsImpl(root);
     }
     verifyReproduciblePackImpl(root);
   } catch (error) {
