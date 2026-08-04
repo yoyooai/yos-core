@@ -114,6 +114,7 @@ Component Management:
   upgrade <name>      Upgrade a component (9-step pipeline)
   upgrade --all       Upgrade all components
   upgrade --self      Upgrade the YOS core itself
+                      --recover <backup>  Retry a retained transaction rollback
   uninstall <name>    Remove a component (--purge, --force)
   uninstall --self    Uninstall YOS entirely (--force to skip prompts)
   remove <name>       Alias for uninstall
@@ -137,6 +138,7 @@ Examples:
   yos upgrade telegram
   yos upgrade --all
   yos upgrade --self
+  yos upgrade --self --recover /tmp/yos-core-backup-...
   yos info telegram
   yos uninstall telegram --purge
   yos uninstall --self

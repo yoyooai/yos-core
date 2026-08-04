@@ -11,9 +11,9 @@ import { loadRegistry } from '../lib/registry.js';
 import { loadComponents, saveComponents } from '../lib/components.js';
 import { checkForUpdates, getLocalSourceUpgradeError, getRepo, runUpgrade, downloadToTemp, readChangelog, filterChangelog, cleanupTemp } from '../lib/upgrade.js';
 import {
-  checkForCoreUpdates, runSelfUpgrade,
+  checkForCoreUpdates, recoverSelfUpgrade, runSelfUpgrade,
   downloadCoreToTemp, readChangelog as readCoreChangelog,
-  cleanupTemp as cleanupCoreTemp, cleanupBackup,
+  cleanupTemp as cleanupCoreTemp,
 } from '../lib/self-upgrade.js';
 import { detectChanges } from '../lib/manifest.js';
 import { parseSkillMd } from '../lib/skill.js';
@@ -251,6 +251,13 @@ export async function upgradeComponent(args) {
   const skipEval = args.includes('--skip-eval');
   const beta = args.includes('--beta');
   const hasTempDirFlag = args.includes('--temp-dir');
+  const recoverIndex = args.indexOf('--recover');
+  const recoveryBackup = recoverIndex !== -1 ? args[recoverIndex + 1] : null;
+
+  if (recoverIndex !== -1 && (!recoveryBackup || recoveryBackup.startsWith('-'))) {
+    console.error('Error: --recover requires a transaction backup directory.');
+    process.exit(1);
+  }
 
   if (hasTempDirFlag) {
     const msg = '--temp-dir is not supported.';
@@ -291,7 +298,7 @@ export async function upgradeComponent(args) {
   }
 
   // Get target component (filter out flags and flag values)
-  const flagsWithValues = new Set(['--branch', '--mode']);
+  const flagsWithValues = new Set(['--branch', '--mode', '--recover']);
   const target = args.find((a, i) => {
     if (a.startsWith('-')) return false;
     if (a === 'confirm') return false;
@@ -302,6 +309,30 @@ export async function upgradeComponent(args) {
 
   // Handle --self: upgrade yos-core itself
   if (upgradeSelf) {
+    if (recoveryBackup) {
+      const lockResult = acquireLock('_yos-core');
+      if (!lockResult.success) {
+        console.error(`Error: ${lockResult.error}`);
+        process.exit(1);
+      }
+      try {
+        const result = recoverSelfUpgrade(recoveryBackup);
+        if (jsonOutput) {
+          console.log(JSON.stringify(result, null, 2));
+        } else if (result.success) {
+          console.log(success('YOS core recovery completed.'));
+        } else {
+          console.error(`Error: ${result.error || 'recovery_incomplete'}`);
+          for (const step of result.steps || []) {
+            console.error(`  ${step.success ? '✓' : '✗'} ${step.action}${step.error ? `: ${step.error}` : ''}`);
+          }
+        }
+        if (!result.success) process.exit(1);
+        return;
+      } finally {
+        releaseLock('_yos-core');
+      }
+    }
     if (checkOnly) {
       return handleSelfCheckOnly({ jsonOutput, branch, beta });
     }
@@ -915,6 +946,26 @@ function detectCoreSkillChanges() {
   return results;
 }
 
+export function readOptionalCoreChangelog(downloadResult, currentVersion, deps = {}) {
+  const unavailable = {
+    changelog: null,
+    warning: 'Update notes unavailable; continuing without them.',
+  };
+  if (!downloadResult?.success || !downloadResult.tempDir) return unavailable;
+
+  try {
+    const readChangelogFn = deps.readChangelog ?? readCoreChangelog;
+    const filterChangelogFn = deps.filterChangelog ?? filterChangelog;
+    const fullChangelog = readChangelogFn(downloadResult.tempDir);
+    return {
+      changelog: filterChangelogFn(fullChangelog, currentVersion),
+      warning: null,
+    };
+  } catch {
+    return unavailable;
+  }
+}
+
 /**
  * Handle --self --check: check for yos-core updates only (no lock needed).
  * Downloads new version to temp dir for file comparison by Claude.
@@ -935,6 +986,7 @@ function handleSelfCheckOnly({ jsonOutput, branch, beta = false }) {
 
   // When update is available (or --branch forces re-check): download to temp, read changelog, detect local changes
   let changelog = null;
+  let changelogWarning = null;
   let tempDir = null;
 
   // With --branch, always proceed even if versions match (user wants to install specific branch)
@@ -948,27 +1000,10 @@ function handleSelfCheckOnly({ jsonOutput, branch, beta = false }) {
     }
     if (dlResult.success) {
       tempDir = dlResult.tempDir;
-
-      // Read changelog from downloaded package (more reliable than remote fetch)
-      const fullChangelog = readCoreChangelog(tempDir);
-      changelog = filterChangelog(fullChangelog, check.current);
-    } else {
-      // Fallback: fetch changelog from remote
-      const releaseSource = resolveReleaseRepo();
-      if (releaseSource.success) {
-        try {
-          const rawChangelog = fetchRawFile(releaseSource.repo, 'CHANGELOG.md', `v${check.latest}`);
-          changelog = filterChangelog(rawChangelog, check.current);
-        } catch {
-          try {
-            const rawChangelog = fetchRawFile(releaseSource.repo, 'CHANGELOG.md');
-            changelog = filterChangelog(rawChangelog, check.current);
-          } catch {
-            // CHANGELOG.md may not exist
-          }
-        }
-      }
     }
+    const notes = readOptionalCoreChangelog(dlResult, check.current);
+    changelog = notes.changelog;
+    changelogWarning = notes.warning;
   }
 
   // Detect local modifications to core skills
@@ -978,6 +1013,7 @@ function handleSelfCheckOnly({ jsonOutput, branch, beta = false }) {
     const output = { action: 'check', target: 'yos-core', ...check };
     if (branch) output.branch = branch;
     if (changelog) output.changelog = changelog;
+    if (changelogWarning) output.changelogWarning = changelogWarning;
     const mappedChanges = allLocalChanges.length > 0
       ? allLocalChanges.map(({ skill, changes }) => ({ skill, modified: changes.modified, added: changes.added }))
       : null;
@@ -997,6 +1033,8 @@ function handleSelfCheckOnly({ jsonOutput, branch, beta = false }) {
           for (const f of changes.added) console.log(`  ${green('A')} ${skill}/${f}`);
         }
       }
+
+      if (changelogWarning) console.log(warn(changelogWarning));
 
       if (changelog) {
         console.log(`\n${heading('Changelog:')}\n${changelog}`);
@@ -1086,8 +1124,9 @@ async function upgradeSelfCore({ branch, beta = false, mode = 'merge' } = {}) {
     tempDir = dlResult.tempDir;
 
     // 4. Show info: version diff, changelog, local modifications to core skills
-    const fullCoreChangelog = readCoreChangelog(tempDir);
-    const coreChangelog = filterChangelog(fullCoreChangelog, check.current);
+    const notes = readOptionalCoreChangelog(dlResult, check.current);
+    const coreChangelog = notes.changelog;
+    const coreChangelogWarning = notes.warning;
 
     // Detect local modifications across all core skills
     const allLocalChanges = detectCoreSkillChanges();
@@ -1138,6 +1177,7 @@ async function upgradeSelfCore({ branch, beta = false, mode = 'merge' } = {}) {
     if (jsonOutput) {
       const output = { ...result };
       if (coreChangelog) output.changelog = coreChangelog;
+      if (coreChangelogWarning) output.changelogWarning = coreChangelogWarning;
       if (allLocalChanges.length > 0) {
         output.localChanges = allLocalChanges.map(({ skill, changes }) => ({
           skill,
@@ -1163,6 +1203,7 @@ async function upgradeSelfCore({ branch, beta = false, mode = 'merge' } = {}) {
       }
     } else if (result.success) {
       console.log(`\n${success(`${bold('YOS core')} upgraded: ${dim(result.from)} → ${bold(result.to)}`)}`);
+      if (coreChangelogWarning) console.log(warn(coreChangelogWarning));
       if (coreChangelog) {
         console.log(`\n${heading('Changelog:')}\n${coreChangelog}`);
       }
@@ -1189,9 +1230,8 @@ async function upgradeSelfCore({ branch, beta = false, mode = 'merge' } = {}) {
         }
       }
 
-      // Clean backup after successful upgrade
-      if (result.backupDir) {
-        cleanupBackup(result.backupDir);
+      for (const warningItem of result.warnings || []) {
+        console.log(warn(`Upgrade completed with warning at step ${warningItem.step}: ${warningItem.message}`));
       }
     } else {
       console.log(`\n${error(`Self-upgrade failed (step ${result.failedStep}): ${result.error}`)}`);
@@ -1205,6 +1245,11 @@ async function upgradeSelfCore({ branch, beta = false, mode = 'merge' } = {}) {
             console.log(`  ${error(r.action)}`);
           }
         }
+      }
+      if (result.manualRecovery) {
+        console.log(`\n${warn('Automatic recovery was incomplete.')}`);
+        console.log(`  Backup: ${result.manualRecovery.backupDir}`);
+        console.log(`  Run: ${result.manualRecovery.command}`);
       }
     }
 
