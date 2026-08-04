@@ -9,6 +9,7 @@ import {
   findBlockedPackageEntries,
   packageContentDigest,
 } from './package-policy.js';
+import { verifyTestPolicy } from './test-policy.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Security verification must not inherit a developer's local mirror, because
@@ -128,24 +129,37 @@ function verifyReproduciblePack(root = ROOT) {
   }
 }
 
-export function runVerification({ root = ROOT, runPrerequisites = true } = {}) {
-  const statusBefore = gitStatus(root);
+export function runVerification({
+  root = ROOT,
+  runPrerequisites = true,
+  gitStatusImpl = gitStatus,
+  verifyTestPolicyImpl = verifyTestPolicy,
+  verifyReproduciblePackImpl = verifyReproduciblePack,
+} = {}) {
+  let statusBefore;
+  try {
+    statusBefore = gitStatusImpl(root);
+  } catch (error) {
+    console.error(`\n[verify] FAILED to inspect working tree: ${error.message}`);
+    return false;
+  }
   let failed = false;
 
   try {
+    verifyTestPolicyImpl({ root });
     if (runPrerequisites) {
       verifyVersions(root);
       npm(['test'], { cwd: root });
       verifyAudits(root);
     }
-    verifyReproduciblePack(root);
+    verifyReproduciblePackImpl(root);
   } catch (error) {
     failed = true;
     console.error(`\n[verify] FAILED: ${error.message}`);
   }
 
   try {
-    const statusAfter = gitStatus(root);
+    const statusAfter = gitStatusImpl(root);
     if (statusAfter !== statusBefore) {
       failed = true;
       console.error('\n[verify] FAILED: verification changed the working tree');
