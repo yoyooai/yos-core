@@ -508,6 +508,7 @@ describe('self-upgrade backup and rollback', () => {
         });
       },
       verifyServices: () => ({ success: true, offline: [] }),
+      getInstalledCoreVersion: () => ({ success: true, version: '0.4.12' }),
     });
 
     assert.equal(
@@ -526,7 +527,105 @@ describe('self-upgrade backup and rollback', () => {
     ]);
     assert.equal(results.some((item) => item.action === 'restore_previous_core' && item.success), true);
     assert.equal(results.some((item) => item.action === 'verify_restored_services' && item.success), true);
+    assert.equal(results.some((item) => item.action === 'verify_restored_core_version' && item.success), true);
 
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('fails rollback verification when the installed core version did not return to the previous version', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-self-upgrade-version-verify-'));
+    const backupDir = path.join(tmpDir, 'backup');
+    const skillsDir = path.join(tmpDir, 'skills');
+    const previousCorePackage = path.join(backupDir, 'core', 'yos-old.tgz');
+    fs.mkdirSync(path.dirname(previousCorePackage), { recursive: true });
+    fs.mkdirSync(skillsDir, { recursive: true });
+    fs.writeFileSync(previousCorePackage, 'old core');
+
+    const results = rollbackSelf({
+      backupDir,
+      previousCorePackage,
+      coreInstallAttempted: true,
+      from: '0.4.12',
+      servicesWereRunning: [],
+    }, {
+      skillsDir,
+      installPreviousCore: () => {},
+      restoreSkillDependencies: () => ({ installed: 0, failed: [] }),
+      getInstalledCoreVersion: () => ({ success: true, version: '0.4.13' }),
+    });
+
+    assert.deepEqual(
+      results.find((item) => item.action === 'verify_restored_core_version'),
+      {
+        action: 'verify_restored_core_version',
+        success: false,
+        expectedVersion: '0.4.12',
+        actualVersion: '0.4.13',
+        error: 'installed core version 0.4.13 does not match expected 0.4.12',
+      }
+    );
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('keeps a core version mismatch from being reported as a completed rollback', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-self-upgrade-version-result-'));
+    const backupDir = path.join(tmpDir, 'backup');
+    const skillsDir = path.join(tmpDir, 'skills');
+    const previousCorePackage = path.join(backupDir, 'core', 'yos-old.tgz');
+    fs.mkdirSync(path.dirname(previousCorePackage), { recursive: true });
+    fs.mkdirSync(skillsDir, { recursive: true });
+    fs.writeFileSync(previousCorePackage, 'old core');
+
+    const result = runSelfUpgradeFinalize({
+      schemaVersion: 2,
+      backupDir,
+      previousCorePackage,
+      coreInstallAttempted: true,
+      servicesWereRunning: [],
+      from: '0.4.12',
+      to: '0.4.13',
+    }, {
+      steps: [
+        () => ({ step: 6, name: 'install_skill_dependencies', status: 'failed', error: 'dependency failed' }),
+      ],
+      rollback: {
+        skillsDir,
+        installPreviousCore: () => {},
+        restoreSkillDependencies: () => ({ installed: 0, failed: [] }),
+        getInstalledCoreVersion: () => ({ success: true, version: '0.4.13' }),
+      },
+    });
+
+    assert.equal(result.rollback.attempted, true);
+    assert.equal(result.rollback.performed, false);
+    assert.equal(result.machineState, 'recovery_required');
+    assert.equal(result.manualRecovery.actualCoreVersion, '0.4.13');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('fails restore_core_skills when the restored tree does not match its backup', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-self-upgrade-skills-verify-'));
+    const backupDir = path.join(tmpDir, 'backup');
+    const backupSkillsDir = path.join(backupDir, 'skills');
+    const skillsDir = path.join(tmpDir, 'skills');
+    fs.mkdirSync(path.join(backupSkillsDir, 'activity-monitor'), { recursive: true });
+    fs.mkdirSync(path.join(skillsDir, 'activity-monitor'), { recursive: true });
+    fs.writeFileSync(path.join(backupSkillsDir, 'activity-monitor', 'SKILL.md'), '# old\n');
+    fs.writeFileSync(path.join(skillsDir, 'activity-monitor', 'SKILL.md'), '# new\n');
+
+    const results = rollbackSelf({
+      backupDir,
+      coreInstallAttempted: false,
+      servicesWereRunning: [],
+    }, {
+      skillsDir,
+      syncTree: () => {},
+      restoreSkillDependencies: () => ({ installed: 0, failed: [] }),
+    });
+
+    const restoredSkills = results.find((item) => item.action === 'restore_core_skills');
+    assert.equal(restoredSkills.success, false);
+    assert.equal(restoredSkills.error, 'restored Core Skills do not match the transaction backup');
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
   it('falls back to plain restart when the backup has no ecosystem file', () => {
@@ -554,6 +653,7 @@ describe('self-upgrade backup and rollback', () => {
         restartCalls.push({ name, opts });
       },
       verifyServices: () => ({ success: true, offline: [] }),
+      getInstalledCoreVersion: () => ({ success: true, version: '0.4.12' }),
     });
 
     assert.deepStrictEqual(restartCalls, [{

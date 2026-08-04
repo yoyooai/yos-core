@@ -7,6 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import crypto from 'node:crypto';
 import { execFileSync, execSync, spawnSync } from 'node:child_process';
 import { SKILLS_DIR, YOS_DIR, getYosConfig } from './config.js';
 import { downloadArchive, downloadBranch } from './download.js';
@@ -1432,6 +1433,44 @@ function step13_commitSkillBaselines(ctx) {
 // Rollback
 // ---------------------------------------------------------------------------
 
+function snapshotRollbackTree(root, fsApi = fs) {
+  const snapshot = {};
+
+  function walk(directory, relativeDirectory = '') {
+    const entries = fsApi.readdirSync(directory, { withFileTypes: true })
+      .filter(entry => entry.name !== 'node_modules')
+      .sort((left, right) => left.name.localeCompare(right.name));
+
+    for (const entry of entries) {
+      const relativePath = relativeDirectory
+        ? path.join(relativeDirectory, entry.name)
+        : entry.name;
+      const absolutePath = path.join(directory, entry.name);
+      const stat = fsApi.lstatSync(absolutePath);
+
+      if (stat.isDirectory()) {
+        snapshot[relativePath] = 'directory';
+        walk(absolutePath, relativePath);
+      } else if (stat.isFile()) {
+        const digest = crypto.createHash('sha256').update(fsApi.readFileSync(absolutePath)).digest('hex');
+        snapshot[relativePath] = `file:${digest}`;
+      } else if (stat.isSymbolicLink()) {
+        snapshot[relativePath] = `symlink:${fsApi.readlinkSync(absolutePath)}`;
+      } else {
+        snapshot[relativePath] = 'unsupported';
+      }
+    }
+  }
+
+  walk(root);
+  return snapshot;
+}
+
+function coreSkillTreesMatch(backupSkillsDir, skillsDir, deps = {}) {
+  const snapshot = deps.snapshotRollbackTree ?? ((root) => snapshotRollbackTree(root, deps.fs ?? fs));
+  return JSON.stringify(snapshot(backupSkillsDir)) === JSON.stringify(snapshot(skillsDir));
+}
+
 /**
  * Rollback from backup.
  */
@@ -1461,7 +1500,13 @@ export function rollbackSelf(ctx, deps = {}) {
   // Restore Core Skills from backup (include .yos manifests to keep them in sync with files)
   if (ctx.backupDir && fsApi.existsSync(path.join(ctx.backupDir, 'skills'))) {
     try {
-      syncTreeFn(path.join(ctx.backupDir, 'skills'), skillsDir, { excludes: ['node_modules'] });
+      const backupSkillsDir = path.join(ctx.backupDir, 'skills');
+      syncTreeFn(backupSkillsDir, skillsDir, { excludes: ['node_modules'] });
+      const verifyCoreSkillsFn = deps.verifyCoreSkills
+        ?? ((source, target) => coreSkillTreesMatch(source, target, { ...deps, fs: fsApi }));
+      if (!verifyCoreSkillsFn(backupSkillsDir, skillsDir)) {
+        throw new Error('restored Core Skills do not match the transaction backup');
+      }
       results.push({ action: 'restore_core_skills', success: true });
     } catch (err) {
       results.push({ action: 'restore_core_skills', success: false, error: err.message });
@@ -1526,6 +1571,33 @@ export function rollbackSelf(ctx, deps = {}) {
       }
     } catch (err) {
       results.push({ action: 'verify_restored_services', success: false, error: err.message });
+    }
+  }
+
+  if (ctx.coreInstallAttempted || ctx.previousCorePackage) {
+    const expectedVersion = ctx.from || null;
+    const getInstalledCoreVersionFn = deps.getInstalledCoreVersion ?? getCurrentVersion;
+    const installed = getInstalledCoreVersionFn();
+    const actualVersion = installed?.success ? installed.version : null;
+
+    if (expectedVersion && actualVersion === expectedVersion) {
+      results.push({
+        action: 'verify_restored_core_version',
+        success: true,
+        expectedVersion,
+        actualVersion,
+      });
+    } else {
+      const error = expectedVersion && actualVersion
+        ? `installed core version ${actualVersion} does not match expected ${expectedVersion}`
+        : 'installed core version could not be verified against the previous version';
+      results.push({
+        action: 'verify_restored_core_version',
+        success: false,
+        expectedVersion,
+        actualVersion,
+        error,
+      });
     }
   }
 
