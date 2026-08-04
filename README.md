@@ -46,7 +46,12 @@ yos list
 
 ```bash
 npm run verify
+npm run release:pack
 ```
+
+Official artifacts must be created with `npm run release:pack`, which completes the full gate before writing to `publication/`. Ordinary `npm pack` remains available to stage a candidate inside the client-side self-upgrade transaction; it is not evidence that an artifact passed the release gate.
+
+If automatic self-upgrade rollback is incomplete, YOS retains the transaction backup and prints a recovery command: `yos upgrade --self --recover <backup>`. Do not remove that backup before recovery.
 
 The verification gate runs the complete Jest and Node test suites, dependency audits and reproducible package checks. A change is not release-ready unless this command passes on the standard Linux environment.
 

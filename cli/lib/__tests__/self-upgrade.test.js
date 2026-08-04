@@ -6,6 +6,9 @@ import { describe, it } from 'node:test';
 
 const {
   createFinalizeState,
+  prepareSelfUpgrade,
+  recoverSelfUpgrade,
+  runSelfUpgrade,
   runSelfUpgradeFinalize,
   step1_backupCoreSkills,
   step7_syncInstructions,
@@ -41,15 +44,19 @@ describe('self-upgrade finalizer handoff', () => {
     assert.deepEqual(createFinalizeState({
       tempDir: '/tmp/new-core',
       backupDir: '/tmp/backup',
+      previousCorePackage: '/tmp/backup/core/yos-old.tgz',
+      coreInstallAttempted: true,
       servicesWereRunning: ['activity-monitor', 'c4-dispatcher'],
       from: '0.4.12',
       to: '0.4.13',
       newVersion: '0.4.13',
       mode: 'merge',
     }), {
-      schemaVersion: 1,
+      schemaVersion: 2,
       tempDir: '/tmp/new-core',
       backupDir: '/tmp/backup',
+      previousCorePackage: '/tmp/backup/core/yos-old.tgz',
+      coreInstallAttempted: true,
       servicesWereRunning: ['activity-monitor', 'c4-dispatcher'],
       from: '0.4.12',
       to: '0.4.13',
@@ -58,10 +65,99 @@ describe('self-upgrade finalizer handoff', () => {
     });
   });
 
+  it('rejects a future finalizer state schema before running post-install steps', () => {
+    let stepCalled = false;
+    const result = runSelfUpgradeFinalize({
+      schemaVersion: 3,
+      from: '0.4.12',
+      to: '0.4.13',
+    }, {
+      steps: [() => {
+        stepCalled = true;
+        return { step: 5, name: 'sync_core_skills', status: 'done' };
+      }],
+    });
+
+    assert.equal(stepCalled, false);
+    assert.equal(result.success, false);
+    assert.equal(result.error, 'unsupported finalize state schemaVersion: 3');
+    assert.equal(result.rollback.performed, false);
+  });
+
+  it('treats a legacy finalizer state as unable to restore the previous core', () => {
+    const rollbackCalls = [];
+    const result = runSelfUpgradeFinalize({
+      schemaVersion: 1,
+      tempDir: '/tmp/new-core',
+      backupDir: '/tmp/backup',
+      servicesWereRunning: ['activity-monitor'],
+      from: '0.4.12',
+      to: '0.4.13',
+    }, {
+      steps: [
+        () => ({ step: 6, name: 'install_skill_dependencies', status: 'failed', error: 'dependency failed' }),
+      ],
+      rollbackSelf: (ctx) => {
+        rollbackCalls.push({
+          coreInstallAttempted: ctx.coreInstallAttempted,
+          previousCorePackage: ctx.previousCorePackage,
+          handoffState: ctx.handoffState,
+        });
+        return [
+          { action: 'restore_previous_core', success: false, error: 'previous core package backup is missing' },
+          { action: 'restore_core_skills', success: true },
+          {
+            action: 'verify_restored_core_version',
+            success: false,
+            expectedVersion: '0.4.12',
+            actualVersion: '0.4.13',
+            error: 'installed core version 0.4.13 does not match expected 0.4.12',
+          },
+        ];
+      },
+    });
+
+    assert.deepEqual(rollbackCalls, [{
+      coreInstallAttempted: true,
+      previousCorePackage: null,
+      handoffState: 'legacy',
+    }]);
+    assert.equal(result.success, false);
+    assert.equal(result.rollback.attempted, true);
+    assert.equal(result.rollback.performed, false);
+    assert.equal(result.machineState, 'recovery_required');
+    assert.equal(result.manualRecovery.expectedCoreVersion, '0.4.12');
+    assert.equal(result.manualRecovery.actualCoreVersion, '0.4.13');
+    assert.equal(result.manualRecovery.coreSkillsRestored, true);
+    assert.match(result.manualRecovery.message, /Core remains at 0\.4\.13/);
+    assert.match(result.manualRecovery.message, /not rolled back to 0\.4\.12/);
+    assert.match(result.manualRecovery.message, /Core Skills were restored/);
+  });
+
+  it('treats an unversioned finalizer state as legacy', () => {
+    let handoffState;
+    const result = runSelfUpgradeFinalize({
+      backupDir: '/tmp/backup',
+      from: '0.4.12',
+      to: '0.4.13',
+    }, {
+      steps: [
+        () => ({ step: 6, name: 'install_skill_dependencies', status: 'failed', error: 'dependency failed' }),
+      ],
+      rollbackSelf: (ctx) => {
+        handoffState = ctx.handoffState;
+        return [{ action: 'restore_core_skills', success: true }];
+      },
+    });
+
+    assert.equal(handoffState, 'legacy');
+    assert.equal(result.success, false);
+  });
+
   it('runs post-install steps with restored state and returns upgrade metadata', () => {
     const calls = [];
     const result = runSelfUpgradeFinalize({
-      schemaVersion: 1,
+      schemaVersion: 2,
       tempDir: '/tmp/new-core',
       backupDir: '/tmp/backup',
       servicesStopped: ['activity-monitor'],
@@ -96,11 +192,13 @@ describe('self-upgrade finalizer handoff', () => {
     }]);
   });
 
-  it('fails without rollback when a post-install step fails', () => {
+  it('rolls back when a post-install step before baseline commit fails', () => {
+    const rollbackCalls = [];
     const result = runSelfUpgradeFinalize({
-      schemaVersion: 1,
+      schemaVersion: 2,
       tempDir: '/tmp/new-core',
       backupDir: '/tmp/backup',
+      previousCorePackage: '/tmp/backup/core/yos-old.tgz',
       servicesWereRunning: ['activity-monitor'],
       from: '0.4.12',
       to: '0.4.13',
@@ -108,12 +206,165 @@ describe('self-upgrade finalizer handoff', () => {
       steps: [
         () => ({ step: 5, name: 'sync_core_skills', status: 'failed', error: 'sync failed' }),
       ],
+      rollbackSelf: (ctx) => {
+        rollbackCalls.push(ctx.previousCorePackage);
+        return [{ action: 'restore_previous_core', success: true }];
+      },
     });
 
     assert.equal(result.success, false);
     assert.equal(result.failedStep, 5);
     assert.equal(result.error, 'sync failed');
-    assert.deepEqual(result.rollback, { performed: false, steps: [] });
+    assert.deepEqual(rollbackCalls, ['/tmp/backup/core/yos-old.tgz']);
+    assert.deepEqual(result.rollback, {
+      attempted: true,
+      performed: true,
+      steps: [{ action: 'restore_previous_core', success: true }],
+    });
+  });
+
+  it('rolls back when service verification fails at step 12', () => {
+    const result = runSelfUpgradeFinalize({
+      schemaVersion: 2,
+      backupDir: '/tmp/backup',
+      previousCorePackage: '/tmp/backup/core/yos-old.tgz',
+      servicesWereRunning: ['activity-monitor'],
+      from: '0.4.12',
+      to: '0.4.13',
+    }, {
+      steps: [
+        () => ({ step: 12, name: 'verify_services', status: 'failed', error: 'offline' }),
+      ],
+      rollbackSelf: () => [{ action: 'restart_activity-monitor', success: true }],
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.failedStep, 12);
+    assert.equal(result.rollback.performed, true);
+  });
+
+  it('keeps a healthy upgrade with an explicit retained-backup warning when step 13 fails', () => {
+    let rollbackCalled = false;
+    let cleanupCalled = false;
+    const result = runSelfUpgradeFinalize({
+      schemaVersion: 2,
+      backupDir: '/tmp/backup',
+      servicesWereRunning: ['activity-monitor'],
+      from: '0.4.12',
+      to: '0.4.13',
+    }, {
+      steps: [
+        () => ({ step: 13, name: 'commit_skill_baselines', status: 'failed', error: 'commit failed' }),
+      ],
+      rollbackSelf: () => {
+        rollbackCalled = true;
+        return [];
+      },
+      cleanupBackup: () => {
+        cleanupCalled = true;
+      },
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.retainBackup, true);
+    assert.deepEqual(result.warnings, [{
+      step: 13,
+      name: 'commit_skill_baselines',
+      message: 'commit failed',
+    }]);
+    assert.equal(rollbackCalled, false);
+    assert.equal(cleanupCalled, false);
+  });
+});
+
+describe('self-upgrade preflight', () => {
+  it('prepares the candidate package and dependencies before any backup or service stop', () => {
+    const calls = [];
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-preflight-test-'));
+    const ctx = { tempDir };
+    const result = prepareSelfUpgrade(ctx, {
+      preparationDir: path.join(tempDir, 'prepared'),
+      assertDiskSpace: () => calls.push('disk'),
+      assertNpmAvailable: () => calls.push('npm'),
+      prepareSkillDependencies: () => calls.push('dependencies'),
+      packCandidate: () => {
+        calls.push('pack');
+        return '/tmp/prepared/yos-new.tgz';
+      },
+    });
+
+    assert.equal(result.status, 'done');
+    assert.deepEqual(calls, ['disk', 'npm', 'dependencies', 'pack']);
+    assert.equal(ctx.preparedPackage, '/tmp/prepared/yos-new.tgz');
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('rejects a failed preflight without creating a backup or stopping services', () => {
+    let preInstallCalled = false;
+    const result = runSelfUpgrade({
+      tempDir: '/tmp/new-core',
+      newVersion: '0.4.13',
+    }, {
+      getCurrentVersion: () => ({ success: true, version: '0.4.12' }),
+      prepareSelfUpgrade: () => ({
+        step: 0,
+        name: 'preflight',
+        status: 'failed',
+        error: 'dependency preparation failed',
+      }),
+      preInstallSteps: [() => {
+        preInstallCalled = true;
+        return { step: 1, name: 'backup', status: 'done' };
+      }],
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.failedStep, 0);
+    assert.equal(result.backupDir, null);
+    assert.equal(result.rollback.performed, false);
+    assert.equal(result.machineState, 'unchanged');
+    assert.equal(result.manualRecovery, undefined);
+    assert.equal(preInstallCalled, false);
+  });
+
+  it('turns a thrown preparation error into an unchanged-machine failure result', () => {
+    const result = runSelfUpgrade({ tempDir: '/tmp/new-core', newVersion: '0.4.13' }, {
+      getCurrentVersion: () => ({ success: true, version: '0.4.12' }),
+      prepareSelfUpgrade: () => {
+        throw new Error('preparation exploded');
+      },
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.failedStep, 0);
+    assert.equal(result.error, 'preparation exploded');
+    assert.equal(result.machineState, 'unchanged');
+    assert.equal(result.rollback.performed, false);
+  });
+
+  it('always runs preparation before backup and service-stop steps', () => {
+    const calls = [];
+    const result = runSelfUpgrade({ tempDir: '/tmp/new-core', newVersion: '0.4.13' }, {
+      getCurrentVersion: () => ({ success: true, version: '0.4.12' }),
+      prepareSelfUpgrade: () => {
+        calls.push('prepare');
+        return { step: 0, name: 'prepare_upgrade', status: 'done' };
+      },
+      preInstallSteps: [
+        () => {
+          calls.push('backup');
+          return { step: 1, name: 'backup', status: 'done' };
+        },
+        () => {
+          calls.push('stop');
+          return { step: 3, name: 'stop', status: 'done' };
+        },
+      ],
+      runInstalledFinalizer: () => ({ action: 'self_upgrade', success: true, steps: [] }),
+    });
+
+    assert.equal(result.success, true);
+    assert.deepEqual(calls, ['prepare', 'backup', 'stop']);
   });
 });
 
@@ -173,6 +424,13 @@ describe('self-upgrade backup and rollback', () => {
       yosDir,
       skillsDir,
       backupDir,
+      packCurrentCore: () => {
+        const coreDir = path.join(backupDir, 'core');
+        fs.mkdirSync(coreDir, { recursive: true });
+        const archive = path.join(coreDir, 'yos-old.tgz');
+        fs.writeFileSync(archive, 'old core');
+        return archive;
+      },
     });
 
     assert.equal(result.status, 'done');
@@ -180,6 +438,7 @@ describe('self-upgrade backup and rollback', () => {
       fs.readFileSync(path.join(backupDir, 'pm2', 'ecosystem.config.cjs'), 'utf8'),
       'module.exports = { apps: ["old"] };\n'
     );
+    assert.equal(ctx.previousCorePackage, path.join(backupDir, 'core', 'yos-old.tgz'));
 
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
@@ -203,6 +462,7 @@ describe('self-upgrade backup and rollback', () => {
       yosDir,
       skillsDir,
       backupDir,
+      packCurrentCore: () => path.join(backupDir, 'core', 'yos-old.tgz'),
     });
 
     assert.equal(result.status, 'done');
@@ -228,20 +488,27 @@ describe('self-upgrade backup and rollback', () => {
     fs.writeFileSync(ecosystemPath, 'module.exports = { apps: ["broken-new"] };\n', 'utf8');
 
     const restartCalls = [];
+    const actions = [];
     const results = rollbackSelf({
       backupDir,
+      previousCorePackage: path.join(backupDir, 'core', 'yos-old.tgz'),
+      from: '0.4.12',
       servicesWereRunning: ['activity-monitor'],
     }, {
       yosDir,
       skillsDir,
       ecosystemPath,
+      installPreviousCore: (archive) => actions.push(`install:${archive}`),
       restartManagedProcess: (name, opts) => {
+        actions.push(`restart:${name}`);
         restartCalls.push({
           name,
           opts,
           ecosystemContent: fs.readFileSync(opts.ecosystemPath, 'utf8'),
         });
       },
+      verifyServices: () => ({ success: true, offline: [] }),
+      getInstalledCoreVersion: () => ({ success: true, version: '0.4.12' }),
     });
 
     assert.equal(
@@ -254,10 +521,132 @@ describe('self-upgrade backup and rollback', () => {
       ecosystemContent: 'module.exports = { apps: ["restored"] };\n',
     }]);
     assert.equal(results.some((item) => item.action === 'restore_pm2_ecosystem' && item.success), true);
+    assert.deepEqual(actions, [
+      `install:${path.join(backupDir, 'core', 'yos-old.tgz')}`,
+      'restart:activity-monitor',
+    ]);
+    assert.equal(results.some((item) => item.action === 'restore_previous_core' && item.success), true);
+    assert.equal(results.some((item) => item.action === 'verify_restored_services' && item.success), true);
+    assert.equal(results.some((item) => item.action === 'verify_restored_core_version' && item.success), true);
 
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  it('fails rollback verification when the installed core version did not return to the previous version', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-self-upgrade-version-verify-'));
+    const backupDir = path.join(tmpDir, 'backup');
+    const skillsDir = path.join(tmpDir, 'skills');
+    const previousCorePackage = path.join(backupDir, 'core', 'yos-old.tgz');
+    fs.mkdirSync(path.dirname(previousCorePackage), { recursive: true });
+    fs.mkdirSync(skillsDir, { recursive: true });
+    fs.writeFileSync(previousCorePackage, 'old core');
+
+    const results = rollbackSelf({
+      backupDir,
+      previousCorePackage,
+      coreInstallAttempted: true,
+      from: '0.4.12',
+      servicesWereRunning: [],
+    }, {
+      skillsDir,
+      installPreviousCore: () => {},
+      restoreSkillDependencies: () => ({ installed: 0, failed: [] }),
+      getInstalledCoreVersion: () => ({ success: true, version: '0.4.13' }),
+    });
+
+    assert.deepEqual(
+      results.find((item) => item.action === 'verify_restored_core_version'),
+      {
+        action: 'verify_restored_core_version',
+        success: false,
+        expectedVersion: '0.4.12',
+        actualVersion: '0.4.13',
+        error: 'installed core version 0.4.13 does not match expected 0.4.12',
+      }
+    );
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('keeps a core version mismatch from being reported as a completed rollback', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-self-upgrade-version-result-'));
+    const backupDir = path.join(tmpDir, 'backup');
+    const skillsDir = path.join(tmpDir, 'skills');
+    const previousCorePackage = path.join(backupDir, 'core', 'yos-old.tgz');
+    fs.mkdirSync(path.dirname(previousCorePackage), { recursive: true });
+    fs.mkdirSync(path.join(backupDir, 'skills', 'comm-bridge'), { recursive: true });
+    fs.mkdirSync(skillsDir, { recursive: true });
+    fs.writeFileSync(previousCorePackage, 'old core');
+    fs.writeFileSync(path.join(backupDir, 'skills', 'comm-bridge', 'SKILL.md'), '# old\n');
+
+    const result = runSelfUpgradeFinalize({
+      schemaVersion: 2,
+      backupDir,
+      previousCorePackage,
+      coreInstallAttempted: true,
+      servicesWereRunning: ['c4-dispatcher'],
+      from: '0.4.12',
+      to: '0.4.13',
+    }, {
+      steps: [
+        () => ({ step: 6, name: 'install_skill_dependencies', status: 'failed', error: 'dependency failed' }),
+      ],
+      rollback: {
+        skillsDir,
+        installPreviousCore: () => {},
+        restoreSkillDependencies: () => ({ installed: 0, failed: [] }),
+        restartManagedProcess: () => { throw new Error('restart failed'); },
+        verifyServices: () => ({ success: false, offline: ['c4-dispatcher'] }),
+        getInstalledCoreVersion: () => ({ success: true, version: '0.4.13' }),
+      },
+    });
+
+    assert.equal(result.rollback.attempted, true);
+    assert.equal(result.rollback.performed, false);
+    assert.equal(result.machineState, 'recovery_required');
+    assert.equal(result.manualRecovery.actualCoreVersion, '0.4.13');
+    assert.match(result.manualRecovery.message, /Rollback was attempted but incomplete/);
+    assert.match(result.manualRecovery.message, /Core version: 0\.4\.13/);
+    assert.match(result.manualRecovery.message, /Core Skills version: 0\.4\.12/);
+    assert.match(result.manualRecovery.message, /Mixed installation: yes/);
+    assert.match(result.manualRecovery.message, /Backup:/);
+    assert.match(result.manualRecovery.message, /yos upgrade --self --recover/);
+    assert.match(result.manualRecovery.message, /c4-dispatcher/);
+    const legacyReply = `yos-core upgrade failed (step ${result.failedStep}): ${result.error}`;
+    assert.match(legacyReply, /Rollback was attempted but incomplete/);
+    assert.match(legacyReply, /Core version: 0\.4\.13/);
+    assert.match(legacyReply, /Core Skills version: 0\.4\.12/);
+    assert.match(legacyReply, /Mixed installation: yes/);
+    assert.match(legacyReply, /Backup:/);
+    assert.match(legacyReply, /yos upgrade --self --recover/);
+    assert.match(legacyReply, /c4-dispatcher/);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('fails restore_core_skills when the restored tree does not match its backup', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-self-upgrade-skills-verify-'));
+    const backupDir = path.join(tmpDir, 'backup');
+    const backupSkillsDir = path.join(backupDir, 'skills');
+    const skillsDir = path.join(tmpDir, 'skills');
+    fs.mkdirSync(path.join(backupSkillsDir, 'activity-monitor'), { recursive: true });
+    fs.mkdirSync(path.join(skillsDir, 'activity-monitor'), { recursive: true });
+    fs.writeFileSync(path.join(backupSkillsDir, 'activity-monitor', 'SKILL.md'), '# old\n');
+    fs.writeFileSync(path.join(skillsDir, 'activity-monitor', 'SKILL.md'), '# new\n');
+
+    const results = rollbackSelf({
+      backupDir,
+      coreInstallAttempted: false,
+      servicesWereRunning: [],
+    }, {
+      skillsDir,
+      syncTree: () => {},
+      restoreSkillDependencies: () => ({ installed: 0, failed: [] }),
+    });
+
+    const restoredSkills = results.find((item) => item.action === 'restore_core_skills');
+    assert.equal(restoredSkills.success, false);
+    assert.equal(restoredSkills.error, 'restored Core Skills do not match the transaction backup');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
   it('falls back to plain restart when the backup has no ecosystem file', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-self-upgrade-rollback-fallback-'));
     const yosDir = path.join(tmpDir, 'yos');
@@ -272,14 +661,18 @@ describe('self-upgrade backup and rollback', () => {
     const restartCalls = [];
     const results = rollbackSelf({
       backupDir,
+      previousCorePackage: path.join(backupDir, 'core', 'yos-old.tgz'),
       servicesWereRunning: ['activity-monitor'],
     }, {
       yosDir,
       skillsDir,
       ecosystemPath,
+      installPreviousCore: () => {},
       restartManagedProcess: (name, opts) => {
         restartCalls.push({ name, opts });
       },
+      verifyServices: () => ({ success: true, offline: [] }),
+      getInstalledCoreVersion: () => ({ success: true, version: '0.4.12' }),
     });
 
     assert.deepStrictEqual(restartCalls, [{
@@ -288,6 +681,73 @@ describe('self-upgrade backup and rollback', () => {
     }]);
     assert.equal(results.some((item) => item.action === 'restart_activity-monitor' && item.success), true);
 
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('recovers a retained transaction backup through the supported recovery entrypoint', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-self-upgrade-recover-'));
+    const backupDir = path.join(tmpDir, 'yos-core-backup-test');
+    fs.mkdirSync(backupDir, { recursive: true });
+    fs.writeFileSync(path.join(backupDir, 'rollback-state.json'), JSON.stringify({
+      schemaVersion: 1,
+      backupDir,
+      previousCorePackage: path.join(backupDir, 'core', 'yos-old.tgz'),
+      coreInstallAttempted: true,
+      servicesWereRunning: ['activity-monitor'],
+      from: '0.4.12',
+    }));
+
+    const calls = [];
+    const result = recoverSelfUpgrade(backupDir, {
+      allowedTmpRoots: [tmpDir],
+      rollbackSelf: (state) => {
+        calls.push(state.from);
+        return [
+          { action: 'restore_previous_core', success: true },
+          { action: 'verify_restored_services', success: true },
+        ];
+      },
+    });
+
+    assert.equal(result.success, true);
+    assert.deepEqual(calls, ['0.4.12']);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('rejects a recovery directory outside the allowed temporary roots', () => {
+    const result = recoverSelfUpgrade('/private/not-a-yos-backup', {
+      allowedTmpRoots: ['/tmp'],
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.error, 'invalid_recovery_backup');
+  });
+
+  it('rejects a recovery state that points at a core package outside its backup', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-self-upgrade-recover-'));
+    const backupDir = path.join(tmpDir, 'yos-core-backup-test');
+    fs.mkdirSync(backupDir, { recursive: true });
+    fs.writeFileSync(path.join(backupDir, 'rollback-state.json'), JSON.stringify({
+      schemaVersion: 1,
+      backupDir,
+      previousCorePackage: path.join(tmpDir, 'untrusted.tgz'),
+      coreInstallAttempted: true,
+      servicesWereRunning: ['activity-monitor'],
+      from: '0.4.12',
+    }));
+
+    let rollbackCalled = false;
+    const result = recoverSelfUpgrade(backupDir, {
+      allowedTmpRoots: [tmpDir],
+      rollbackSelf: () => {
+        rollbackCalled = true;
+        return [];
+      },
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.error, 'invalid_recovery_state');
+    assert.equal(rollbackCalled, false);
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 });
@@ -851,7 +1311,7 @@ describe('step7 manifest deploy (real step7_syncInstructions)', () => {
     const wrappedStep7 = (ctx) => step7_syncInstructions({ ...ctx, yosDir, packageRoot: path.join(tmpDir, 'no-fallback') });
 
     const result = runSelfUpgradeFinalize({
-      schemaVersion: 1,
+      schemaVersion: 2,
       tempDir: path.join(tmpDir, 'pkg'),
       from: '0.4.12',
       to: '0.4.13',

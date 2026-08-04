@@ -20,8 +20,8 @@ if (!tempDir || !scenario || !yosDir) {
 }
 
 const {
-  cleanupBackup,
   createFinalizeState,
+  rollbackSelf,
   runSelfUpgrade,
   runSelfUpgradeFinalize,
   step5_syncCoreSkills,
@@ -44,19 +44,33 @@ try {
     onStep: scenario === 'json' ? undefined : printStep,
   }, {
     getCurrentVersion: () => ({ success: true, version: '0.5.3' }),
+    prepareSelfUpgrade: (ctx) => {
+      const preparedPackage = path.join(yosDir, 'prepared-yos.tgz');
+      fs.writeFileSync(preparedPackage, 'prepared');
+      ctx.preparedPackage = preparedPackage;
+      npmCommands.push('npm pack --ignore-scripts --pack-destination <preflight>');
+      return { step: 0, name: 'prepare_upgrade', status: 'done', message: 'prepared' };
+    },
     step1: {
       yosDir,
       skillsDir: path.join(yosDir, '.claude', 'skills'),
       backupDir: transactionBackupDir,
+      packCurrentCore: (_ctx, backupDir) => {
+        const coreDir = path.join(backupDir, 'core');
+        fs.mkdirSync(coreDir, { recursive: true });
+        const archive = path.join(coreDir, 'yos-old.tgz');
+        fs.writeFileSync(archive, 'old core');
+        return archive;
+      },
     },
     step3: {
       getSkillsServices: () => [{ name: 'fixture-service', status: 'online' }],
       stopService: (name) => stoppedServices.push(name),
     },
     step4: {
-      execSync: (command) => {
-        npmCommands.push(command);
-        return command.startsWith('npm pack') ? 'yos-fixture.tgz\n' : '';
+      execFileSync: (command, args) => {
+        npmCommands.push([command, ...args].join(' '));
+        return '';
       },
     },
     runInstalledFinalizer: (ctx) => {
@@ -71,15 +85,20 @@ try {
           error: 'injected later failure',
         }));
       }
-      return runSelfUpgradeFinalize(createFinalizeState(ctx), { steps });
+      return runSelfUpgradeFinalize(createFinalizeState(ctx), {
+        steps,
+        rollbackSelf: (rollbackCtx) => rollbackSelf(rollbackCtx, {
+          yosDir,
+          skillsDir: path.join(yosDir, '.claude', 'skills'),
+          ecosystemPath: path.join(yosDir, 'pm2', 'ecosystem.config.cjs'),
+          installPreviousCore: () => {},
+          getInstalledCoreVersion: () => ({ success: true, version: '0.5.3' }),
+          restartManagedProcess: () => {},
+          verifyServices: () => ({ success: true, offline: [] }),
+        }),
+      });
     },
   });
-
-  // Match component.js ownership: only the non-JSON successful launcher
-  // removes the temporary transaction backup.
-  if (scenario !== 'json' && result.success && result.backupDir) {
-    cleanupBackup(result.backupDir);
-  }
 } finally {
   console.log = originalLog;
 }

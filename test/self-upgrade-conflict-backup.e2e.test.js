@@ -70,8 +70,8 @@ describe('self-upgrade durable conflict backups (#717)', () => {
     expect(result.mergeConflicts).toHaveLength(2);
     expect(stoppedServices).toEqual(['fixture-service']);
     expect(npmCommands).toHaveLength(2);
-    expect(npmCommands[0]).toMatch(/^npm pack/);
-    expect(npmCommands[1]).toMatch(/^npm install -g/);
+    expect(npmCommands[0]).toMatch(/^npm pack --ignore-scripts/);
+    expect(npmCommands[1]).toMatch(/npm install -g/);
     expect(fs.existsSync(transactionBackupDir)).toBe(false);
 
     for (const conflict of result.mergeConflicts) {
@@ -84,28 +84,29 @@ describe('self-upgrade durable conflict backups (#717)', () => {
     expect(readFile(result.mergeConflicts.find(({ file }) => file === 'SKILL.md').backupPath)).toContain('value=local');
   });
 
-  test('JSON result exposes durable backup paths without running success cleanup', () => {
+  test('JSON success cleans the transaction backup while preserving durable conflict backups', () => {
     prepareThreeWayConflictFixture();
 
     const { result, launcherOutput, transactionBackupDir } = runScenario('json');
 
     expect(result.success).toBe(true);
     expect(launcherOutput).toEqual([]);
-    expect(fs.existsSync(transactionBackupDir)).toBe(true);
+    expect(fs.existsSync(transactionBackupDir)).toBe(false);
     expect(result.mergeConflicts).toHaveLength(2);
     for (const conflict of result.mergeConflicts) {
       expect(fs.existsSync(conflict.backupPath)).toBe(true);
     }
   });
 
-  test('later finalizer failure performs no rollback and retains both backup lifecycles', () => {
+  test('later finalizer failure rolls back and retains both backup lifecycles', () => {
     prepareThreeWayConflictFixture();
 
     const { result, transactionBackupDir } = runScenario('later-failure');
 
     expect(result.success).toBe(false);
     expect(result.failedStep).toBe(6);
-    expect(result.rollback).toEqual({ performed: false, steps: [] });
+    expect(result.rollback.performed).toBe(true);
+    expect(result.rollback.steps.every((step) => step.success)).toBe(true);
     expect(fs.existsSync(transactionBackupDir)).toBe(true);
 
     const durableRoot = path.join(yosDir, '.backup');

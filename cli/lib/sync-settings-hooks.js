@@ -348,7 +348,14 @@ export function persistInstalledSettingsAndSyncCoupledThreshold({
   let backupPath = null;
   if (existsSync(settingsPath)) {
     backupPath = `${settingsPath}.bak.${Date.now()}`;
-    copyFileSync(settingsPath, backupPath);
+    try {
+      copyFileSync(settingsPath, backupPath);
+    } catch (error) {
+      if (error?.code === 'EISDIR' || error?.code === 'ENOTSUP') {
+        throw new Error('Settings sync failed: existing settings path is a directory; replace it with a JSON file and retry.');
+      }
+      throw new Error('Settings sync failed: existing settings could not be backed up; check file permissions and retry.');
+    }
   }
   try {
     writeFileSync(settingsPath, JSON.stringify(installedSettings, null, 2) + '\n');
@@ -716,5 +723,13 @@ export function main(argv = process.argv.slice(2)) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  main();
+  try {
+    main();
+  } catch (error) {
+    const message = String(error?.message || '').startsWith('Settings sync failed:')
+      ? error.message
+      : 'Settings sync failed: unable to update settings; inspect the local configuration and retry.';
+    console.error(message);
+    process.exit(1);
+  }
 }

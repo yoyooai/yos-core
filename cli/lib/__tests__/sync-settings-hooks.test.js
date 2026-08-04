@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync, execSync } from 'node:child_process';
+import { execFileSync, execSync, spawnSync } from 'node:child_process';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -433,6 +433,23 @@ describe('persistInstalledSettingsAndSyncCoupledThreshold', () => {
       ['copy', '/tmp/yos/.claude/settings.json', '/tmp/yos/.claude/settings.json.bak.<ts>'],
       ['copy', '/tmp/yos/.claude/settings.json.bak.<ts>', '/tmp/yos/.claude/settings.json'],
     ]);
+  });
+
+  it('reports a directory at settings.json without a stack or private path', () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-settings-eisdir-'));
+    const yosDir = path.join(tempRoot, 'private-customer-yos');
+    fs.mkdirSync(path.join(yosDir, '.claude', 'settings.json'), { recursive: true });
+
+    const result = spawnSync(process.execPath, [path.join(__dirname, '..', 'sync-settings-hooks.js')], {
+      env: { ...process.env, HOME: tempRoot, YOS_DIR: yosDir },
+      encoding: 'utf8',
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Settings sync failed: existing settings path is a directory/);
+    assert.doesNotMatch(result.stderr, /private-customer-yos/);
+    assert.doesNotMatch(result.stderr, /\n\s*at /);
+    fs.rmSync(tempRoot, { recursive: true, force: true });
   });
 });
 
