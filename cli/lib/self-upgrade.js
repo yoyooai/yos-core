@@ -1785,13 +1785,19 @@ function buildSelfUpgradeResult(ctx, failedStep, rollbackResults = null, rollbac
       : machineUnchanged
         ? 'unchanged'
         : 'recovery_required';
+    const manualRecovery = machineState === 'recovery_required' && ctx.backupDir
+      ? buildManualRecovery(ctx, rollbackResults || [])
+      : null;
+    const resultError = manualRecovery
+      ? `${failedStep.error}\nRECOVERY: ${manualRecovery.message}`
+      : failedStep.error;
     return {
       action: 'self_upgrade',
       success: false,
       from: ctx.from,
       to: null,
       failedStep: failedStep.step,
-      error: failedStep.error,
+      error: resultError,
       steps: ctx.steps,
       rollback: {
         attempted: rollbackPerformed,
@@ -1800,9 +1806,7 @@ function buildSelfUpgradeResult(ctx, failedStep, rollbackResults = null, rollbac
       },
       backupDir: ctx.backupDir,
       machineState,
-      ...(machineState === 'recovery_required' && ctx.backupDir ? {
-        manualRecovery: buildManualRecovery(ctx, rollbackResults || []),
-      } : {}),
+      ...(manualRecovery ? { manualRecovery } : {}),
     };
   }
 

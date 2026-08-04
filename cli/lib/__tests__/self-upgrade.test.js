@@ -611,6 +611,14 @@ describe('self-upgrade backup and rollback', () => {
     assert.match(result.manualRecovery.message, /Backup:/);
     assert.match(result.manualRecovery.message, /yos upgrade --self --recover/);
     assert.match(result.manualRecovery.message, /c4-dispatcher/);
+    const legacyReply = `yos-core upgrade failed (step ${result.failedStep}): ${result.error}`;
+    assert.match(legacyReply, /Rollback was attempted but incomplete/);
+    assert.match(legacyReply, /Core version: 0\.4\.13/);
+    assert.match(legacyReply, /Core Skills version: 0\.4\.12/);
+    assert.match(legacyReply, /Mixed installation: yes/);
+    assert.match(legacyReply, /Backup:/);
+    assert.match(legacyReply, /yos upgrade --self --recover/);
+    assert.match(legacyReply, /c4-dispatcher/);
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
