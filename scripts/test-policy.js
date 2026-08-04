@@ -2,6 +2,11 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import {
+  loadApprovedTestBaselines,
+  verifyJestResult,
+  verifyNodeTapResult,
+} from './test-baseline-policy.js';
 
 const TEST_FILE = /(^|\/)(?:__tests__\/.*|tests?\/.*|[^/]+\.(?:test|spec))\.(?:[cm]?js|jsx|ts|tsx)$/;
 const CONFIG_FILE = /(^|\/)(?:jest\.config\.[^/]+|package\.json|run-[^/]*tests?\.[^/]+)$/;
@@ -174,6 +179,42 @@ export function verifyCriticalTestFiles(root, manifest) {
   }
 }
 
+function mustReject(label, operation) {
+  try {
+    operation();
+  } catch {
+    return;
+  }
+  throw new Error(`${label} did not reject a below-baseline result`);
+}
+
+export function verifyTestBaselineGuard(root) {
+  const baselines = loadApprovedTestBaselines(path.join(root, 'scripts', 'test-baselines.json'));
+  mustReject('Jest baseline guard', () => verifyJestResult({
+    numPassedTests: Math.max(0, baselines.jest.minimumPassed - 1),
+    numFailedTests: 0,
+    numPendingTests: 0,
+    numTodoTests: 0,
+  }, baselines.jest));
+  mustReject('Node baseline guard', () => verifyNodeTapResult([
+    `# tests ${baselines.node.minimumPassed}`,
+    `# pass ${Math.max(0, baselines.node.minimumPassed - 1)}`,
+    '# fail 0',
+    '# cancelled 0',
+    '# skipped 0',
+    '# todo 0',
+  ].join('\n'), baselines.node));
+
+  const verifySource = fs.readFileSync(path.join(root, 'scripts', 'verify.js'), 'utf8');
+  const testIndex = verifySource.indexOf('verifyExecutedTestsImpl(root);');
+  const auditIndex = verifySource.indexOf('verifyAuditsImpl(root);');
+  const packIndex = verifySource.indexOf('verifyReproduciblePackImpl(root);');
+  if (testIndex < 0) throw new Error('executed-test gate is missing from verification');
+  if (auditIndex < 0 || packIndex < 0 || testIndex > auditIndex || testIndex > packIndex) {
+    throw new Error('executed-test gate must run before audits and packaging');
+  }
+}
+
 function readJson(filePath, label) {
   try {
     return JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -210,5 +251,6 @@ export function verifyTestPolicy({
   }
 
   verifyCriticalTestFiles(root, readJson(criticalManifestPath, 'critical test manifest'));
+  verifyTestBaselineGuard(root);
   return { scannedFiles: scanPaths.length, criticalFiles: readJson(criticalManifestPath, 'critical test manifest').files.length };
 }

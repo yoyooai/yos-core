@@ -10,6 +10,7 @@ import {
   loadApprovedSkipAllowlist,
   listTrackedFiles,
   verifyCriticalTestFiles,
+  verifyTestBaselineGuard,
   verifyTestPolicy,
 } from '../scripts/test-policy.js';
 
@@ -118,6 +119,40 @@ describe('test policy', () => {
     expect(() => verifyCriticalTestFiles(root, manifest)).toThrow(/empty\.test\.js: expected at least 1 test case/);
     write(path.join(root, 'test', 'empty.test.js'), "test('present', () => {});\n");
     expect(() => verifyCriticalTestFiles(root, manifest)).toThrow(/missing critical file: test\/missing\.test\.js/);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test('rejects a removed, warning-only, or late executed-test gate', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-test-baseline-wiring-'));
+    const baselines = {
+      jest: { minimumPassed: 186 },
+      node: { minimumPassed: 1063 },
+    };
+    write(path.join(root, 'scripts', 'test-baselines.json'), JSON.stringify({
+      version: 1,
+      baselines,
+      approvedDigest: digest(baselines),
+    }));
+    const verifyPath = path.join(root, 'scripts', 'verify.js');
+    const healthy = [
+      'verifyTestPolicyImpl({ root });',
+      'verifyExecutedTestsImpl(root);',
+      'verifyAuditsImpl(root);',
+      'verifyReproduciblePackImpl(root);',
+    ].join('\n');
+    write(verifyPath, healthy);
+    expect(() => verifyTestBaselineGuard(root)).not.toThrow();
+
+    write(verifyPath, healthy.replace('verifyExecutedTestsImpl(root);', 'console.warn("test counts skipped");'));
+    expect(() => verifyTestBaselineGuard(root)).toThrow(/executed-test gate is missing/);
+
+    write(verifyPath, [
+      'verifyTestPolicyImpl({ root });',
+      'verifyAuditsImpl(root);',
+      'verifyReproduciblePackImpl(root);',
+      'verifyExecutedTestsImpl(root);',
+    ].join('\n'));
+    expect(() => verifyTestBaselineGuard(root)).toThrow(/must run before audits and packaging/);
     fs.rmSync(root, { recursive: true, force: true });
   });
 
