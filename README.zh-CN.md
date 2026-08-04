@@ -46,9 +46,12 @@ yos list
 
 ```bash
 npm run verify
+npm run release:pack
 ```
 
-统一门禁会运行全部 Jest 测试、Node 测试、依赖安全审计和可复现打包检查。标准 Linux 环境中未通过该命令的版本，不得作为发布版本。
+统一门禁会运行全部 Jest 测试、Node 测试、依赖安全审计和可复现打包检查。标准 Linux 环境中未通过该命令的版本，不得作为发布版本。正式制品必须使用 `npm run release:pack`：它先完整执行门禁，通过后才会生成 `publication/` 中的包。普通 `npm pack` 仅供客户端升级事务构建候选包，不代表已通过发布门禁。
+
+自升级如果自动回滚不完整，会保留事务备份并输出完整恢复命令：`yos upgrade --self --recover <backup>`。不要在恢复前手工删除该备份目录。
 
 ## 当前兼容边界
 

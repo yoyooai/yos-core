@@ -44,6 +44,7 @@ looked reasonable.
 | D6 | `yos logs` targets corrected to the paths services actually write (`activity-monitor/activity.log`; `scheduler` read through PM2) | `yos logs` execution path changes. Upstream pointed `activity` and `scheduler` at files nothing writes, so the default invocation always failed on a healthy install. | 苏白, 2026-08-03 | `3f21e9f` | authorized |
 | D7 | `yos upgrade --self --check` reports the variable to configure instead of the internal token | Operator-facing text only. The `remote_version_failed` token and the release-source library contract are unchanged. | 苏白, 2026-08-03 | `6597a0a` | authorized |
 | D8 | `LICENSE` copyright line replaced (upstream's holder replaced with `YOS Team`) | Licensing, not code. MIT permits modification and commercial use but requires the original copyright notice to be retained, so the compliant form is upstream's line plus ours, not a replacement. | — | `ae85d6b` | **pending — owner handling** |
+| D9 | Self-upgrade and release packaging made transactional (`release:pack`, pre-stop candidate preparation, previous-core snapshot, post-install rollback and explicit recovery) | Ordinary `npm pack` no longer runs the repository release gate. A self-upgrade prepares its candidate before stopping services, restores the previous core and services after a failed step 4–12, retains a warning backup after step 13, and exposes an explicit recovery command when automatic rollback is incomplete. Optional update notes are read only from the downloaded package. | 苏白, 2026-08-04 | `4886eb3`, `e3520bb`, `c40acfb` | authorized |
 
 ## Consequences for future upstream syncs
 
@@ -56,6 +57,7 @@ comparison and selective porting. The rows above are where that porting will con
   reconciled against our recovery layer by hand.
 - **D3** — any upstream change to upgrade or release resolution will conflict directly.
 - **D5** — path, variable and service-name renames affect nearly every diff hunk.
+- **D9** — upstream changes to self-upgrade steps, package lifecycle scripts or release construction must preserve the transaction and release-gate boundaries.
 
 The fork-review audit that produced this classification is
 [`docs/audits/2026-07-16-yos-v060-fork-review.md`](audits/2026-07-16-yos-v060-fork-review.md).
