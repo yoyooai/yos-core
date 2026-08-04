@@ -71,4 +71,21 @@ describe('self-upgrade recovery reply', () => {
     assert.match(reply, /\/tmp\/yos-core-backup-test/);
     assert.match(reply, /yos upgrade --self --recover/);
   });
+
+  it('does not duplicate recovery details already carried by the legacy error field', () => {
+    const recoveryMessage = 'Rollback was attempted but incomplete. Core version: 0.4.13. Core Skills version: 0.4.12.';
+    const reply = formatC4Reply('self-upgrade', {
+      success: false,
+      failedStep: 6,
+      error: `dependency failed\nRECOVERY: ${recoveryMessage}`,
+      rollback: { attempted: true, performed: false, steps: [] },
+      manualRecovery: {
+        message: recoveryMessage,
+        backupDir: '/tmp/yos-core-backup-test',
+        command: 'yos upgrade --self --recover "/tmp/yos-core-backup-test"',
+      },
+    });
+
+    assert.equal(reply.split(recoveryMessage).length - 1, 1);
+  });
 });

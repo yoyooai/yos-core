@@ -130,7 +130,7 @@ export function formatC4Reply(type, data) {
           r += `\nRollback ${rollback.performed ? 'completed' : 'incomplete'}: `
             + rollback.steps.map(s => `${s.success ? 'OK' : 'FAIL'}: ${s.action}`).join(', ');
         }
-        if (manualRecovery) {
+        if (manualRecovery && !String(error).includes(manualRecovery.message)) {
           r += `\n${manualRecovery.message}`;
           r += `\nBackup: ${manualRecovery.backupDir}`;
           r += `\nRun: ${manualRecovery.command}`;
