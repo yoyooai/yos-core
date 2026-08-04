@@ -1641,6 +1641,16 @@ const POST_INSTALL_STEPS = [
   step13_commitSkillBaselines,
 ];
 
+const FINALIZE_STATE_SCHEMA_VERSION = 2;
+
+function classifyFinalizeState(state) {
+  if (state.schemaVersion === FINALIZE_STATE_SCHEMA_VERSION) return 'current';
+  // The released v1 launcher did not carry a recoverable core package. An
+  // unversioned handoff is older still and has the same rollback boundary.
+  if (state.schemaVersion === undefined || state.schemaVersion === 1) return 'legacy';
+  return 'unsupported';
+}
+
 function buildSelfUpgradeResult(ctx, failedStep, rollbackResults = null, rollbackPerformed = Boolean(rollbackResults)) {
   if (failedStep) {
     const rollbackComplete = rollbackPerformed
@@ -1712,7 +1722,7 @@ function buildSelfUpgradeResult(ctx, failedStep, rollbackResults = null, rollbac
 
 export function createFinalizeState(ctx) {
   return {
-    schemaVersion: 1,
+    schemaVersion: FINALIZE_STATE_SCHEMA_VERSION,
     tempDir: ctx.tempDir,
     backupDir: ctx.backupDir,
     previousCorePackage: ctx.previousCorePackage,
@@ -1767,7 +1777,8 @@ function runInstalledFinalizer(ctx) {
 }
 
 export function runSelfUpgradeFinalize(state = {}, deps = {}) {
-  if (state.schemaVersion !== undefined && state.schemaVersion !== 1) {
+  const handoffState = classifyFinalizeState(state);
+  if (handoffState === 'unsupported') {
     return {
       action: 'self_upgrade',
       success: false,
@@ -1786,8 +1797,11 @@ export function runSelfUpgradeFinalize(state = {}, deps = {}) {
     mode: state.mode,
   });
   ctx.backupDir = state.backupDir || null;
-  ctx.previousCorePackage = state.previousCorePackage || null;
-  ctx.coreInstallAttempted = Boolean(state.coreInstallAttempted);
+  ctx.handoffState = handoffState;
+  ctx.previousCorePackage = handoffState === 'current' ? state.previousCorePackage || null : null;
+  // The finalizer only runs after the candidate core was installed. Legacy
+  // launchers did not record this fact, so absence must not mean "unchanged".
+  ctx.coreInstallAttempted = handoffState === 'legacy' || Boolean(state.coreInstallAttempted);
   ctx.servicesWereRunning = Array.isArray(state.servicesWereRunning) ? [...state.servicesWereRunning] : [];
   ctx.from = state.from || null;
   ctx.to = state.to || state.newVersion || null;

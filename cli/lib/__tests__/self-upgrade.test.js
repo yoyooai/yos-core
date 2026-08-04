@@ -52,7 +52,7 @@ describe('self-upgrade finalizer handoff', () => {
       newVersion: '0.4.13',
       mode: 'merge',
     }), {
-      schemaVersion: 1,
+      schemaVersion: 2,
       tempDir: '/tmp/new-core',
       backupDir: '/tmp/backup',
       previousCorePackage: '/tmp/backup/core/yos-old.tgz',
@@ -65,10 +65,80 @@ describe('self-upgrade finalizer handoff', () => {
     });
   });
 
+  it('rejects a future finalizer state schema before running post-install steps', () => {
+    let stepCalled = false;
+    const result = runSelfUpgradeFinalize({
+      schemaVersion: 3,
+      from: '0.4.12',
+      to: '0.4.13',
+    }, {
+      steps: [() => {
+        stepCalled = true;
+        return { step: 5, name: 'sync_core_skills', status: 'done' };
+      }],
+    });
+
+    assert.equal(stepCalled, false);
+    assert.equal(result.success, false);
+    assert.equal(result.error, 'unsupported finalize state schemaVersion: 3');
+    assert.equal(result.rollback.performed, false);
+  });
+
+  it('treats a legacy finalizer state as unable to restore the previous core', () => {
+    const rollbackCalls = [];
+    const result = runSelfUpgradeFinalize({
+      schemaVersion: 1,
+      tempDir: '/tmp/new-core',
+      backupDir: '/tmp/backup',
+      servicesWereRunning: ['activity-monitor'],
+      from: '0.4.12',
+      to: '0.4.13',
+    }, {
+      steps: [
+        () => ({ step: 6, name: 'install_skill_dependencies', status: 'failed', error: 'dependency failed' }),
+      ],
+      rollbackSelf: (ctx) => {
+        rollbackCalls.push({
+          coreInstallAttempted: ctx.coreInstallAttempted,
+          previousCorePackage: ctx.previousCorePackage,
+          handoffState: ctx.handoffState,
+        });
+        return [{ action: 'restore_core_skills', success: true }];
+      },
+    });
+
+    assert.deepEqual(rollbackCalls, [{
+      coreInstallAttempted: true,
+      previousCorePackage: null,
+      handoffState: 'legacy',
+    }]);
+    assert.equal(result.success, false);
+  });
+
+  it('treats an unversioned finalizer state as legacy', () => {
+    let handoffState;
+    const result = runSelfUpgradeFinalize({
+      backupDir: '/tmp/backup',
+      from: '0.4.12',
+      to: '0.4.13',
+    }, {
+      steps: [
+        () => ({ step: 6, name: 'install_skill_dependencies', status: 'failed', error: 'dependency failed' }),
+      ],
+      rollbackSelf: (ctx) => {
+        handoffState = ctx.handoffState;
+        return [{ action: 'restore_core_skills', success: true }];
+      },
+    });
+
+    assert.equal(handoffState, 'legacy');
+    assert.equal(result.success, false);
+  });
+
   it('runs post-install steps with restored state and returns upgrade metadata', () => {
     const calls = [];
     const result = runSelfUpgradeFinalize({
-      schemaVersion: 1,
+      schemaVersion: 2,
       tempDir: '/tmp/new-core',
       backupDir: '/tmp/backup',
       servicesStopped: ['activity-monitor'],
@@ -106,7 +176,7 @@ describe('self-upgrade finalizer handoff', () => {
   it('rolls back when a post-install step before baseline commit fails', () => {
     const rollbackCalls = [];
     const result = runSelfUpgradeFinalize({
-      schemaVersion: 1,
+      schemaVersion: 2,
       tempDir: '/tmp/new-core',
       backupDir: '/tmp/backup',
       previousCorePackage: '/tmp/backup/core/yos-old.tgz',
@@ -135,7 +205,7 @@ describe('self-upgrade finalizer handoff', () => {
 
   it('rolls back when service verification fails at step 12', () => {
     const result = runSelfUpgradeFinalize({
-      schemaVersion: 1,
+      schemaVersion: 2,
       backupDir: '/tmp/backup',
       previousCorePackage: '/tmp/backup/core/yos-old.tgz',
       servicesWereRunning: ['activity-monitor'],
@@ -157,7 +227,7 @@ describe('self-upgrade finalizer handoff', () => {
     let rollbackCalled = false;
     let cleanupCalled = false;
     const result = runSelfUpgradeFinalize({
-      schemaVersion: 1,
+      schemaVersion: 2,
       backupDir: '/tmp/backup',
       servicesWereRunning: ['activity-monitor'],
       from: '0.4.12',
@@ -439,7 +509,6 @@ describe('self-upgrade backup and rollback', () => {
 
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
-
   it('falls back to plain restart when the backup has no ecosystem file', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-self-upgrade-rollback-fallback-'));
     const yosDir = path.join(tmpDir, 'yos');
@@ -1103,7 +1172,7 @@ describe('step7 manifest deploy (real step7_syncInstructions)', () => {
     const wrappedStep7 = (ctx) => step7_syncInstructions({ ...ctx, yosDir, packageRoot: path.join(tmpDir, 'no-fallback') });
 
     const result = runSelfUpgradeFinalize({
-      schemaVersion: 1,
+      schemaVersion: 2,
       tempDir: path.join(tmpDir, 'pkg'),
       from: '0.4.12',
       to: '0.4.13',
