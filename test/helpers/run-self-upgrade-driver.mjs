@@ -92,6 +92,7 @@ try {
           skillsDir: path.join(yosDir, '.claude', 'skills'),
           ecosystemPath: path.join(yosDir, 'pm2', 'ecosystem.config.cjs'),
           installPreviousCore: () => {},
+          getInstalledCoreVersion: () => ({ success: true, version: '0.5.3' }),
           restartManagedProcess: () => {},
           verifyServices: () => ({ success: true, offline: [] }),
         }),
