@@ -206,13 +206,21 @@ export function verifyTestBaselineGuard(root) {
   ].join('\n'), baselines.node));
 
   const verifySource = fs.readFileSync(path.join(root, 'scripts', 'verify.js'), 'utf8');
-  const testIndex = verifySource.indexOf('const executedTestCounts = verifyExecutedTestsImpl(root, baselines);');
-  const countIndex = verifySource.indexOf('verifyExecutedTestCountsImpl(executedTestCounts, baselines);');
+  const testIndex = /^\s*const counts = verifyExecutedTestsImpl\(root, baselines\);\s*$/m.exec(verifySource)?.index ?? -1;
+  const countIndex = /^\s*return verifyExecutedTestCountsImpl\(counts, baselines\) === counts;\s*$/m.exec(verifySource)?.index ?? -1;
+  const gateIndex = /^\s*countsVerified = executeTestGateImpl\(\{\s*$/m.exec(verifySource)?.index ?? -1;
   const auditIndex = verifySource.indexOf('verifyAuditsImpl(root);');
   const packIndex = verifySource.indexOf('verifyReproduciblePackImpl(root);');
-  if (testIndex < 0 || countIndex < 0) throw new Error('executed-test gate is missing from verification');
+  const resultIndex = /^\s*if \(!failed && runPrerequisites && !countsVerified\) \{\s*$/m.exec(verifySource)?.index ?? -1;
+  if (testIndex < 0 || countIndex < 0 || gateIndex < 0) {
+    throw new Error('executed-test gate is missing from verification');
+  }
+  if (resultIndex < 0) {
+    throw new Error('executed-test verification result is not enforced');
+  }
   if (auditIndex < 0 || packIndex < 0 || testIndex > countIndex
-    || countIndex > auditIndex || countIndex > packIndex) {
+    || gateIndex > auditIndex || gateIndex > packIndex
+    || resultIndex < auditIndex || resultIndex < packIndex) {
     throw new Error('executed-test gate must run before audits and packaging');
   }
 }

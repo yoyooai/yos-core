@@ -122,7 +122,7 @@ describe('test policy', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  test('rejects a removed, warning-only, or late executed-test gate', () => {
+  test('rejects a removed, warning-only, late, or unconsumed executed-test gate', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-test-baseline-wiring-'));
     const baselines = {
       jest: { minimumPassed: 186 },
@@ -135,27 +135,37 @@ describe('test policy', () => {
     }));
     const verifyPath = path.join(root, 'scripts', 'verify.js');
     const healthy = [
+      'const counts = verifyExecutedTestsImpl(root, baselines);',
+      'return verifyExecutedTestCountsImpl(counts, baselines) === counts;',
       'verifyTestPolicyImpl({ root });',
-      'const executedTestCounts = verifyExecutedTestsImpl(root, baselines);',
-      'verifyExecutedTestCountsImpl(executedTestCounts, baselines);',
+      'countsVerified = executeTestGateImpl({',
       'verifyAuditsImpl(root);',
       'verifyReproduciblePackImpl(root);',
+      'if (!failed && runPrerequisites && !countsVerified) {',
     ].join('\n');
     write(verifyPath, healthy);
     expect(() => verifyTestBaselineGuard(root)).not.toThrow();
 
     write(verifyPath, healthy.replace(
-      'const executedTestCounts = verifyExecutedTestsImpl(root, baselines);\nverifyExecutedTestCountsImpl(executedTestCounts, baselines);',
-      'try { verifyExecutedTestsImpl(root, baselines); } catch { console.warn("test counts skipped"); }',
+      'countsVerified = executeTestGateImpl({',
+      'try { executeTestGateImpl({',
     ));
     expect(() => verifyTestBaselineGuard(root)).toThrow(/executed-test gate is missing/);
 
+    write(verifyPath, healthy.replace(
+      'if (!failed && runPrerequisites && !countsVerified) {',
+      'if (false && !failed && runPrerequisites && !countsVerified) {',
+    ));
+    expect(() => verifyTestBaselineGuard(root)).toThrow(/verification result is not enforced/);
+
     write(verifyPath, [
+      'const counts = verifyExecutedTestsImpl(root, baselines);',
+      'return verifyExecutedTestCountsImpl(counts, baselines) === counts;',
       'verifyTestPolicyImpl({ root });',
       'verifyAuditsImpl(root);',
       'verifyReproduciblePackImpl(root);',
-      'const executedTestCounts = verifyExecutedTestsImpl(root, baselines);',
-      'verifyExecutedTestCountsImpl(executedTestCounts, baselines);',
+      'countsVerified = executeTestGateImpl({',
+      'if (!failed && runPrerequisites && !countsVerified) {',
     ].join('\n'));
     expect(() => verifyTestBaselineGuard(root)).toThrow(/must run before audits and packaging/);
     fs.rmSync(root, { recursive: true, force: true });
