@@ -298,6 +298,55 @@ function parseTagsResponse(jsonStr, { includePrerelease = false, tagPrefix = nul
   return versions[0] || null;
 }
 
+/**
+ * Choose the version an install should resolve to from a component's tag line.
+ *
+ * A stable release always wins. A component that has only ever published
+ * prereleases would otherwise resolve to nothing, so its newest prerelease is
+ * used and flagged — a prerelease can never shadow a stable version, because
+ * this only reaches for one when no stable version exists.
+ *
+ * Kept separate from fetching so the choice is testable without a network.
+ *
+ * @param {string[]} tagNames - Tag names as published by the repository
+ * @param {{ tagPrefix?: string | null }} [options]
+ * @returns {{ version: string | null, prerelease: boolean }}
+ */
+export function selectInstallVersion(tagNames, { tagPrefix = null } = {}) {
+  const versions = (tagNames || [])
+    .map(name => matchTagVersion(name, tagPrefix))
+    .filter(v => v !== null);
+
+  const stable = versions.filter(v => !v.includes('-')).sort(compareSemverDesc);
+  if (stable.length > 0) return { version: stable[0], prerelease: false };
+
+  const newest = [...versions].sort(compareSemverDesc);
+  return newest.length > 0
+    ? { version: newest[0], prerelease: true }
+    : { version: null, prerelease: false };
+}
+
+/**
+ * Fetch a repository's tag names and choose the version to install.
+ *
+ * @param {string} repo - GitHub repo in "org/name" format
+ * @param {{ tagPrefix?: string | null }} [options]
+ * @returns {{ version: string | null, prerelease: boolean }}
+ * @throws {Error} On network/API failures
+ */
+export function fetchInstallVersion(repo, { tagPrefix = null } = {}) {
+  let tags;
+  try {
+    const json = withRateLimitRetrySync(() => fetchTagsJsonSync(repo), `${repo} tags`);
+    tags = JSON.parse(json);
+  } catch (err) {
+    const msg = err.stderr?.toString().trim() || err.message || 'unknown error';
+    throw new Error(`Failed to fetch tags for ${repo}: ${sanitizeError(msg)}`);
+  }
+  if (!Array.isArray(tags)) return { version: null, prerelease: false };
+  return selectInstallVersion(tags.map(t => t.name), { tagPrefix });
+}
+
 function fetchTagsJsonSync(repo) {
   const url = `https://api.github.com/repos/${repo}/tags?per_page=100`;
   const token = getGitHubToken();

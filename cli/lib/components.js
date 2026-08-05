@@ -7,7 +7,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { COMPONENTS_FILE } from './config.js';
 import { loadRegistry } from './registry.js';
-import { fetchLatestTag } from './github.js';
+import { fetchInstallVersion } from './github.js';
 import { inspectLocalSource, resolveLocalPath } from './download.js';
 
 /**
@@ -81,12 +81,13 @@ export async function resolveTarget(nameOrUrl, { branch = null } = {}) {
     version = nameOrUrl.substring(atIndex + 1);
   }
 
-  // Helper: try fetchLatestTag, capture network errors separately
+  // Helper: resolve the version to install, capturing network errors separately
   function tryFetchLatestTag(repo, tagPrefix = null) {
     try {
-      return { version: fetchLatestTag(repo, { tagPrefix }) || null, fetchError: null };
+      const picked = fetchInstallVersion(repo, { tagPrefix });
+      return { version: picked.version, fetchError: null, prerelease: picked.prerelease };
     } catch (err) {
-      return { version: null, fetchError: err.message };
+      return { version: null, fetchError: err.message, prerelease: false };
     }
   }
 
@@ -166,6 +167,9 @@ function resolveGitHubTarget({
     repo,
     version: resolvedVersion,
     fetchError: tag.fetchError,
+    // Only set when resolution fell back to a prerelease on its own; an
+    // explicitly requested version is the caller's own choice to report.
+    isPrerelease: Boolean(tag.prerelease),
     isThirdParty,
     subdir,
     tagPrefix,

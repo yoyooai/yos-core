@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { afterEach, describe, it } from 'node:test';
 import { extractTarball } from '../download.js';
-import { buildTagName, matchTagVersion } from '../github.js';
+import { buildTagName, matchTagVersion, selectInstallVersion } from '../github.js';
 import { resolveTarget } from '../components.js';
 
 const tmpDirs = [];
@@ -211,5 +211,42 @@ describe('upgrade scoping for components inside a repository', () => {
       if (previous === undefined) delete process.env.YOS_DIR;
       else process.env.YOS_DIR = previous;
     }
+  });
+});
+
+describe('choosing the version an install resolves to', () => {
+  it('prefers a stable release over any prerelease', () => {
+    const picked = selectInstallVersion(['v1.0.0', 'v1.1.0-alpha.1', 'v0.9.0']);
+    assert.deepEqual(picked, { version: '1.0.0', prerelease: false });
+  });
+
+  it('falls back to the newest prerelease when no stable release exists', () => {
+    // Without this a component whose whole line is still alpha resolves to no
+    // version, and the documented `yos add <name>` fails outright.
+    const picked = selectInstallVersion(['v0.1.0-alpha.1', 'v0.1.0-alpha.2']);
+    assert.deepEqual(picked, { version: '0.1.0-alpha.2', prerelease: true });
+  });
+
+  it('reports no version when the tag line is empty', () => {
+    assert.deepEqual(selectInstallVersion([]), { version: null, prerelease: false });
+    assert.deepEqual(selectInstallVersion(['not-a-version']), { version: null, prerelease: false });
+  });
+
+  it('chooses within one component tag line only', () => {
+    const tags = [
+      'feishu-v0.1.0-alpha.1',
+      'weixin-v2.0.0',        // a sibling's stable release
+      'v3.0.0',               // a repository-wide release
+    ];
+    // The sibling's stable tag must not satisfy feishu, or feishu would resolve
+    // to a version that was never published for it.
+    assert.deepEqual(
+      selectInstallVersion(tags, { tagPrefix: 'feishu' }),
+      { version: '0.1.0-alpha.1', prerelease: true }
+    );
+    assert.deepEqual(
+      selectInstallVersion(tags, { tagPrefix: 'weixin' }),
+      { version: '2.0.0', prerelease: false }
+    );
   });
 });
