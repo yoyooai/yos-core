@@ -19,7 +19,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
-import { SKILLS_DIR, COMPONENTS_DIR, BIN_DIR } from '../lib/config.js';
+import { SKILLS_DIR, COMPONENTS_DIR, BIN_DIR, CONFIG_DIR } from '../lib/config.js';
 import { loadComponents, saveComponents, resolveTarget, loadTargetRegistryInfo, outputTask } from '../lib/components.js';
 import { acquireSource } from '../lib/download.js';
 import { generateManifest, saveMergeBaseline } from '../lib/manifest.js';
@@ -30,6 +30,7 @@ import { promptYesNo, prompt, promptSecret } from '../lib/prompts.js';
 import { writeEnvEntries } from '../lib/env.js';
 import { hasConfigureHook, runConfigureHook } from '../lib/configure-hook.js';
 import { registerService } from '../lib/service.js';
+import { npmInstallEnv } from '../lib/npm-env.js';
 import { bold, dim, green, red, yellow, cyan, success, error, warn, heading } from '../lib/colors.js';
 
 function printManualCaddyRoutes(result) {
@@ -365,6 +366,7 @@ async function installDeclarative(resolved, skillDir, skipConfirm, jsonOutput, b
           cwd: skillDir,
           stdio: jsonOutput ? 'pipe' : 'inherit',
           timeout: 300000,
+          env: npmInstallEnv(),
         });
         if (!jsonOutput) console.log(`  ${success('npm install complete.')}`);
       } catch (err) {
@@ -402,7 +404,30 @@ async function installDeclarative(resolved, skillDir, skipConfirm, jsonOutput, b
   };
   if (branch) componentEntry.branch = branch;
   components[resolved.name] = componentEntry;
-  saveComponents(components);
+  // An unrecorded component is worse than an uninstalled one: the files are on
+  // disk, so the next `yos add` refuses to continue ("Skill directory already
+  // exists"), and the user has no way to tell what happened. Undo the install
+  // instead of leaving that behind.
+  try {
+    saveComponents(components);
+  } catch (err) {
+    const detail = err?.message || String(err);
+    if (jsonOutput) {
+      console.log(JSON.stringify({
+        action: 'add', component: resolved.name, success: false,
+        error: 'registration_failed',
+        message: `could not record the component: ${detail}`,
+        reply: `Failed to install ${resolved.name}: the component could not be recorded, so the install was undone.`,
+      }));
+    } else {
+      console.error(`  ${error(`Could not record the component: ${detail}`)}`);
+      console.error(`  ${dim(`Nothing is left half-installed — ${resolved.name} was removed again.`)}`);
+      console.error(`  ${dim(`Check that ${CONFIG_DIR} is writable, then retry: yos add ${resolved.name}`)}`);
+    }
+    cleanup(skillDir);
+    fs.rmSync(dataDir, { recursive: true, force: true });
+    process.exit(1);
+  }
 
   // Step 4: Create bin symlinks
   const binResult = linkBins(skillDir, fm.bin);
@@ -551,6 +576,7 @@ async function installDeclarative(resolved, skillDir, skipConfirm, jsonOutput, b
   }
 
   // Step 8: Start service
+  let serviceRunning = null;   // null = this component declares no service
   const service = lifecycle.service;
   if (service && service.entry) {
     console.log(`\n${heading('Starting service...')}`);
@@ -561,6 +587,7 @@ async function installDeclarative(resolved, skillDir, skipConfirm, jsonOutput, b
       type: service.type || 'pm2',
     });
     const serviceName = service.name || ('yos-' + resolved.name);
+    serviceRunning = Boolean(svcResult.success);
     if (svcResult.success) {
       console.log(`  ${success(`${bold(serviceName)} started`)}`);
     } else if (svcResult.crashLooping) {
@@ -577,7 +604,14 @@ async function installDeclarative(resolved, skillDir, skipConfirm, jsonOutput, b
     }
   }
 
-  console.log(`\n${success(`${bold(resolved.name)} installed successfully!`)}`);
+  // "installed successfully" directly under a red "does not stay running" line
+  // reads as success to anyone skimming, and the thing they actually have to do
+  // — fill in credentials — gets lost. Say which of the two happened.
+  if (serviceRunning === false) {
+    console.log(`\n${warn(`${bold(resolved.name)} is installed but not running yet — see the steps above.`)}`);
+  } else {
+    console.log(`\n${success(`${bold(resolved.name)} installed successfully!`)}`);
+  }
 
   // Show PATH hint if bin commands were linked
   if (binResult && Object.keys(binResult).length > 0) {

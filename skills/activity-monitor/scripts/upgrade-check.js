@@ -15,8 +15,48 @@ const YOS_DIR = process.env.YOS_DIR || path.join(os.homedir(), 'yos');
 const MONITOR_DIR = path.join(YOS_DIR, 'activity-monitor');
 const LOG_FILE = path.join(MONITOR_DIR, 'activity.log');
 const COMPONENTS_JSON = path.join(YOS_DIR, '.yos', 'components.json');
-const CORE_RELEASE_REPO = process.env.YOS_RELEASE_REPO?.trim() || null;
+/**
+ * The release repository, from the environment or from the machine's own .env.
+ *
+ * The installer records it in ~/yos/.env, and this script is spawned by the
+ * activity monitor with whatever environment PM2 happens to pass, so reading
+ * only process.env silently disabled every core update check on a machine that
+ * was in fact configured.
+ */
+function resolveCoreReleaseRepo() {
+  const fromEnv = process.env.YOS_RELEASE_REPO?.trim();
+  if (fromEnv) return fromEnv;
+  try {
+    for (const line of fs.readFileSync(path.join(YOS_DIR, '.env'), 'utf8').split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const separator = trimmed.indexOf('=');
+      if (separator === -1) continue;
+      if (trimmed.slice(0, separator).trim() !== 'YOS_RELEASE_REPO') continue;
+      return trimmed.slice(separator + 1).trim().replace(/^["']|["']$/g, '') || null;
+    }
+  } catch { /* no .env on this machine */ }
+  return null;
+}
+
+const CORE_RELEASE_REPO = resolveCoreReleaseRepo();
 const GITHUB_REPO_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*$/;
+
+// Distribution mirror. This script runs from ~/yos/.claude/skills, detached
+// from the installed package, so the default is repeated here rather than
+// imported; test/dist-origin-parity.test.js fails if the two ever disagree.
+const DEFAULT_DIST_BASE = 'https://yoyooai.com/dist';
+const DEFAULT_DIST_OWNERS = 'yoyooai';
+const DIST_BASE = String(process.env.YOS_DIST_BASE ?? DEFAULT_DIST_BASE).trim().replace(/\/+$/, '');
+const DIST_OWNERS = String(process.env.YOS_DIST_OWNERS ?? DEFAULT_DIST_OWNERS)
+  .split(',').map(owner => owner.trim()).filter(Boolean);
+
+function isMirroredRepo(repo) {
+  if (!GITHUB_REPO_PATTERN.test(String(repo || ''))) return false;
+  if (DIST_OWNERS.includes('*')) return true;
+  const owner = String(repo).split('/')[0].toLowerCase();
+  return DIST_OWNERS.some(candidate => candidate.toLowerCase() === owner);
+}
 
 function resolveCommBridgeScript(fileName) {
   const prodPath = path.join(YOS_DIR, '.claude', 'skills', 'comm-bridge', 'scripts', fileName);
@@ -54,7 +94,36 @@ function compareSemver(a, b) {
   return 0;
 }
 
+/**
+ * Tag names from our distribution mirror, or null when it does not apply.
+ * The periodic check must not be the one thing on the machine that still needs
+ * GitHub: on a host that cannot reach it, `git ls-remote` below spends its full
+ * timeout every few hours and reports every component as un-checkable.
+ */
+function mirrorTagNames(repo) {
+  if (!DIST_BASE || !isMirroredRepo(repo)) return null;
+  const url = `${DIST_BASE}/${repo}/tags.json`;
+  try {
+    const output = execFileSync('curl', ['-fsSL', url], {
+      encoding: 'utf8', stdio: 'pipe', timeout: 15000,
+    });
+    const tags = JSON.parse(output);
+    if (!Array.isArray(tags)) return null;
+    return tags.map(tag => String(tag?.name || '')).filter(Boolean);
+  } catch (err) {
+    const detail = err.stderr ? String(err.stderr).trim().split('\n')[0] : err.message;
+    log(`Upgrade check: mirror miss for ${repo} tags (${detail}) — falling back to GitHub`);
+    return null;
+  }
+}
+
 function getLatestTag(repo) {
+  const mirrored = mirrorTagNames(repo);
+  if (mirrored) {
+    if (mirrored.length === 0) return { version: null, error: 'no tags' };
+    return pickLatest(mirrored);
+  }
+
   let output;
   try {
     output = execFileSync('git', [
@@ -65,7 +134,11 @@ function getLatestTag(repo) {
     return { version: null, error: msg };
   }
   if (!output) return { version: null, error: 'no tags' };
-  const versions = output.split('\n')
+  return pickLatest(output.split('\n'));
+}
+
+function pickLatest(lines) {
+  const versions = lines
     .map(line => line.replace(/.*refs\/tags\//, '').replace(/\^{}$/, ''))
     .filter(name => /^v?\d+\.\d+\.\d+/.test(name))
     .map(name => name.replace(/^v/, ''))

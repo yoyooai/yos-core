@@ -4,6 +4,54 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
+## [0.1.0-alpha.4] - 2026-08-05
+
+Found by blocking every GitHub host and installing from zero. The result was not
+a slow install but three hard failures, so a customer whose network cannot reach
+GitHub — measured from a mainland-China host the same day: raw.githubusercontent
+8/8 timeouts, `git clone` failing 2 of 3 attempts at 45s — could not install YOS
+at all, roughly half the time.
+
+### Added
+
+- A distribution mirror on our own domain now serves every artifact an install
+  needs: the release metadata, the packaged release, component archives, the
+  installer itself, the Node.js bootstrap and the prebuilt native binaries.
+  GitHub remains the source of record and is still used as a fallback, which
+  announces itself instead of failing quietly. `scripts/build-dist.mjs` builds
+  the mirror and refuses to publish an incomplete one.
+- `YOS_DIST_BASE` points the CLI and the installer at a different mirror;
+  setting it empty restores the previous GitHub-only behavior. `YOS_DIST_ONLY=1`
+  proves an operation needs nothing but the mirror.
+
+### Fixed
+
+- `install.sh` resolved the release tag inside a command substitution under
+  `set -e`. When GitHub was unreachable it exited with status 7 and printed
+  nothing at all — no error, no hint. It now reports what it could not reach and
+  what to do about it.
+- Node.js was bootstrapped through nvm, whose installer is hosted on
+  raw.githubusercontent and then clones from GitHub, so it could never bootstrap
+  a machine without GitHub access. A pinned Node.js is downloaded from a
+  reachable mirror and verified against its published SHA-256 instead.
+- better-sqlite3, required by comm-bridge, scheduler and web-console, fetched
+  its prebuilt binary from GitHub releases. With GitHub unreachable it fell
+  through to `node-gyp rebuild` and failed for want of Python, so those three
+  could not be installed at all. Prebuilt binaries are now fetched from the
+  mirror, for every Node.js version the installer accepts.
+- `yos upgrade`'s periodic check reached GitHub with `git ls-remote` and spent
+  its whole timeout on a host that cannot reach it, reporting every component as
+  un-checkable.
+- The Caddy binary and its version came from GitHub, so `yos init --https` could
+  not complete without it.
+- `yos add` printed "installed successfully!" directly beneath a red line saying
+  the component's service does not stay running. It now says which of the two
+  happened.
+- An install whose registration write failed left the component on disk but
+  unrecorded, and every later `yos add` refused to continue because the skill
+  directory already existed. The install is now undone, and the message says
+  what to check.
+
 ## [0.1.0-alpha.3] - 2026-08-05
 
 Found by installing 0.1.0-alpha.2 on clean machines and handing the Weixin login

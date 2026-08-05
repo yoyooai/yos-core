@@ -1,18 +1,95 @@
 {
   "version": 1,
   "files": [
-    { "path": "cli/lib/__tests__/self-upgrade.test.js", "minimumTests": 1 },
-    { "path": "cli/lib/__tests__/component-self-upgrade.test.js", "minimumTests": 1 },
-    { "path": "cli/lib/__tests__/self-upgrade-rollback-test-guard.test.js", "minimumTests": 1 },
-    { "path": "test/release-pack.test.js", "minimumTests": 1 },
-    { "path": "test/test-policy.test.js", "minimumTests": 1 },
-    { "path": "test/test-baseline-policy.test.js", "minimumTests": 1 },
-    { "path": "test/verify-test-policy-wiring.test.js", "minimumTests": 1 },
-    { "path": "scripts/test-baseline-policy.js" },
-    { "path": "scripts/test-baselines.json" },
-    { "path": "scripts/test-policy.js" },
-    { "path": "scripts/test-skip-allowlist.json" },
-    { "path": "scripts/critical-test-files.json" },
-    { "path": "scripts/verify.js" }
+    {
+      "path": "cli/lib/__tests__/self-upgrade.test.js",
+      "minimumTests": 1
+    },
+    {
+      "path": "cli/lib/__tests__/component-self-upgrade.test.js",
+      "minimumTests": 1
+    },
+    {
+      "path": "cli/lib/__tests__/self-upgrade-rollback-test-guard.test.js",
+      "minimumTests": 1
+    },
+    {
+      "path": "test/release-pack.test.js",
+      "minimumTests": 1
+    },
+    {
+      "path": "test/test-policy.test.js",
+      "minimumTests": 1
+    },
+    {
+      "path": "test/test-baseline-policy.test.js",
+      "minimumTests": 1
+    },
+    {
+      "path": "test/verify-test-policy-wiring.test.js",
+      "minimumTests": 1
+    },
+    {
+      "path": "scripts/test-baseline-policy.js"
+    },
+    {
+      "path": "scripts/test-baselines.json"
+    },
+    {
+      "path": "scripts/test-policy.js"
+    },
+    {
+      "path": "scripts/test-skip-allowlist.json"
+    },
+    {
+      "path": "scripts/critical-test-files.json"
+    },
+    {
+      "path": "scripts/verify.js"
+    },
+    {
+      "path": "cli/lib/__tests__/dist-origin.test.js",
+      "minimumTests": 10
+    },
+    {
+      "path": "cli/lib/__tests__/dist-mirror-first.test.js",
+      "minimumTests": 5
+    },
+    {
+      "path": "cli/lib/__tests__/dist-origin-parity.test.js",
+      "minimumTests": 12
+    },
+    {
+      "path": "cli/lib/__tests__/npm-env.test.js",
+      "minimumTests": 6
+    },
+    {
+      "path": "cli/lib/dist-origin.js"
+    },
+    {
+      "path": "cli/lib/npm-env.js"
+    },
+    {
+      "path": "scripts/dist-vendor.json"
+    },
+    {
+      "path": "scripts/build-dist.mjs"
+    },
+    {
+      "path": "cli/lib/__tests__/native-prebuild-wiring.test.js",
+      "minimumTests": 3
+    },
+    {
+      "path": "cli/lib/__tests__/add-honest-outcome.test.js",
+      "minimumTests": 4
+    },
+    {
+      "path": "cli/lib/__tests__/release-source-machine-config.test.js",
+      "minimumTests": 5
+    },
+    {
+      "path": "cli/lib/__tests__/self-check-prerelease-only.test.js",
+      "minimumTests": 3
+    }
   ]
 }
