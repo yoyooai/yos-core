@@ -560,8 +560,17 @@ async function installDeclarative(resolved, skillDir, skipConfirm, jsonOutput, b
       skillDir,
       type: service.type || 'pm2',
     });
+    const serviceName = service.name || ('yos-' + resolved.name);
     if (svcResult.success) {
-      console.log(`  ${success(`${bold(service.name || ('yos-' + resolved.name))} started`)}`);
+      console.log(`  ${success(`${bold(serviceName)} started`)}`);
+    } else if (svcResult.crashLooping) {
+      // The component is installed; it just cannot run yet. Saying "started"
+      // here would send the user away believing the work is done, while a
+      // process restarts forever in the background.
+      console.log(`  ${error(`${bold(serviceName)} does not stay running — ${svcResult.error}`)}`);
+      console.log(`  ${dim('Almost always missing configuration. Check what it needs:')}`);
+      console.log(`  ${dim(`  pm2 logs ${serviceName} --err --lines 20`)}`);
+      console.log(`  ${dim(`then fill in ~/yos/.env and run: pm2 restart ${serviceName}`)}`);
     } else {
       console.log(`  ${error(`Failed to start service: ${svcResult.error}`)}`);
       console.log(`  ${dim('You can start it manually later.')}`);

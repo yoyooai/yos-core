@@ -8,6 +8,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { showStatus, showLogs, startServices, stopServices, restartServices } from './commands/service.js';
+import { formatFailure } from './lib/format-failure.js';
 
 // Ensure ~/.local/bin is in PATH (Claude Code installs there)
 const localBin = path.join(os.homedir(), '.local', 'bin');
@@ -149,6 +150,6 @@ Examples:
 }
 
 main().catch((err) => {
-  console.error(err);
+  console.error(formatFailure(err));
   process.exitCode = 1;
 });
