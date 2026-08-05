@@ -82,6 +82,10 @@
     {
       "path": "cli/lib/__tests__/add-honest-outcome.test.js",
       "minimumTests": 4
+    },
+    {
+      "path": "cli/lib/__tests__/release-source-machine-config.test.js",
+      "minimumTests": 5
     }
   ]
 }

@@ -15,7 +15,31 @@ const YOS_DIR = process.env.YOS_DIR || path.join(os.homedir(), 'yos');
 const MONITOR_DIR = path.join(YOS_DIR, 'activity-monitor');
 const LOG_FILE = path.join(MONITOR_DIR, 'activity.log');
 const COMPONENTS_JSON = path.join(YOS_DIR, '.yos', 'components.json');
-const CORE_RELEASE_REPO = process.env.YOS_RELEASE_REPO?.trim() || null;
+/**
+ * The release repository, from the environment or from the machine's own .env.
+ *
+ * The installer records it in ~/yos/.env, and this script is spawned by the
+ * activity monitor with whatever environment PM2 happens to pass, so reading
+ * only process.env silently disabled every core update check on a machine that
+ * was in fact configured.
+ */
+function resolveCoreReleaseRepo() {
+  const fromEnv = process.env.YOS_RELEASE_REPO?.trim();
+  if (fromEnv) return fromEnv;
+  try {
+    for (const line of fs.readFileSync(path.join(YOS_DIR, '.env'), 'utf8').split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const separator = trimmed.indexOf('=');
+      if (separator === -1) continue;
+      if (trimmed.slice(0, separator).trim() !== 'YOS_RELEASE_REPO') continue;
+      return trimmed.slice(separator + 1).trim().replace(/^["']|["']$/g, '') || null;
+    }
+  } catch { /* no .env on this machine */ }
+  return null;
+}
+
+const CORE_RELEASE_REPO = resolveCoreReleaseRepo();
 const GITHUB_REPO_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*$/;
 
 // Distribution mirror. This script runs from ~/yos/.claude/skills, detached
