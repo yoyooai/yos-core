@@ -250,7 +250,11 @@ module.exports = {
       cwd: HOME,
       env: {
         PATH: ENHANCED_PATH,
-        NODE_ENV: 'production'
+        NODE_ENV: 'production',
+        // The port was never passed here, so the service used its own default
+        // while `yos init` could have recorded a different one after finding
+        // 3456 taken. Read the recorded value; the default still matches.
+        WEB_CONSOLE_PORT: readEnvValue('WEB_CONSOLE_PORT', '3456')
       },
       autorestart: true,
       max_restarts: 10,

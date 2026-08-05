@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import dns from 'node:dns/promises';
 import { YOS_DIR, CONFIG_DIR, SKILLS_DIR, COMPONENTS_FILE } from '../lib/config.js';
+import { readRecordedConsolePort } from '../lib/web-console-port.js';
 import { readEnvFile } from '../lib/env.js';
 import { loadComponents } from '../lib/components.js';
 import { fetchLatestTagAsync, compareSemverDesc } from '../lib/github.js';
@@ -545,7 +546,7 @@ function discoverChannels(pm2Procs, env, tmuxSession, components) {
     const hasPassword = !!(env.get('YOS_WEB_PASSWORD') || env.get('WEB_CONSOLE_PASSWORD'));
 
     // Use domain URL if Caddy is running, otherwise localhost + network IP
-    const port = process.env.WEB_CONSOLE_PORT || '3456';
+    const port = readRecordedConsolePort();
     let action, secondaryAction, warning, hint;
     warning = null;
     hint = null;
