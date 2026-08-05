@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { COMPONENTS_FILE } from './config.js';
+import { COMPONENTS_FILE, CONFIG_DIR } from './config.js';
 import { loadRegistry } from './registry.js';
 import { fetchInstallVersion } from './github.js';
 import { inspectLocalSource, resolveLocalPath } from './download.js';
@@ -28,6 +28,13 @@ export function loadComponents() {
  * Save installed components to components.json
  */
 export function saveComponents(components) {
+  // `yos init` creates this directory, but `yos add` can legitimately run before
+  // it exists — installing with --no-init, or an init that did not finish. The
+  // write then failed with a raw ENOENT *after* the component was already on
+  // disk, so it was installed but unrecorded, and the next `yos add` refused to
+  // continue because the skill directory was already there. Same guard as
+  // updateYosConfig in config.js.
+  fs.mkdirSync(CONFIG_DIR, { recursive: true });
   fs.writeFileSync(COMPONENTS_FILE, JSON.stringify(components, null, 2));
 }
 

@@ -105,6 +105,14 @@ ok()    { printf "${GREEN}[yos]${NC} %s\n" "$*"; }
 warn()  { printf "${YELLOW}[yos]${NC} %s\n" "$*"; }
 fail()  { printf "${RED}[yos]${NC} %s\n" "$*" >&2; exit 1; }
 
+# /dev/tty is a device node that is always present, so testing for its existence
+# says nothing about whether a terminal is reachable: with no controlling
+# terminal it exists but cannot be opened. Unattended installs (CI, cloud-init,
+# nohup, setsid) land exactly there — reading from /dev/tty then fails, which
+# either aborts the install or skips a step while still reporting success.
+# Every place that wants to talk to the user must ask this, not test existence.
+_tty_readable() { (: < /dev/tty) 2>/dev/null; }
+
 # ── Resolve install ref ───────────────────────────────────────
 if [ -n "$YOS_RELEASE_REPO" ]; then
   if [[ ! "$YOS_RELEASE_REPO" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
@@ -382,7 +390,7 @@ _has_yes_flag() {
   return 1
 }
 
-if ! _has_yes_flag && [ -t 0 -o -e /dev/tty ]; then
+if ! _has_yes_flag && { [ -t 0 ] || _tty_readable; }; then
   echo ""
   printf '%b' "${YELLOW}${BOLD}"
   echo "  ◆ Security Notice"
@@ -412,7 +420,7 @@ if ! _has_yes_flag && [ -t 0 -o -e /dev/tty ]; then
   printf '%b' "${BOLD}"
   printf "  I understand and want to continue [Y/n]: "
   printf '%b' "${NC}"
-  if [ -e /dev/tty ]; then
+  if _tty_readable; then
     read -r answer < /dev/tty
   else
     read -r answer
@@ -509,7 +517,7 @@ else
   info "Running yos init..."
   echo ""
   local init_exit=0
-  if [ -e /dev/tty ]; then
+  if _tty_readable; then
     yos init ${INIT_ARGS[@]+"${INIT_ARGS[@]}"} < /dev/tty || init_exit=$?
   else
     yos init ${INIT_ARGS[@]+"${INIT_ARGS[@]}"} || init_exit=$?
@@ -518,7 +526,16 @@ else
   if [ "$init_exit" -eq 0 ]; then
     _show_source_hint
   else
+    # yos is installed but unconfigured. Saying so and failing is the whole
+    # point: a caller that only checks the exit status must not read this as a
+    # finished install, or it will hand over a machine that breaks on first use.
     echo ""
+    warn "yos init did not complete (exit code $init_exit)."
+    info "yos itself is installed. Finish the setup with:"
+    echo ""
+    echo "    yos init"
+    echo ""
+    return "$init_exit"
   fi
 fi
 
