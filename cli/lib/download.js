@@ -8,6 +8,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import { getGitHubToken, sanitizeError, withRateLimitRetrySync, buildTagName } from './github.js';
+import { distMirrorUrl, isDistOnly, noteMirrorFallback } from './dist-origin.js';
 import { copyTree } from './fs-utils.js';
 import { parseSkillMd } from './skill.js';
 
@@ -30,10 +31,10 @@ function createDownloadTmpDir() {
 
 /**
  * Download a tarball from a URL using curl.
- * Tries the public endpoint first (works for public repos without auth),
- * then falls back to the authenticated GitHub API if a token is available.
- * This avoids 403 errors when a token lacks org access for public repos.
- * Retries with backoff on GitHub rate limiting.
+ * Origin order: our distribution mirror, then the public GitHub endpoint
+ * (works for public repos without auth), then the authenticated GitHub API if
+ * a token is available — which avoids 403 errors when a token lacks org access
+ * for public repos. Retries with backoff on GitHub rate limiting.
  *
  * @param {string} repo - GitHub repo in "org/name" format
  * @param {string} ref - Git ref (tag name or branch name)
@@ -48,7 +49,28 @@ function curlDownload(repo, ref, refType, tarballPath) {
 }
 
 function curlDownloadOnce(repo, ref, refType, tarballPath) {
-  // 1. Try public endpoint first (no auth needed for public repos)
+  // 1. Our own distribution mirror — the only origin a customer machine is
+  //    guaranteed to reach (see cli/lib/dist-origin.js). Anonymous static file.
+  const mirrorUrl = distMirrorUrl('tarball', { repo, ref, refType });
+  if (mirrorUrl) {
+    try {
+      execFileSync('curl', ['-fsSL', '-o', tarballPath, mirrorUrl], {
+        timeout: 60000,
+        stdio: 'pipe',
+      });
+      return;
+    } catch (err) {
+      if (isDistOnly()) {
+        const detail = String(err?.stderr || err?.message || err).trim().split('\n')[0];
+        throw new Error(
+          `Distribution mirror download failed and YOS_DIST_ONLY is set: ${mirrorUrl} — ${detail}`
+        );
+      }
+      noteMirrorFallback('tarball', `${repo}@${ref}`, err);
+    }
+  }
+
+  // 2. Try public GitHub endpoint (no auth needed for public repos)
   const publicUrl = refType === 'tag'
     ? `https://github.com/${repo}/archive/refs/tags/${ref}.tar.gz`
     : `https://github.com/${repo}/archive/refs/heads/${ref}.tar.gz`;
@@ -64,7 +86,7 @@ function curlDownloadOnce(repo, ref, refType, tarballPath) {
     publicError = err;
   }
 
-  // 2. Fall back to authenticated GitHub API (for private repos)
+  // 3. Fall back to authenticated GitHub API (for private repos)
   const token = getGitHubToken();
   if (!token) {
     // No token available — surface the original public error; retry semantics

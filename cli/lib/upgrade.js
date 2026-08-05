@@ -21,6 +21,7 @@ import { copyTree, syncTree } from './fs-utils.js';
 import { applyCaddyRoutes } from './caddy.js';
 import { smartSync, formatMergeResult } from './smart-merge.js';
 import { restartFromEcosystem, restartManagedProcess } from './pm2.js';
+import { npmInstallEnv } from './npm-env.js';
 
 // ---------------------------------------------------------------------------
 // Version helpers
@@ -504,6 +505,7 @@ function step4_npmInstall(ctx) {
       cwd: ctx.skillDir,
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
+      env: npmInstallEnv(),
     });
     return { step: 4, name: 'npm_install', status: 'done', duration: Date.now() - startTime };
   } catch (err) {
@@ -705,6 +707,7 @@ export function rollback(ctx, deps = {}) {
         execSync('npm install --omit=dev', {
           cwd: ctx.skillDir,
           stdio: ['pipe', 'pipe', 'pipe'],
+          env: npmInstallEnv(),
         });
         results.push({ action: 'restore_dependencies', success: true });
       } catch (err) {

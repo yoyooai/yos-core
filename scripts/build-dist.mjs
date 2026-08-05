@@ -1,0 +1,396 @@
+#!/usr/bin/env node
+/**
+ * Build the YOS distribution mirror: a directory of static files that serves
+ * everything an install needs, so a customer machine never has to reach GitHub.
+ *
+ * The JSON documents deliberately copy GitHub's response shape (`tags.json`
+ * mirrors /repos/:repo/tags, `releases/latest.json` mirrors
+ * /repos/:repo/releases/latest) so the client parses one format no matter which
+ * origin answered. See cli/lib/dist-origin.js for the consuming side.
+ *
+ * Usage:
+ *   node scripts/build-dist.mjs --output <dir> \
+ *     --repo yoyooai/yos-core=. \
+ *     --repo yoyooai/yos-components=../yos-components \
+ *     [--tags 5] [--default-branch main] [--skip-vendor] [--vendor-cache <dir>]
+ *     [--allow-missing-vendor]
+ *
+ * Output layout (under <dir>):
+ *   install.sh                                   installer from the newest core release
+ *   install-<tag>.sh                             the same installer, pinned
+ *   index.json                                  what this build contains, with sha256 per file
+ *   <owner>/<repo>/tags.json                     every mirrored tag
+ *   <owner>/<repo>/releases/latest.json          newest tag, for the installer
+ *   <owner>/<repo>/tarball/tags/<tag>.tar.gz     source archive (GitHub archive shape)
+ *   <owner>/<repo>/raw/<ref>/<path>              small metadata files read at runtime
+ *   <owner>/<repo>/package/<name>-<version>.tgz  npm package (core only)
+ *   vendor/...                                   re-hosted third-party artifacts
+ */
+
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+/** Small files the CLI reads at runtime (see fetchRawFile call sites). */
+const RAW_FILE_NAMES = new Set(['registry.json', 'package.json', 'SKILL.md', 'CHANGELOG.md', 'VERSION']);
+const RAW_MAX_DEPTH = 3;
+
+function parseArgs(argv) {
+  const options = {
+    output: null, repos: [], tags: 5, defaultBranch: 'main',
+    skipVendor: false, allowMissingVendor: false, vendorCache: null,
+  };
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    const value = () => {
+      const next = argv[++i];
+      if (!next) throw new Error(`${arg} requires a value`);
+      return next;
+    };
+    if (arg === '--output') options.output = path.resolve(value());
+    else if (arg === '--repo') {
+      const raw = value();
+      const split = raw.indexOf('=');
+      if (split < 1) throw new Error(`--repo expects owner/name=path (got "${raw}")`);
+      const repo = raw.slice(0, split);
+      if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(repo)) {
+        throw new Error(`--repo expects owner/name (got "${repo}")`);
+      }
+      options.repos.push({ repo, dir: path.resolve(raw.slice(split + 1)) });
+    } else if (arg === '--tags') options.tags = Number(value());
+    else if (arg === '--default-branch') options.defaultBranch = value();
+    else if (arg === '--skip-vendor') options.skipVendor = true;
+    else if (arg === '--allow-missing-vendor') options.allowMissingVendor = true;
+    else if (arg === '--vendor-cache') options.vendorCache = path.resolve(value());
+    else throw new Error(`Unknown argument: ${arg}`);
+  }
+  if (!options.output) throw new Error('--output is required');
+  if (options.repos.length === 0) throw new Error('at least one --repo is required');
+  if (!Number.isInteger(options.tags) || options.tags < 1) throw new Error('--tags must be a positive integer');
+  return options;
+}
+
+function git(dir, args, { encoding = 'utf8' } = {}) {
+  return execFileSync('git', ['-C', dir, ...args], {
+    encoding,
+    maxBuffer: 256 * 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+}
+
+function sha256(filePath) {
+  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+
+/** Newest first: 1.0.0 beats 1.0.0-alpha.1 beats 0.9.9. */
+function compareVersionsDesc(a, b) {
+  const [aBase, aPre] = a.split(/-(.+)/);
+  const [bBase, bPre] = b.split(/-(.+)/);
+  const aParts = aBase.split('.').map(Number);
+  const bParts = bBase.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    const diff = (bParts[i] || 0) - (aParts[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  if (!aPre && bPre) return -1;
+  if (aPre && !bPre) return 1;
+  if (!aPre && !bPre) return 0;
+  return bPre.localeCompare(aPre, 'en');
+}
+
+function versionOf(tag) {
+  const match = String(tag).match(/(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$/);
+  return match ? match[1] : null;
+}
+
+/** Tags of a repository, newest first, keeping any component prefix intact. */
+function listTags(dir, limit) {
+  const all = git(dir, ['tag', '--list'])
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .filter(tag => versionOf(tag) !== null);
+
+  // Group by prefix ("", "feishu", "weixin"): each component line gets its own
+  // most-recent releases, so mirroring N tags never starves a sibling channel.
+  const byPrefix = new Map();
+  for (const tag of all) {
+    const version = versionOf(tag);
+    const prefix = tag.slice(0, tag.length - version.length).replace(/[-v]+$/, '');
+    if (!byPrefix.has(prefix)) byPrefix.set(prefix, []);
+    byPrefix.get(prefix).push(tag);
+  }
+  const kept = [];
+  for (const tags of byPrefix.values()) {
+    tags.sort((a, b) => compareVersionsDesc(versionOf(a), versionOf(b)));
+    kept.push(...tags.slice(0, limit));
+  }
+  return kept;
+}
+
+function writeFileWithDirs(filePath, contents) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, contents);
+}
+
+function writeJson(filePath, value) {
+  writeFileWithDirs(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+/** Raw metadata files at a ref, mirroring only the names the CLI actually reads. */
+function mirrorRawFiles(dir, ref, outDir, record) {
+  const listing = git(dir, ['ls-tree', '-r', '--name-only', ref])
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .filter(entry => {
+      const parts = entry.split('/');
+      return parts.length <= RAW_MAX_DEPTH && RAW_FILE_NAMES.has(parts[parts.length - 1]);
+    });
+
+  for (const entry of listing) {
+    const contents = git(dir, ['show', `${ref}:${entry}`], { encoding: 'buffer' });
+    const target = path.join(outDir, 'raw', ref, entry);
+    writeFileWithDirs(target, contents);
+    record(target);
+  }
+  return listing.length;
+}
+
+function buildRepo({ repo, dir }, options, record) {
+  if (!fs.existsSync(path.join(dir, '.git'))) {
+    throw new Error(`${dir} is not a git checkout (needed for ${repo})`);
+  }
+  const outDir = path.join(options.output, repo);
+  const tags = listTags(dir, options.tags);
+  if (tags.length === 0) throw new Error(`${repo} has no version tags to mirror`);
+
+  const summary = { repo, tags: [], rawFiles: 0, packages: [] };
+
+  // tags.json — GitHub's /tags shape; only `name` is consumed, `commit.sha`
+  // is kept so a human can tell what a mirrored tag actually points at.
+  const tagEntries = tags.map(tag => ({
+    name: tag,
+    commit: { sha: git(dir, ['rev-parse', `${tag}^{commit}`]).trim() },
+  }));
+  const tagsFile = path.join(outDir, 'tags.json');
+  writeJson(tagsFile, tagEntries);
+  record(tagsFile);
+
+  // releases/latest.json — what the installer resolves when no --branch is given.
+  const newest = [...tags].sort((a, b) => compareVersionsDesc(versionOf(a), versionOf(b)))[0];
+  const latestFile = path.join(outDir, 'releases', 'latest.json');
+  writeJson(latestFile, {
+    tag_name: newest,
+    name: newest,
+    prerelease: /-(?:alpha|beta|rc)/i.test(newest),
+    commit: git(dir, ['rev-parse', `${newest}^{commit}`]).trim(),
+  });
+  record(latestFile);
+
+  for (const tag of tags) {
+    // Source archive, same shape as a GitHub archive: one top-level directory,
+    // so the client's `tar --strip-components=1` keeps working unchanged.
+    const archive = path.join(outDir, 'tarball', 'tags', `${tag}.tar.gz`);
+    fs.mkdirSync(path.dirname(archive), { recursive: true });
+    const prefix = `${repo.split('/')[1]}-${versionOf(tag)}/`;
+    execFileSync('git', ['-C', dir, 'archive', `--format=tar.gz`, `--prefix=${prefix}`, '-o', archive, tag], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    record(archive);
+    summary.rawFiles += mirrorRawFiles(dir, tag, outDir, record);
+    summary.tags.push(tag);
+  }
+
+  // The default branch is mirrored too: component upgrade reads SKILL.md from
+  // it and self-upgrade reads package.json from it. Named explicitly rather
+  // than taken from HEAD — a release must never mirror whatever branch the
+  // build machine happened to have checked out.
+  const defaultBranch = options.defaultBranch;
+  try {
+    git(dir, ['rev-parse', '--verify', `${defaultBranch}^{commit}`]);
+  } catch {
+    throw new Error(`${repo} has no branch "${defaultBranch}" (pass --default-branch)`);
+  }
+  summary.rawFiles += mirrorRawFiles(dir, defaultBranch, outDir, record);
+  summary.defaultBranch = defaultBranch;
+
+  return { summary, outDir, tags, newest };
+}
+
+/**
+ * Publish the installer that goes with a release.
+ *
+ * The download page serves this exact file, so it is built from the released
+ * tag rather than copied by hand: a hand-copied installer is how the page and
+ * the release drift apart without anyone noticing.
+ */
+function publishInstaller({ repo, dir }, tag, options, record) {
+  const contents = git(dir, ['show', `${tag}:scripts/install.sh`], { encoding: 'buffer' });
+  for (const name of ['install.sh', `install-${tag}.sh`]) {
+    const target = path.join(options.output, name);
+    writeFileWithDirs(target, contents);
+    fs.chmodSync(target, 0o644);
+    record(target);
+  }
+  return `install-${tag}.sh`;
+}
+
+/**
+ * Pack the npm artifact for a tag from a throwaway worktree, so the package is
+ * built from exactly the released tree and never from local edits.
+ */
+function packRelease({ repo, dir }, tag, outDir, record) {
+  const worktree = fs.mkdtempSync(path.join(fs.realpathSync(process.env.TMPDIR || '/tmp'), 'yos-dist-pack-'));
+  const stage = fs.mkdtempSync(path.join(fs.realpathSync(process.env.TMPDIR || '/tmp'), 'yos-dist-out-'));
+  try {
+    git(dir, ['worktree', 'add', '--detach', worktree, tag]);
+    const output = execFileSync('npm', ['pack', '--ignore-scripts', '--pack-destination', stage], {
+      cwd: worktree,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const fileName = output.trim().split('\n').at(-1);
+    const target = path.join(outDir, 'package', fileName);
+    writeFileWithDirs(target, fs.readFileSync(path.join(stage, fileName)));
+    record(target);
+    return fileName;
+  } finally {
+    try { git(dir, ['worktree', 'remove', '--force', worktree]); } catch { /* best effort */ }
+    fs.rmSync(worktree, { recursive: true, force: true });
+    fs.rmSync(stage, { recursive: true, force: true });
+  }
+}
+
+function download(url, target, cacheDir) {
+  const cached = cacheDir ? path.join(cacheDir, crypto.createHash('sha256').update(url).digest('hex').slice(0, 16) + '-' + path.basename(url)) : null;
+  if (cached && fs.existsSync(cached)) {
+    writeFileWithDirs(target, fs.readFileSync(cached));
+    return true;
+  }
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  try {
+    execFileSync('curl', ['-fsSL', '--max-time', '300', '-o', target, url], { stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch {
+    return false;
+  }
+  if (cached) {
+    fs.mkdirSync(path.dirname(cached), { recursive: true });
+    fs.copyFileSync(target, cached);
+  }
+  return true;
+}
+
+function expand(template, values) {
+  return template.replace(/\{(\w+)\}/g, (_, key) => String(values[key] ?? `{${key}}`));
+}
+
+/**
+ * Re-host third-party artifacts. Runs where GitHub *is* reachable (our build
+ * machine) precisely so that the install machine never needs it.
+ */
+function buildVendor(options, record) {
+  const spec = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts', 'dist-vendor.json'), 'utf8'));
+  const vendorDir = path.join(options.output, 'vendor');
+  const summary = { caddy: [], prebuilds: [], missing: [] };
+
+  const caddy = spec.caddy;
+  writeJson(path.join(vendorDir, 'caddy', 'latest.json'), { tag_name: `v${caddy.version}` });
+  record(path.join(vendorDir, 'caddy', 'latest.json'));
+  for (const fileTemplate of caddy.files) {
+    const file = expand(fileTemplate, { version: caddy.version });
+    const url = expand(caddy.source, { version: caddy.version, file });
+    const target = path.join(vendorDir, 'caddy', `v${caddy.version}`, file);
+    if (download(url, target, options.vendorCache)) {
+      record(target);
+      summary.caddy.push(file);
+    } else {
+      summary.missing.push(url);
+    }
+  }
+
+  for (const prebuild of spec.prebuilds) {
+    for (const abi of prebuild.abis) {
+      for (const target of prebuild.targets) {
+        const file = expand(prebuild.file, { version: prebuild.version, abi, ...target });
+        const url = expand(prebuild.source, { version: prebuild.version, file });
+        // prebuild-install expands <host>/v<version>/<file>, so the version
+        // directory here is part of the contract, not decoration.
+        const outFile = path.join(vendorDir, prebuild.package, `v${prebuild.version}`, file);
+        if (download(url, outFile, options.vendorCache)) {
+          record(outFile);
+          summary.prebuilds.push(file);
+        } else {
+          summary.missing.push(url);
+        }
+      }
+    }
+  }
+  return summary;
+}
+
+function main() {
+  const options = parseArgs(process.argv.slice(2));
+  fs.mkdirSync(options.output, { recursive: true });
+
+  const files = [];
+  const record = filePath => {
+    files.push({
+      path: path.relative(options.output, filePath).split(path.sep).join('/'),
+      bytes: fs.statSync(filePath).size,
+      sha256: sha256(filePath),
+    });
+  };
+
+  const repos = [];
+  for (const entry of options.repos) {
+    const built = buildRepo(entry, options, record);
+    // Only the core package is installed by npm; components are installed from
+    // their source subdirectory, so packing them would be dead weight.
+    if (entry.repo.endsWith('/yos-core')) {
+      built.summary.packages.push(packRelease(entry, built.newest, built.outDir, record));
+      built.summary.installer = publishInstaller(entry, built.newest, options, record);
+    }
+    repos.push(built.summary);
+    console.log(`[dist] ${entry.repo}: ${built.summary.tags.length} tag(s), newest ${built.newest}`);
+  }
+
+  let vendor = null;
+  if (!options.skipVendor) {
+    vendor = buildVendor(options, record);
+    console.log(`[dist] vendor: ${vendor.caddy.length} caddy, ${vendor.prebuilds.length} prebuild(s)`);
+    for (const missing of vendor.missing) console.error(`[dist] not mirrored: ${missing}`);
+    // A half-populated vendor tree is worse than none: prebuild-install accepts
+    // a single host, so one missing file sends that install to node-gyp, which
+    // needs a compiler and Python and fails on a stock server.
+    if (vendor.missing.length > 0 && !options.allowMissingVendor) {
+      throw new Error(
+        `${vendor.missing.length} vendor artifact(s) could not be mirrored — fix the source or pass --allow-missing-vendor`
+      );
+    }
+  } else {
+    console.log('[dist] vendor: skipped');
+  }
+
+  const indexPath = path.join(options.output, 'index.json');
+  writeJson(indexPath, {
+    schemaVersion: 1,
+    generator: 'scripts/build-dist.mjs',
+    repos,
+    vendor,
+    files: files.sort((a, b) => a.path.localeCompare(b.path, 'en')),
+  });
+  console.log(`[dist] ${files.length} file(s) → ${options.output}`);
+  console.log(`[dist] index: ${indexPath}`);
+}
+
+try {
+  main();
+} catch (error) {
+  console.error(`Distribution build failed: ${error.message}`);
+  process.exit(1);
+}

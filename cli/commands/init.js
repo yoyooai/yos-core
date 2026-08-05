@@ -23,6 +23,8 @@ import {
   refreshSplitInstructions,
 } from '../lib/runtime/instruction-builder.js';
 import { deployManifestTemplate } from '../lib/runtime/tmux-env.js';
+import { npmInstallEnv } from '../lib/npm-env.js';
+import { distVendorUrl, noteMirrorFallback } from '../lib/dist-origin.js';
 import {
   installGlobalPackage,
   installCodex,
@@ -881,6 +883,7 @@ function installSkillDependencies() {
         cwd: skillDir,
         stdio: 'inherit',
         timeout: 300000,
+        env: npmInstallEnv(),
       });
     } catch {
       console.log(`  ${warn(`Failed to install ${bold(entry.name)} dependencies`)}`);
@@ -1317,6 +1320,19 @@ function detectPlatform() {
  */
 function getLatestCaddyVersion() {
   const FALLBACK_VERSION = '2.10.2';
+  // Our mirror first: on a machine that cannot reach GitHub the API call below
+  // burns 15s per install and then silently pins whatever this file happened to
+  // hard-code, which is how an installer quietly drifts years behind.
+  const mirrorUrl = distVendorUrl('caddy/latest.json');
+  if (mirrorUrl) {
+    try {
+      const output = execFileSync('curl', ['-fsSL', mirrorUrl], {
+        encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 15000,
+      });
+      const version = (JSON.parse(output).tag_name || '').replace(/^v/, '');
+      if (version) return version;
+    } catch { /* fall through to GitHub */ }
+  }
   try {
     const output = execSync(
       'curl -fsSL https://api.github.com/repos/caddyserver/caddy/releases/latest',
@@ -1346,16 +1362,32 @@ function downloadCaddy() {
   console.log(`  ${dim(`Latest Caddy version: v${version}`)}`);
 
   const filename = `caddy_${version}_${platform}_${arch}.tar.gz`;
-  const url = `https://github.com/caddyserver/caddy/releases/download/v${version}/${filename}`;
+  const githubUrl = `https://github.com/caddyserver/caddy/releases/download/v${version}/${filename}`;
+  const mirrorUrl = distVendorUrl(`caddy/v${version}/${filename}`);
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-caddy-'));
   const tarballPath = path.join(tmpDir, filename);
 
   try {
     console.log(`  ${cyan('Downloading Caddy...')}`);
-    execSync(`curl -fsSL -o "${tarballPath}" "${url}"`, {
-      stdio: 'pipe',
-      timeout: 120000,
-    });
+    // Mirror first, GitHub second: --https must not depend on GitHub being up.
+    let downloaded = false;
+    if (mirrorUrl) {
+      try {
+        execFileSync('curl', ['-fsSL', '-o', tarballPath, mirrorUrl], {
+          stdio: 'pipe',
+          timeout: 120000,
+        });
+        downloaded = true;
+      } catch (err) {
+        noteMirrorFallback('vendor', `caddy v${version} (${platform}/${arch})`, err);
+      }
+    }
+    if (!downloaded) {
+      execFileSync('curl', ['-fsSL', '-o', tarballPath, githubUrl], {
+        stdio: 'pipe',
+        timeout: 120000,
+      });
+    }
 
     // Extract just the caddy binary
     execSync(`tar xzf "${tarballPath}" -C "${tmpDir}" caddy`, {

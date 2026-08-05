@@ -8,6 +8,7 @@ import { readdirSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { npmInstallEnv } from '../cli/lib/npm-env.js';
 
 const root = join(fileURLToPath(import.meta.url), '..', '..');
 const skillsDir = join(root, 'skills');
@@ -21,5 +22,5 @@ for (const name of readdirSync(skillsDir, { withFileTypes: true })) {
   const dependencies = JSON.parse(readFileSync(pkg, 'utf8')).dependencies || {};
   if (Object.keys(dependencies).length === 0) continue;
   console.log(`[pretest] Installing deps for skills/${name.name}`);
-  execFileSync('npm', ['install', '--omit=dev'], { cwd: dir, stdio: 'inherit' });
+  execFileSync('npm', ['install', '--omit=dev'], { cwd: dir, stdio: 'inherit', env: npmInstallEnv() });
 }

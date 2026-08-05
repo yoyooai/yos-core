@@ -82,9 +82,26 @@ YOS_REPO="${YOS_REPO:-}"
 # host on the download page — means the hosted copy is a byte-identical copy of
 # this file, so the two cannot drift apart unnoticed.
 YOS_RELEASE_REPO="${YOS_RELEASE_REPO:-yoyooai/yos-core}"
-NODE_VERSION="24"               # LTS-track major version
+
+# Distribution mirror. Everything this script must download is served from here,
+# because GitHub is not reliably reachable where YOS gets installed (measured
+# 2026-08-05 from a mainland-China host: raw.githubusercontent 8/8 timeouts,
+# `git clone` 2 of 3 timing out at 45s, release assets unusable). GitHub remains
+# the source of record and is still tried as a fallback.
+# Keep the default in sync with cli/lib/dist-origin.js — one dash, so that an
+# explicitly empty value disables the mirror instead of restoring the default.
+YOS_DIST_BASE="${YOS_DIST_BASE-https://yoyooai.com/dist}"
+
+# Node.js is pinned and SHA-256 verified rather than installed through nvm:
+# nvm's own installer lives on raw.githubusercontent and then clones from
+# GitHub, so it cannot bootstrap a machine that has no GitHub access.
+NODE_VERSION="${YOS_NODE_VERSION:-24.19.0}"
 MIN_NODE_MAJOR=20
-NVM_INSTALL_URL="https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh"
+NODE_MIRROR="${YOS_NODE_MIRROR:-https://cdn.npmmirror.com/binaries/node}"
+DOWNLOAD_CONNECT_TIMEOUT="${YOS_DOWNLOAD_CONNECT_TIMEOUT:-8}"
+DOWNLOAD_MAX_TIME="${YOS_DOWNLOAD_MAX_TIME:-120}"
+NODE_ARCHIVE_MAX_BYTES=134217728
+NODE_SHASUMS_MAX_BYTES=262144
 
 # ── Colors (disabled if not a terminal) ───────────────────────
 if [ -t 1 ]; then
@@ -113,6 +130,67 @@ fail()  { printf "${RED}[yos]${NC} %s\n" "$*" >&2; exit 1; }
 # Every place that wants to talk to the user must ask this, not test existence.
 _tty_readable() { (: < /dev/tty) 2>/dev/null; }
 
+# ── Distribution mirror ───────────────────────────────────────
+# A credential-free HTTPS URL with no query string or fragment: artifact URLs
+# have to stay copy-pasteable, cacheable and safe to print in a log.
+validate_dist_base() {
+  [[ "$1" =~ ^https://[^/@?#[:space:]]+(/[^@?#[:space:]]*)?$ ]]
+}
+
+if [ -n "$YOS_DIST_BASE" ] && ! validate_dist_base "$YOS_DIST_BASE"; then
+  fail "YOS_DIST_BASE must be a credential-free HTTPS URL without query parameters or fragments. Repair: export YOS_DIST_BASE=https://yoyooai.com/dist && retry."
+fi
+
+# Print the mirror URL for a path, or fail (status 1) when no mirror is set.
+dist_url() {
+  [ -n "$YOS_DIST_BASE" ] || return 1
+  printf '%s/%s\n' "${YOS_DIST_BASE%/}" "$1"
+}
+
+download_to() {
+  local url="$1" output="$2" max_bytes="$3"
+  curl -fL --silent --show-error --retry 2 --retry-delay 1 \
+    --connect-timeout "$DOWNLOAD_CONNECT_TIMEOUT" --max-time "$DOWNLOAD_MAX_TIME" \
+    --max-redirs 5 --max-filesize "$max_bytes" --proto '=https' --proto-redir '=https' \
+    -o "$output" "$url"
+}
+
+# Resolve the newest published release into LATEST_TAG.
+# Mirror first, GitHub second, and a loud failure last: the previous version of
+# this script resolved the tag inside a command substitution under `set -e`, so
+# an unreachable GitHub killed the install with no message at all and exit 7.
+LATEST_TAG=""
+resolve_latest_tag() {
+  local url raw tag
+  LATEST_TAG=""
+
+  if url="$(dist_url "${YOS_RELEASE_REPO}/releases/latest.json")"; then
+    if ! raw="$(curl -fsSL --connect-timeout "$DOWNLOAD_CONNECT_TIMEOUT" \
+      --max-time "$DOWNLOAD_MAX_TIME" "$url" 2>/dev/null)"; then
+      raw=""
+      warn "Could not read $url — trying GitHub" >&2
+    fi
+    tag="$(printf '%s' "$raw" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)"
+    if [ -n "$tag" ]; then
+      LATEST_TAG="$tag"
+      return 0
+    fi
+  fi
+
+  if ! raw="$(curl -fsSL --connect-timeout "$DOWNLOAD_CONNECT_TIMEOUT" \
+    --max-time "$DOWNLOAD_MAX_TIME" \
+    "https://api.github.com/repos/${YOS_RELEASE_REPO}/releases/latest" 2>/dev/null)"; then
+    raw=""
+  fi
+  tag="$(printf '%s' "$raw" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)"
+  if [ -n "$tag" ]; then
+    warn "Resolved the latest release from GitHub — the distribution mirror did not answer" >&2
+    LATEST_TAG="$tag"
+    return 0
+  fi
+  return 1
+}
+
 # ── Resolve install ref ───────────────────────────────────────
 if [ -n "$YOS_RELEASE_REPO" ]; then
   if [[ ! "$YOS_RELEASE_REPO" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
@@ -131,12 +209,10 @@ if [ -z "$BRANCH" ]; then
   if [ -z "$YOS_RELEASE_REPO" ]; then
     fail "No release repository configured. Pass --branch <tag-or-branch> with YOS_REPO."
   fi
-  LATEST_TAG="$(curl -fsSL "https://api.github.com/repos/${YOS_RELEASE_REPO}/releases/latest" 2>/dev/null \
-    | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')"
-  if [ -n "$LATEST_TAG" ]; then
+  if resolve_latest_tag; then
     BRANCH="$LATEST_TAG"
   else
-    fail "Could not resolve the latest YOS release. Retry later or pass --branch <tag-or-branch>."
+    fail "Could not resolve the latest YOS release from ${YOS_DIST_BASE:-(no mirror)} or GitHub. Repair: check network access, or pass --branch <tag-or-branch> to install a known version."
   fi
 fi
 
@@ -226,39 +302,185 @@ ensure_tmux() {
   ok "tmux: installed"
 }
 
-# ── Prerequisite: Node.js (via nvm) ──────────────────────────
+# ── Prerequisite: xz (Linux Node.js archives are .tar.xz) ────
+xz_package_name() {
+  if command -v apt-get &>/dev/null; then
+    printf '%s\n' 'xz-utils'
+  else
+    printf '%s\n' 'xz'
+  fi
+}
+
+xz_repair_command() {
+  local prefix=''
+  if [ "$(id -u)" -ne 0 ]; then
+    prefix='sudo '
+  fi
+  if command -v apt-get &>/dev/null; then
+    printf '%sapt-get install -y xz-utils\n' "$prefix"
+  elif command -v dnf &>/dev/null; then
+    printf '%sdnf install -y xz\n' "$prefix"
+  elif command -v yum &>/dev/null; then
+    printf '%syum install -y xz\n' "$prefix"
+  else
+    printf '%s\n' 'install the xz command with the system package manager'
+  fi
+}
+
+ensure_xz() {
+  if [ "$OS" != "linux" ]; then
+    return
+  fi
+  if command -v xz &>/dev/null; then
+    return
+  fi
+  local package repair
+  package="$(xz_package_name)"
+  repair="$(xz_repair_command)"
+  install_system_package "$package"
+  if ! command -v xz &>/dev/null; then
+    fail "xz is required to extract the Linux Node.js archive, but it is still unavailable after installing $package. Repair: $repair, then retry."
+  fi
+  ok "xz: installed ($package)"
+}
+
+file_sha256() {
+  local file_path="$1"
+  if command -v sha256sum &>/dev/null; then
+    sha256sum "$file_path" | cut -d' ' -f1
+  else
+    shasum -a 256 "$file_path" | cut -d' ' -f1
+  fi
+}
+
+# ── Prerequisite: Node.js (verified binary, no GitHub) ───────
+persist_node_path() {
+  local marker='# yos-managed: Node.js PATH'
+  # shellcheck disable=SC2016
+  local export_line='export PATH="$HOME/.local/node-current/bin:$PATH"'
+  mkdir -p "$HOME"
+  if ! grep -Fqx "$export_line" "$HOME/.profile" 2>/dev/null; then
+    if ! grep -Fqx "$marker" "$HOME/.profile" 2>/dev/null; then
+      printf '\n%s\n' "$marker" >> "$HOME/.profile"
+    fi
+    printf '%s\n' "$export_line" >> "$HOME/.profile"
+  fi
+  export PATH="$HOME/.local/node-current/bin:$PATH"
+}
+
+install_node_binary() {
+  if ! validate_dist_base "$NODE_MIRROR"; then
+    fail "YOS_NODE_MIRROR must be a credential-free HTTPS URL without query parameters or fragments. Repair: export YOS_NODE_MIRROR=https://cdn.npmmirror.com/binaries/node && retry."
+  fi
+  local platform archive_ext archive_name base_url work_dir archive shasums
+  local expected_sha actual_sha archive_listing extraction_repair
+  local install_root version_dir extracted_dir link_path
+  case "$OS" in
+    linux) platform="linux"; archive_ext="tar.xz" ;;
+    macos) platform="darwin"; archive_ext="tar.gz" ;;
+    *) fail "No Node.js binary bootstrap is available for $OS/$ARCH." ;;
+  esac
+  if [ "$OS" = "linux" ]; then
+    ensure_xz
+    extraction_repair="$(xz_repair_command)"
+  else
+    extraction_repair='verify that tar and gzip are available, then retry'
+  fi
+
+  archive_name="node-v${NODE_VERSION}-${platform}-${ARCH}.${archive_ext}"
+  base_url="${NODE_MIRROR%/}/v${NODE_VERSION}"
+  work_dir="$(mktemp -d "${TMPDIR:-/tmp}/yos-node.XXXXXX")"
+  archive="$work_dir/$archive_name"
+  shasums="$work_dir/SHASUMS256.txt"
+
+  info "Downloading Node.js v${NODE_VERSION} checksums from ${base_url}/SHASUMS256.txt"
+  if ! download_to "${base_url}/SHASUMS256.txt" "$shasums" "$NODE_SHASUMS_MAX_BYTES"; then
+    rm -rf "$work_dir"
+    fail "Could not download Node.js checksums. Repair: export YOS_NODE_MIRROR=https://your-reachable-mirror.example/binaries/node and retry."
+  fi
+  expected_sha="$(awk -v file="$archive_name" '$2 == file || $2 == "*" file { print $1 }' "$shasums")"
+  if [[ ! "$expected_sha" =~ ^[a-f0-9]{64}$ ]]; then
+    rm -rf "$work_dir"
+    fail "Node.js checksum list has no single valid SHA-256 entry for $archive_name; nothing was installed."
+  fi
+
+  info "Downloading Node.js v${NODE_VERSION} from ${base_url}/${archive_name}"
+  if ! download_to "${base_url}/${archive_name}" "$archive" "$NODE_ARCHIVE_MAX_BYTES"; then
+    rm -rf "$work_dir"
+    fail "Could not download Node.js. Repair: export YOS_NODE_MIRROR=https://your-reachable-mirror.example/binaries/node and retry."
+  fi
+  if [ ! -s "$archive" ]; then
+    rm -rf "$work_dir"
+    fail "Node.js archive is empty; nothing was installed."
+  fi
+  actual_sha="$(file_sha256 "$archive")"
+  if [ "$actual_sha" != "$expected_sha" ]; then
+    rm -rf "$work_dir"
+    fail "Node.js archive SHA-256 verification failed; nothing was installed."
+  fi
+
+  extracted_dir="$work_dir/node-v${NODE_VERSION}-${platform}-${ARCH}"
+  archive_listing="$work_dir/archive.list"
+  if ! tar -tf "$archive" > "$archive_listing"; then
+    rm -rf "$work_dir"
+    fail "Node.js archive could not be read by tar. Repair: $extraction_repair."
+  fi
+  if ! awk -v root="node-v${NODE_VERSION}-${platform}-${ARCH}/" \
+    'index($0, root) != 1 { bad=1 } END { exit bad }' "$archive_listing"; then
+    rm -rf "$work_dir"
+    fail "Node.js archive contains paths outside its expected directory; nothing was installed."
+  fi
+  if ! tar -xf "$archive" -C "$work_dir"; then
+    rm -rf "$work_dir"
+    fail "Node.js archive extraction failed after its paths passed validation. Repair: $extraction_repair."
+  fi
+  if [ ! -x "$extracted_dir/bin/node" ] || [ ! -x "$extracted_dir/bin/npm" ]; then
+    rm -rf "$work_dir"
+    fail "Verified Node.js archive is missing executable node or npm files; nothing was installed."
+  fi
+
+  install_root="$HOME/.local"
+  version_dir="$install_root/node-v${NODE_VERSION}-${platform}-${ARCH}"
+  link_path="$install_root/node-current"
+  mkdir -p "$install_root"
+  if [ -e "$link_path" ] && [ ! -L "$link_path" ]; then
+    rm -rf "$work_dir"
+    fail "$link_path already exists and is not a symlink; move it aside and retry."
+  fi
+  if [ -e "$version_dir" ] && [ ! -d "$version_dir" ]; then
+    rm -rf "$work_dir"
+    fail "$version_dir already exists and is not a directory; move it aside and retry."
+  fi
+  if [ -d "$version_dir" ]; then
+    if [ ! -x "$version_dir/bin/node" ] || [ ! -x "$version_dir/bin/npm" ] \
+      || [ "$("$version_dir/bin/node" -v 2>/dev/null)" != "v${NODE_VERSION}" ]; then
+      rm -rf "$work_dir"
+      fail "$version_dir exists but is not a complete Node.js v${NODE_VERSION} installation; move it aside and retry."
+    fi
+  else
+    mv "$extracted_dir" "$version_dir"
+  fi
+  ln -sfn "$version_dir" "$link_path"
+  rm -rf "$work_dir"
+  persist_node_path
+  ok "node: $(node -v) (verified SHA-256: $actual_sha)"
+}
+
 ensure_node() {
-  # Check if Node.js + npm exist and meet minimum version
+  # An existing Node.js that meets the minimum is left alone.
   if command -v node &>/dev/null && command -v npm &>/dev/null; then
     local current_major
     current_major="$(node -v | sed 's/v//' | cut -d. -f1)"
-    if [ "$current_major" -ge "$MIN_NODE_MAJOR" ]; then
+    if [[ "$current_major" =~ ^[0-9]+$ ]] && [ "$current_major" -ge "$MIN_NODE_MAJOR" ]; then
       ok "node: $(node -v) (meets >= v${MIN_NODE_MAJOR} requirement)"
       return
     fi
-    warn "node: $(node -v) is below minimum v${MIN_NODE_MAJOR}, upgrading..."
+    warn "node: $(node -v) is below minimum v${MIN_NODE_MAJOR}, installing a verified Node.js binary..."
   elif command -v node &>/dev/null; then
-    warn "node found but npm is missing, installing via nvm..."
+    warn "node found but npm is missing, installing a verified Node.js binary..."
   fi
 
-  # Install or load nvm
-  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
-
-  if [ ! -s "$NVM_DIR/nvm.sh" ]; then
-    info "Installing nvm..."
-    curl -fsSL "$NVM_INSTALL_URL" | bash
-  fi
-
-  # Load nvm into current shell
-  # shellcheck source=/dev/null
-  . "$NVM_DIR/nvm.sh"
-
-  info "Installing Node.js v${NODE_VERSION} via nvm..."
-  nvm install "$NODE_VERSION"
-  nvm use "$NODE_VERSION"
-  nvm alias default "$NODE_VERSION"
-
-  ok "node: $(node -v)"
+  install_node_binary
 }
 
 # ── Ensure PATH in shell profile ─────────────────────────────
@@ -330,8 +552,22 @@ install_yos() {
     warn "yos is already installed (${current_version}). Upgrading..."
   fi
 
-  local install_url="${YOS_REPO}#${BRANCH}"
-  info "Installing yos from configured source (${BRANCH})..."
+  # Prefer the packaged release on our mirror. `npm install -g <git-url>` makes
+  # npm clone from GitHub, which is the single most likely thing to fail on a
+  # customer machine; a tarball over HTTPS from our own domain does not.
+  local install_url="${YOS_REPO}#${BRANCH}" source_label="git (${BRANCH})"
+  local package_url package_version
+  package_version="${BRANCH#v}"
+  if package_url="$(dist_url "${YOS_RELEASE_REPO}/package/yos-${package_version}.tgz")"; then
+    if curl -fsI --connect-timeout "$DOWNLOAD_CONNECT_TIMEOUT" --max-time 30 \
+      -o /dev/null "$package_url" 2>/dev/null; then
+      install_url="$package_url"
+      source_label="release package (${BRANCH})"
+    else
+      warn "No release package for ${BRANCH} on the distribution mirror — installing from git, which needs GitHub"
+    fi
+  fi
+  info "Installing yos from ${source_label}..."
 
   # If npm global prefix is not user-writable (system-installed node),
   # use sudo for npm install -g
@@ -367,9 +603,9 @@ printf '%b' "  ${BOLD}Give your AI a life.${NC}"
 echo ""
 echo ""
 
-# Warn if running as root (nvm and yos should run as a normal user)
+# Warn if running as root (yos keeps its state under a user's home directory)
 if [ "$(id -u)" -eq 0 ]; then
-  warn "Running as root is not recommended. YOS and nvm work best under a regular user account."
+  warn "Running as root is not recommended. YOS works best under a regular user account."
   warn "Press Ctrl+C to abort, or wait 5 seconds to continue..."
   sleep 5
 fi

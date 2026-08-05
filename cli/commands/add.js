@@ -30,6 +30,7 @@ import { promptYesNo, prompt, promptSecret } from '../lib/prompts.js';
 import { writeEnvEntries } from '../lib/env.js';
 import { hasConfigureHook, runConfigureHook } from '../lib/configure-hook.js';
 import { registerService } from '../lib/service.js';
+import { npmInstallEnv } from '../lib/npm-env.js';
 import { bold, dim, green, red, yellow, cyan, success, error, warn, heading } from '../lib/colors.js';
 
 function printManualCaddyRoutes(result) {
@@ -365,6 +366,7 @@ async function installDeclarative(resolved, skillDir, skipConfirm, jsonOutput, b
           cwd: skillDir,
           stdio: jsonOutput ? 'pipe' : 'inherit',
           timeout: 300000,
+          env: npmInstallEnv(),
         });
         if (!jsonOutput) console.log(`  ${success('npm install complete.')}`);
       } catch (err) {

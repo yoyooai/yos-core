@@ -1,0 +1,32 @@
+{
+  "comment": [
+    "Third-party artifacts re-hosted on our distribution mirror so that no",
+    "required install step depends on GitHub. Consumed by scripts/build-dist.mjs.",
+    "better-sqlite3 ABIs: 115 = Node 20, 127 = Node 22, 137 = Node 24."
+  ],
+  "caddy": {
+    "version": "2.10.2",
+    "source": "https://github.com/caddyserver/caddy/releases/download/v{version}/{file}",
+    "files": [
+      "caddy_{version}_linux_amd64.tar.gz",
+      "caddy_{version}_linux_arm64.tar.gz",
+      "caddy_{version}_mac_amd64.tar.gz",
+      "caddy_{version}_mac_arm64.tar.gz"
+    ]
+  },
+  "prebuilds": [
+    {
+      "package": "better-sqlite3",
+      "version": "12.6.2",
+      "source": "https://github.com/WiseLibs/better-sqlite3/releases/download/v{version}/{file}",
+      "file": "better-sqlite3-v{version}-node-v{abi}-{platform}-{arch}.tar.gz",
+      "abis": [115, 127, 137],
+      "targets": [
+        { "platform": "linux", "arch": "x64" },
+        { "platform": "linux", "arch": "arm64" },
+        { "platform": "darwin", "arch": "x64" },
+        { "platform": "darwin", "arch": "arm64" }
+      ]
+    }
+  ]
+}

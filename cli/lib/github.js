@@ -5,9 +5,56 @@
 
 import { execSync, execFileSync, execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
+import { distMirrorUrl, isDistOnly, noteMirrorFallback } from './dist-origin.js';
 
 const execFileAsync = promisify(execFileCb);
 let _cachedToken = undefined;
+
+/**
+ * Read a document from our distribution mirror.
+ *
+ * Every metadata read tries the mirror before GitHub, because GitHub is not
+ * reliably reachable where YOS is installed (see cli/lib/dist-origin.js). The
+ * mirror serves anonymous static files, so no credentials are involved.
+ *
+ * @returns {string|null} The document, or null when the mirror does not apply
+ * @throws When the mirror applies but the read fails and fallback is disabled
+ */
+function fetchFromMirrorSync(kind, target, label) {
+  const url = distMirrorUrl(kind, target);
+  if (!url) return null;
+  try {
+    return execFileSync('curl', ['-fsSL', url], {
+      encoding: 'utf8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    if (isDistOnly()) throw mirrorOnlyError(kind, label, url, err);
+    noteMirrorFallback(kind, label, err);
+    return null;
+  }
+}
+
+async function fetchFromMirrorAsync(kind, target, label) {
+  const url = distMirrorUrl(kind, target);
+  if (!url) return null;
+  try {
+    const { stdout } = await execFileAsync('curl', ['-fsSL', url], {
+      encoding: 'utf8', timeout: 10000,
+    });
+    return stdout;
+  } catch (err) {
+    if (isDistOnly()) throw mirrorOnlyError(kind, label, url, err);
+    noteMirrorFallback(kind, label, err);
+    return null;
+  }
+}
+
+function mirrorOnlyError(kind, label, url, err) {
+  const detail = String(err?.stderr || err?.message || err).trim().split('\n')[0];
+  return new Error(
+    `Distribution mirror read failed (${kind} ${label}) and YOS_DIST_ONLY is set: ${url} — ${detail}`
+  );
+}
 
 function authenticationHeaders(token, additionalHeaders = []) {
   return [`Authorization: Bearer ${token}`, ...additionalHeaders].join('\n') + '\n';
@@ -183,6 +230,9 @@ export function fetchRawFile(repo, filePath, branch = 'main') {
 }
 
 function fetchRawFileOnce(repo, filePath, branch) {
+  const mirrored = fetchFromMirrorSync('raw', { repo, filePath, branch }, `${repo}/${filePath}`);
+  if (mirrored !== null) return mirrored;
+
   const publicUrl = `https://raw.githubusercontent.com/${repo}/${branch}/${filePath}`;
   const token = getGitHubToken();
   let authenticatedError;
@@ -348,6 +398,9 @@ export function fetchInstallVersion(repo, { tagPrefix = null } = {}) {
 }
 
 function fetchTagsJsonSync(repo) {
+  const mirrored = fetchFromMirrorSync('tags', { repo }, `${repo} tags`);
+  if (mirrored !== null) return mirrored;
+
   const url = `https://api.github.com/repos/${repo}/tags?per_page=100`;
   const token = getGitHubToken();
   let authenticatedError;
@@ -372,6 +425,9 @@ function fetchTagsJsonSync(repo) {
 }
 
 async function fetchTagsJsonAsync(repo) {
+  const mirrored = await fetchFromMirrorAsync('tags', { repo }, `${repo} tags`);
+  if (mirrored !== null) return mirrored;
+
   const url = `https://api.github.com/repos/${repo}/tags?per_page=100`;
   const token = getGitHubToken();
   let authenticatedError;
