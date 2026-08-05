@@ -141,10 +141,8 @@ export function executeTestGate({
   root,
   baselines,
   verifyExecutedTestsImpl,
-  verifyExecutedTestCountsImpl,
 }) {
-  const counts = verifyExecutedTestsImpl(root, baselines);
-  return verifyExecutedTestCountsImpl(counts, baselines) === counts;
+  return verifyExecutedTestsImpl(root, baselines);
 }
 
 function verifyReproduciblePack(root = ROOT) {
@@ -211,30 +209,44 @@ export function runVerification({
     return false;
   }
   let failed = false;
-  let countsVerified = !runPrerequisites;
+  let approvedBaselines = null;
+  let counts = null;
 
   try {
     verifyTestPolicyImpl({ root });
     if (runPrerequisites) {
       verifyVersionsImpl(root);
-      const baselines = testBaselines ?? loadApprovedTestBaselines(path.join(root, 'scripts', 'test-baselines.json'));
-      countsVerified = executeTestGateImpl({
+      approvedBaselines = testBaselines ?? loadApprovedTestBaselines(path.join(root, 'scripts', 'test-baselines.json'));
+      counts = executeTestGateImpl({
         root,
-        baselines,
+        baselines: approvedBaselines,
         verifyExecutedTestsImpl,
-        verifyExecutedTestCountsImpl,
       });
-      verifyAuditsImpl(root);
     }
-    verifyReproduciblePackImpl(root);
   } catch (error) {
     failed = true;
     console.error(`\n[verify] FAILED: ${error.message}`);
   }
 
-  if (!failed && runPrerequisites && !countsVerified) {
+  if (!failed && runPrerequisites) {
+    try {
+      verifyExecutedTestCountsImpl(counts, approvedBaselines);
+    } catch (error) {
+      failed = true;
+      console.error(`\n[verify] FAILED: ${error.message}`);
+    }
+  }
+
+  try {
+    if (!failed && runPrerequisites) {
+      verifyAuditsImpl(root);
+    }
+    if (!failed) {
+      verifyReproduciblePackImpl(root);
+    }
+  } catch (error) {
     failed = true;
-    console.error('\n[verify] FAILED: executed-test counts were never verified');
+    console.error(`\n[verify] FAILED: ${error.message}`);
   }
 
   try {

@@ -70,3 +70,15 @@ gate 调用和最终消费判断都存在且顺序正确。
 - 开发侧最终复跑：Jest 195/195、Node 1065/1065，npm run verify PASS。
 
 这仍不是权限边界；受保护分支上的 required check 和作者之外的独立验收继续是外部闸门。
+
+## executed-test 只交回数据
+
+2026-08-05 按“门禁不许交回结论，只许交回数据”收口最后一层执行门禁：
+
+- `executeTestGate` 只返回原始执行计数，不再在 gate 内返回布尔放行结论。
+- `runVerification` 在主验证 `try/catch` 外统一调用 `verifyExecutedTestCountsImpl(counts, approvedBaselines)`，再决定是否进入审计和打包。
+- `true`、`undefined`、空值、对象或 warning-only 吞错返回都会在审计和打包前失败，不能再伪装成 PASS。
+- 静态守卫同步要求四件事同时存在且顺序正确：原始计数返回、计数状态声明、外层 validator、validator 先于审计和打包。
+
+开发侧最终复跑：`test/verify-test-policy-wiring.test.js` 与 `test/test-policy.test.js` 共 `13/13` 通过。
+这仍属于开发侧证据，不替代小A独立复验。

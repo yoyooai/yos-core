@@ -206,21 +206,36 @@ export function verifyTestBaselineGuard(root) {
   ].join('\n'), baselines.node));
 
   const verifySource = fs.readFileSync(path.join(root, 'scripts', 'verify.js'), 'utf8');
-  const testIndex = /^\s*const counts = verifyExecutedTestsImpl\(root, baselines\);\s*$/m.exec(verifySource)?.index ?? -1;
-  const countIndex = /^\s*return verifyExecutedTestCountsImpl\(counts, baselines\) === counts;\s*$/m.exec(verifySource)?.index ?? -1;
-  const gateIndex = /^\s*countsVerified = executeTestGateImpl\(\{\s*$/m.exec(verifySource)?.index ?? -1;
-  const auditIndex = verifySource.indexOf('verifyAuditsImpl(root);');
-  const packIndex = verifySource.indexOf('verifyReproduciblePackImpl(root);');
-  const resultIndex = /^\s*if \(!failed && runPrerequisites && !countsVerified\) \{\s*$/m.exec(verifySource)?.index ?? -1;
-  if (testIndex < 0 || countIndex < 0 || gateIndex < 0) {
+  const gateReturnIndex = /^\s*return verifyExecutedTestsImpl\(root, baselines\);\s*$/m.exec(verifySource)?.index ?? -1;
+  const legacyVerdictIndex = /^\s*return verifyExecutedTestCountsImpl\(counts, baselines\) === counts;\s*$/m.exec(verifySource)?.index ?? -1;
+  const runIndex = verifySource.indexOf('export function runVerification({');
+  const runSource = runIndex >= 0 ? verifySource.slice(runIndex) : '';
+  const decisionStart = runSource.indexOf('let failed = false;');
+  const decisionSource = decisionStart >= 0 ? runSource.slice(decisionStart) : runSource;
+  const declarationIndex = /^\s*let counts = null;\s*$/m.exec(decisionSource)?.index ?? -1;
+  const tryIndex = /^\s*try \{\s*$/m.exec(decisionSource)?.index ?? -1;
+  const gateIndex = /^\s*counts = executeTestGateImpl\(\{\s*$/m.exec(decisionSource)?.index ?? -1;
+  const catchIndex = /^\s*\} catch \(error\) \{\s*$/m.exec(decisionSource)?.index ?? -1;
+  const validatorIndex = /^\s*verifyExecutedTestCountsImpl\(counts, approvedBaselines\);\s*$/m.exec(decisionSource)?.index ?? -1;
+  const auditIndex = decisionSource.indexOf('verifyAuditsImpl(root);');
+  const packIndex = decisionSource.indexOf('verifyReproduciblePackImpl(root);');
+  if (legacyVerdictIndex >= 0) {
+    throw new Error('executed-test gate must return raw counts');
+  }
+  if (gateReturnIndex < 0 || gateIndex < 0) {
     throw new Error('executed-test gate is missing from verification');
   }
-  if (resultIndex < 0) {
-    throw new Error('executed-test verification result is not enforced');
+  if (validatorIndex < 0) {
+    throw new Error('executed-test count validator is missing from verification');
   }
-  if (auditIndex < 0 || packIndex < 0 || testIndex > countIndex
-    || gateIndex > auditIndex || gateIndex > packIndex
-    || resultIndex < auditIndex || resultIndex < packIndex) {
+  if (tryIndex < 0 || declarationIndex < 0 || declarationIndex > tryIndex) {
+    throw new Error('executed-test verification state must be declared before the verification try block');
+  }
+  if (catchIndex < 0 || validatorIndex < catchIndex) {
+    throw new Error('executed-test count validator must be enforced after the verification catch block');
+  }
+  if (auditIndex < 0 || packIndex < 0
+    || gateIndex > catchIndex || validatorIndex > auditIndex || validatorIndex > packIndex) {
     throw new Error('executed-test gate must run before audits and packaging');
   }
 }
