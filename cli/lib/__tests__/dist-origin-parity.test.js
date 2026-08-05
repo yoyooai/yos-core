@@ -119,6 +119,18 @@ describe('upgrade check does not require GitHub', () => {
 });
 
 describe('a machine records where it was installed from', () => {
+  it('records it even when init is skipped', () => {
+    // --no-init is a documented option, so the recording cannot live only in
+    // `yos init`: a machine installed that way would never learn where it came
+    // from, and `yos upgrade --self` would stay dead on it forever.
+    assert.match(installSh, /record_release_source\(\) \{/);
+    const noInitBranch = installSh.slice(installSh.indexOf('Skipping yos init'));
+    assert.match(noInitBranch.slice(0, 200), /record_release_source/);
+    // Append-only: an operator's existing choice must survive a re-install.
+    const recorder = installSh.slice(installSh.indexOf('record_release_source() {'));
+    assert.match(recorder.slice(0, 600), /grep -q .\^YOS_RELEASE_REPO=/);
+  });
+
   it('hands the resolved release repository to yos init', () => {
     // Without this, `yos upgrade --self` on a fresh machine answers
     // "YOS_RELEASE_REPO is not configured": a customer can install YOS and then

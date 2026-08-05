@@ -547,6 +547,24 @@ FISH_EOF
   export PATH="$HOME/.local/bin:$HOME/yos/bin:$PATH"
 }
 
+# Record where this machine was installed from, so `yos upgrade --self` has an
+# answer. `yos init` records it too, but only if it runs: --no-init is a
+# documented option, and a machine installed that way would otherwise never know
+# its own release source. Append-only, and never overwrites an existing value —
+# `yos init` reads .env the same way.
+record_release_source() {
+  [ -n "$YOS_RELEASE_REPO" ] || return 0
+  local env_file="$HOME/yos/.env"
+  if [ -f "$env_file" ] && grep -q '^YOS_RELEASE_REPO=' "$env_file" 2>/dev/null; then
+    return 0
+  fi
+  mkdir -p "$HOME/yos" || return 0
+  {
+    printf '\n# YOS release source (recorded by the installer)\n'
+    printf 'YOS_RELEASE_REPO=%s\n' "$YOS_RELEASE_REPO"
+  } >> "$env_file" || return 0
+}
+
 # ── Install YOS ─────────────────────────────────────────────
 install_yos() {
   if command -v yos &>/dev/null; then
@@ -740,6 +758,7 @@ if [ "$NO_INIT" = true ]; then
   local shell_rc
   shell_rc="$(_detect_shell_rc)"
   info "Skipping yos init (--no-init)."
+  record_release_source
   echo ""
   if [ -n "$shell_rc" ]; then
     info "To initialize later, open a new terminal or run:"
@@ -757,6 +776,7 @@ else
   # Hand the resolved release repository to init so the machine records where it
   # was installed from; otherwise `yos upgrade --self` has nothing to go on.
   export YOS_RELEASE_REPO
+  record_release_source
   echo ""
   local init_exit=0
   if _tty_readable; then
