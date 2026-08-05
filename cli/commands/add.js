@@ -27,7 +27,7 @@ import { parseSkillMd, detectComponentType } from '../lib/skill.js';
 import { linkBins } from '../lib/bin.js';
 import { applyCaddyRoutes } from '../lib/caddy.js';
 import { promptYesNo, prompt, promptSecret } from '../lib/prompts.js';
-import { writeEnvEntries, findUnsetRequiredConfig } from '../lib/env.js';
+import { writeEnvEntries, findUnsetRequiredConfig, describeRequiredConfig } from '../lib/env.js';
 import { hasConfigureHook, runConfigureHook } from '../lib/configure-hook.js';
 import { registerService } from '../lib/service.js';
 import { npmInstallEnv } from '../lib/npm-env.js';
@@ -603,7 +603,12 @@ async function installDeclarative(resolved, skillDir, skipConfirm, jsonOutput, b
       // sending the user to read crash logs for something we know.
       const unset = findUnsetRequiredConfig(config.required);
       if (unset.length > 0) {
-        console.log(`  ${dim(`Required and not set in ~/yos/.env: ${unset.join(', ')}`)}`);
+        console.log(`  ${dim('Required and not set in ~/yos/.env:')}`);
+        // The component declares where each value comes from; printing the name
+        // alone leaves the customer to go hunting for it.
+        for (const { name, description } of describeRequiredConfig(config.required, unset)) {
+          console.log(`  ${dim(`  ${name}${description ? ` — ${description}` : ''}`)}`);
+        }
         console.log(`  ${dim(`Add them to ~/yos/.env, then run: yos start`)}`);
       } else {
         console.log(`  ${dim('Almost always missing configuration. Check what it needs:')}`);

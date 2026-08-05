@@ -66,6 +66,35 @@ export function findUnsetRequiredConfig(required, { env = process.env, readEnv =
 }
 
 /**
+ * Pair the names of unset required values with whatever the component said
+ * about them.
+ *
+ * Naming `FEISHU_APP_ID` tells a customer which value is missing but not where
+ * to get it, and the answer is not something we should hardcode per component:
+ * components already declare it (`description` in their `config.required`), we
+ * were simply dropping it on the floor at the moment it was most useful.
+ *
+ * @param {Array<string|{name: string, description?: string}>} required
+ * @param {string[]} names - Names to describe, typically from findUnsetRequiredConfig
+ * @returns {Array<{name: string, description: string}>} description is '' when undeclared
+ */
+export function describeRequiredConfig(required, names) {
+  const wanted = new Set(Array.isArray(names) ? names : []);
+  const described = new Map();
+  if (Array.isArray(required)) {
+    for (const item of required) {
+      const name = typeof item === 'string' ? item : item?.name;
+      if (typeof name !== 'string' || !wanted.has(name)) continue;
+      const description = typeof item === 'object' && typeof item?.description === 'string'
+        ? item.description.trim()
+        : '';
+      described.set(name, description);
+    }
+  }
+  return [...wanted].map((name) => ({ name, description: described.get(name) ?? '' }));
+}
+
+/**
  * Append environment entries to .env file.
  * Skips keys that already exist (append-only, never overwrites).
  *

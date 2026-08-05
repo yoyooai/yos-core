@@ -54,7 +54,10 @@ describe('a service that cannot run says what is missing and what to type', () =
     assert.match(branch, /findUnsetRequiredConfig\(config\.required\)/);
     assert.match(branch, /Required and not set in ~\/yos\/\.env/);
     assert.match(branch, /yos start/);
-    assert.match(addSource, /import \{ writeEnvEntries, findUnsetRequiredConfig \}/);
+    // Pin that it is imported from env.js, not the exact list of named imports:
+    // the list grew on 2026-08-06 and an exact match would fail for a reason
+    // that has nothing to do with what this test is protecting.
+    assert.match(addSource, /import \{[^}]*findUnsetRequiredConfig[^}]*\} from '\.\.\/lib\/env\.js'/);
   });
 
   it('tells the user the loop was stopped, so "not running" is not read as "still trying"', () => {
