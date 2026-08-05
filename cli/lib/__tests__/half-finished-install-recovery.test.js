@@ -17,7 +17,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { afterEach, describe, it } from 'node:test';
 
-import { describeExtractFailure } from '../download.js';
+import { describeExtractFailure, extractTarball } from '../download.js';
 import { refreshSplitInstructions } from '../runtime/instruction-builder.js';
 
 /** The thrown error itself is the subject here, so it has to be captured. */
@@ -98,6 +98,22 @@ describe('an incomplete download says so', () => {
     assert.match(message, /run the same command again/);
     assert.doesNotMatch(message, /tar xzf/);
     assert.doesNotMatch(message, /Unexpected EOF/);
+  });
+
+  it('is what extracting an archive actually reports', () => {
+    // Pinning the helper alone left the call site free to go back to forwarding
+    // tar's stderr, with every test still green. This walks the real path: a
+    // truncated archive on disk, through extractTarball.
+    const dir = tmpDir('yos-extract-real-');
+    const archive = path.join(dir, 'archive.tar.gz');
+    // A real gzip header followed by nothing — what a cut-off download looks like.
+    fs.writeFileSync(archive, Buffer.from([0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03]));
+
+    const result = extractTarball(archive, path.join(dir, 'out'));
+    assert.equal(result.success, false);
+    assert.match(result.error, /incomplete or corrupt/);
+    assert.match(result.error, /Nothing has been changed/);
+    assert.doesNotMatch(result.error, /tar xzf/);
   });
 
   it('separates running out of disk from a bad download', () => {
