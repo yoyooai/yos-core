@@ -74,6 +74,14 @@
     },
     {
       "path": "scripts/build-dist.mjs"
+    },
+    {
+      "path": "cli/lib/__tests__/native-prebuild-wiring.test.js",
+      "minimumTests": 3
+    },
+    {
+      "path": "cli/lib/__tests__/add-honest-outcome.test.js",
+      "minimumTests": 4
     }
   ]
 }
