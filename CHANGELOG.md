@@ -4,8 +4,43 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
+## [0.1.0-alpha.2] - 2026-08-05
+
+Still an alpha: no installation has been run for a full day, and the Weixin
+channel has not completed a real-person QR login.
+
+### Added
+
+- A component can be installed from a subdirectory of a repository, so several
+  components can share one repository. Each keeps its own version line through
+  a tag prefix (`feishu-v…`, `weixin-v…`), and download, install, upgrade,
+  `doctor` and `search` all stay scoped to the component's own directory.
+- `yos add <name>` without a version falls back to the newest prerelease when a
+  component has no stable release yet, and says so. A stable release always
+  wins, so a prerelease cannot displace one.
+
+### Changed
+
+- The repositories moved to the `yoyooai` organisation: `yoyooai/yos-core` and
+  `yoyooai/yos-components`. GitHub redirects the previous addresses, but the
+  registry and the installer now name where things actually live.
+- `scripts/install.sh` carries the release repository as its default, so the
+  copy served from the download page is a byte-identical copy of this file
+  rather than differing from it by one line.
+
 ### Fixed
 
+- The installer decided whether a terminal was reachable by testing that
+  `/dev/tty` exists. That device node is always present, so with no controlling
+  terminal — CI, cloud-init, ansible, `nohup` — the test passed and the read
+  that followed failed: the consent prompt aborted the install outright, and
+  the `yos init` hand-off was skipped while the installer still printed
+  "Installation complete!" and exited 0. A single probe now decides it, and an
+  init that does not finish makes the installer fail.
+- `yos add` failed with a raw `ENOENT` when `~/yos/.yos` did not exist — an
+  install with `--no-init`, or an init that did not finish. The component was
+  already on disk by then, so it was installed but unrecorded, and the retry
+  refused to continue because the skill directory existed.
 - `yos logs activity` and `yos logs scheduler` resolved to `activity-log.txt` and `scheduler-log.txt`, which no service ever writes, so the default `yos logs` always reported "Log file not found". `activity` now reads the activity monitor's own log and `scheduler` reads the output PM2 captures for it.
 - `yos upgrade --self --check` printed the raw `release_source_not_configured` token when no release source was configured. It now reports which variable to set.
 
