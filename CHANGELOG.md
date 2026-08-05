@@ -4,7 +4,22 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
-## [0.1.0-alpha.2] - 2026-08-05
+## [0.1.0-alpha.3] - 2026-08-05
+
+Found by installing 0.1.0-alpha.2 on clean machines and handing the Weixin login
+to a person on another continent from the server.
+
+### Fixed
+
+- `yos add` reported a component's service as started when pm2 had merely
+  accepted the start. A component missing its credentials exits at once and is
+  restarted forever, so the install said "started" while a loop burned in the
+  background — one service reached 371 restarts under that report. The service is
+  now watched briefly after starting, and a process that does not stay up is
+  reported as such, with the command that shows why and what to do next.
+- Every command failure printed the whole error object, so the one sentence that
+  mattered sat under a dozen frames of node internals. Failures now lead with the
+  message and the path; `YOS_DEBUG=1` restores the stack.
 
 Still an alpha: no installation has been run for a full day, and the Weixin
 channel has not completed a real-person QR login.
