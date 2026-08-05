@@ -163,3 +163,53 @@ describe('registry entries for components inside a repository', () => {
     assert.equal(resolved.source.tagPrefix, undefined);
   });
 });
+
+describe('upgrade scoping for components inside a repository', () => {
+  it('reads the component path and tag line from its recorded install source', async () => {
+    const yosDir = makeTmpDir();
+    fs.mkdirSync(path.join(yosDir, '.yos'), { recursive: true });
+    fs.writeFileSync(
+      path.join(yosDir, '.yos', 'components.json'),
+      JSON.stringify({
+        feishu: {
+          version: '0.1.0',
+          repo: 'some-org/channels',
+          source: {
+            type: 'github-release',
+            repo: 'some-org/channels',
+            ref: '0.1.0',
+            refType: 'tag',
+            path: 'channels/001_feishu',
+            tagPrefix: 'feishu',
+          },
+        },
+        solo: {
+          version: '1.0.0',
+          repo: 'some-org/solo',
+          source: { type: 'github-release', repo: 'some-org/solo', ref: '1.0.0', refType: 'tag' },
+        },
+      }),
+      'utf8'
+    );
+
+    // config.js reads YOS_DIR at import time, so the override precedes the import.
+    const previous = process.env.YOS_DIR;
+    process.env.YOS_DIR = yosDir;
+    try {
+      const { getComponentSourceMeta } = await import(
+        `../upgrade.js?subdir-upgrade-scope=${encodeURIComponent(yosDir)}`
+      );
+
+      // Without this an upgrade would download the whole repository over a
+      // component and compare against a sibling's version line.
+      assert.deepEqual(getComponentSourceMeta('feishu'), {
+        subdir: 'channels/001_feishu',
+        tagPrefix: 'feishu',
+      });
+      assert.deepEqual(getComponentSourceMeta('solo'), { subdir: null, tagPrefix: null });
+    } finally {
+      if (previous === undefined) delete process.env.YOS_DIR;
+      else process.env.YOS_DIR = previous;
+    }
+  });
+});
