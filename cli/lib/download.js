@@ -360,9 +360,50 @@ export function extractTarball(tarballPath, destDir, { subdir = null } = {}) {
     return {
       success: false,
       extractedDir: null,
-      error: `Failed to extract tarball: ${err.message}`,
+      error: describeExtractFailure(err, tarballPath),
     };
   }
+}
+
+/**
+ * Say what a failed extraction means, instead of forwarding tar's stderr.
+ *
+ * The raw form of this was what a customer saw when a download was cut short:
+ * "Command failed: tar xzf /tmp/... / gzip: stdin: unexpected end of file /
+ * tar: Unexpected EOF in archive". Every word of that is about tar, and none of
+ * it says the download was incomplete or that retrying is the fix.
+ */
+export function describeExtractFailure(err, tarballPath) {
+  const raw = String(err?.message || err || '');
+  const stderr = String(err?.stderr || '');
+  const combined = `${raw}\n${stderr}`;
+  const size = (() => {
+    try { return fs.statSync(tarballPath).size; } catch { return null; }
+  })();
+
+  const truncated = /unexpected end of file|Unexpected EOF|unexpected end of input|not in gzip format|invalid compressed data/i.test(combined);
+  if (truncated) {
+    const sizeNote = size === null ? '' : ` (got ${size} bytes)`;
+    return [
+      `The downloaded archive is incomplete or corrupt${sizeNote}, so it could not be unpacked.`,
+      'Nothing has been changed. This is almost always a download cut short —',
+      'run the same command again; if it keeps happening, the network or the',
+      'mirror is truncating the file.',
+    ].join('\n');
+  }
+
+  if (/ETIMEDOUT|timed out|timeout/i.test(combined)) {
+    return [
+      'Unpacking the archive took too long and was stopped.',
+      'Nothing has been changed. Try again on a less loaded machine.',
+    ].join('\n');
+  }
+
+  if (/ENOSPC|no space left/i.test(combined)) {
+    return 'Ran out of disk space while unpacking the archive. Nothing has been changed. Free some space and try again.';
+  }
+
+  return `Failed to extract tarball: ${raw}`;
 }
 
 /**

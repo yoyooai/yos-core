@@ -25,6 +25,8 @@ import {
 import { deployManifestTemplate } from '../lib/runtime/tmux-env.js';
 import { npmInstallEnv } from '../lib/npm-env.js';
 import { writeEnvEntries } from '../lib/env.js';
+import { resolveWebConsolePort, readRecordedConsolePort, DEFAULT_WEB_CONSOLE_PORT } from '../lib/web-console-port.js';
+import { readServiceState, judgeSettle } from '../lib/service.js';
 import { distVendorUrl, noteMirrorFallback } from '../lib/dist-origin.js';
 import {
   installGlobalPackage,
@@ -919,6 +921,70 @@ function installSkillDependencies() {
  * @param {string|null} explicitPassword - Password from --web-password flag or env var
  * @returns {string} The password (existing or newly generated)
  */
+/**
+ * Read the console port the user configured, if any.
+ *
+ * @returns {{ port: number, explicit: boolean }}
+ */
+function readConfiguredConsolePort() {
+  const fromEnv = Number(process.env.WEB_CONSOLE_PORT);
+  if (Number.isInteger(fromEnv) && fromEnv > 0) return { port: fromEnv, explicit: true };
+  try {
+    const content = fs.readFileSync(path.join(YOS_DIR, '.env'), 'utf8');
+    const match = content.match(/^\s*WEB_CONSOLE_PORT\s*=\s*(\d+)\s*$/m);
+    if (match) return { port: Number(match[1]), explicit: true };
+  } catch { /* no .env yet */ }
+  return { port: DEFAULT_WEB_CONSOLE_PORT, explicit: false };
+}
+
+/** Record the port so the PM2 entry, the Caddy route and the printed URL agree. */
+function writeConsolePort(port) {
+  const envPath = path.join(YOS_DIR, '.env');
+  let content = '';
+  try { content = fs.readFileSync(envPath, 'utf8'); } catch { return false; }
+  const line = `WEB_CONSOLE_PORT=${port}`;
+  content = /^\s*WEB_CONSOLE_PORT\s*=.*$/m.test(content)
+    ? content.replace(/^\s*WEB_CONSOLE_PORT\s*=.*$/m, line)
+    : `${content.trimEnd()}\n# Web Console port\n${line}\n`;
+  fs.writeFileSync(envPath, content);
+  return true;
+}
+
+/**
+ * Settle which port the console gets, before anything is started or printed.
+ *
+ * @returns {Promise<number>} the port to use; the preferred one when nothing is free
+ */
+async function settleWebConsolePort({ quiet = false } = {}) {
+  const configured = readConfiguredConsolePort();
+  const outcome = await resolveWebConsolePort({
+    preferred: configured.port,
+    explicit: configured.explicit,
+  });
+
+  if (outcome.port === null) {
+    // Starting anyway would be dishonest in the other direction: the service
+    // check after startup reports it as not running, which is the truth.
+    if (!quiet) {
+      console.log(`  ${warn(`Port ${outcome.preferred} is in use${configured.explicit ? '' : ', and so are the nine after it'}.`)}`);
+      console.log(`  ${dim(`Free it, or set WEB_CONSOLE_PORT in ${YOS_DIR}/.env to a port that is free, then run: yos restart`)}`);
+    }
+    return outcome.preferred;
+  }
+
+  if (outcome.moved) {
+    writeConsolePort(outcome.port);
+    if (!quiet) {
+      console.log(`  ${warn(`Port ${outcome.preferred} is in use — the web console will use ${outcome.port} instead.`)}`);
+      console.log(`  ${dim(`Recorded as WEB_CONSOLE_PORT in ${YOS_DIR}/.env`)}`);
+    }
+  } else if (configured.explicit) {
+    writeConsolePort(outcome.port);
+  }
+
+  return outcome.port;
+}
+
 function ensureWebConsolePassword(explicitPassword = null) {
   const envPath = path.join(YOS_DIR, '.env');
   const newKey = 'YOS_WEB_PASSWORD';
@@ -1045,7 +1111,7 @@ function printWebConsoleInfo() {
     const url = `${proto}://${config.domain}/console/`;
     console.log(`    URL:      ${bold(url)}`);
   } else {
-    const port = process.env.WEB_CONSOLE_PORT || '3456';
+    const port = readRecordedConsolePort();
     console.log(`    Local:    ${bold(`http://localhost:${port}/`)}`);
     const ip = getNetworkIP();
     if (ip) {
@@ -1087,7 +1153,14 @@ function initializeDatabases() {
 
 /**
  * Prepare and start core services via PM2 ecosystem config.
- * @returns {number} Number of services successfully started
+ *
+ * Returns the failures as well as the count. Reporting only the number that
+ * started let `yos init` print "3 service(s) started", "initialized
+ * successfully" and a console URL on a machine where the console was crash
+ * looping on a port already in use — the same defect as saying a component
+ * installed when its service could not run.
+ *
+ * @returns {{ started: number, failed: Array<{name: string, status: string}> }}
  */
 function startCoreServices(webPassword = null) {
   installSkillDependencies();
@@ -1097,7 +1170,7 @@ function startCoreServices(webPassword = null) {
   const ecosystemPath = path.join(YOS_DIR, 'pm2', 'ecosystem.config.cjs');
   if (!fs.existsSync(ecosystemPath)) {
     console.log(`  ${warn('ecosystem.config.cjs not found')}`);
-    return 0;
+    return { started: 0, failed: [] };
   }
 
   try {
@@ -1111,28 +1184,57 @@ function startCoreServices(webPassword = null) {
     execSync('pm2 save', { stdio: 'pipe' });
   } catch (err) {
     console.log(`  ${warn(`Failed to start services: ${err.message}`)}`);
-    return 0;
+    return { started: 0, failed: [] };
   }
 
-  // Report status of core services only
+  // Report what the services are actually doing, not what they were doing the
+  // instant pm2 accepted them.
+  //
+  // A snapshot right after `pm2 start` is worthless: a service that cannot bind
+  // its port is still `online` for the first moment, so init used to print a ✓
+  // for a web console that spent the next minute crash looping on EADDRINUSE.
+  // Restarts gained over a short window is the signal that separates the two.
   try {
     const serviceNames = getCoreServiceNames();
-    const list = execSync('pm2 jlist', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
-    const procs = JSON.parse(list);
+    const before = new Map(serviceNames.map(name => [name, readServiceState(name)]));
+    const settleMs = Number(process.env.YOS_SERVICE_SETTLE_MS) || 6000;
+    execSync(`sleep ${Math.max(1, Math.round(settleMs / 1000))}`, { stdio: 'pipe' });
+
     let started = 0;
-    for (const proc of procs) {
-      if (!serviceNames.includes(proc.name)) continue;
-      if (proc.pm2_env?.status === 'online') {
-        console.log(`  ${success(bold(proc.name))}`);
+    const failed = [];
+    for (const name of serviceNames) {
+      const after = readServiceState(name);
+      if (!after) continue;   // not defined on this machine
+      const verdict = judgeSettle(before.get(name), after);
+      if (verdict.success) {
+        console.log(`  ${success(bold(name))}`);
         started++;
       } else {
-        console.log(`  ${error(`${bold(proc.name)}: ${proc.pm2_env?.status || 'unknown'}`)}`);
+        console.log(`  ${error(`${bold(name)}: ${verdict.error}`)}`);
+        failed.push({ name, status: after.status, reason: verdict.error });
       }
     }
-    return started;
+    return { started, failed };
   } catch {
-    return 0;
+    return { started: 0, failed: [] };
   }
+}
+
+/**
+ * Say out loud that init did not finish clean, and how to look.
+ *
+ * @returns {number} exit code contribution: 1 when something is not running
+ */
+function reportServiceOutcome(outcome, { quiet = false } = {}) {
+  const failed = outcome?.failed ?? [];
+  if (failed.length === 0) return 0;
+  if (!quiet) {
+    const names = failed.map((service) => service.name).join(', ');
+    console.log(`\n${warn(`${failed.length} service(s) did not start: ${names}`)}`);
+    console.log(`  ${dim('Look at why with:')} ${dim(`pm2 logs ${failed[0].name} --err --lines 20`)}`);
+    console.log(`  ${dim('Then: yos restart')}`);
+  }
+  return 1;
 }
 
 // ── PM2 boot auto-start ──────────────────────────────────────────
@@ -1537,7 +1639,7 @@ ${siteAddress} {
     redir /console /console/ permanent
     handle /console/* {
         uri strip_prefix /console
-        reverse_proxy localhost:3456
+        reverse_proxy localhost:${readRecordedConsolePort()}
     }
 
     log {
@@ -2412,13 +2514,16 @@ export async function initCommand(args) {
       try { fs.unlinkSync(path.join(YOS_DIR, 'activity-monitor', 'codex-heartbeat-pending.json')); } catch {}
     }
     if (!quiet) console.log(heading('Starting services...'));
-    const servicesStarted = startCoreServices(opts.webPassword);
+    await settleWebConsolePort({ quiet });
+    const serviceOutcome = startCoreServices(opts.webPassword);
+    const servicesStarted = serviceOutcome.started;
     if (servicesStarted > 0) {
       setupPm2Startup();
       if (!quiet) console.log(`\n${green(`${servicesStarted} service(s) started.`)} ${dim('Run "yos status" to check.')}`);
     } else {
       if (!quiet) console.log(`\n${dim('No services to start.')}`);
     }
+    exitCode = reportServiceOutcome(serviceOutcome, { quiet }) || exitCode;
 
     if (selectedRuntime === 'claude' && claudeAuthenticated && !skipConfirm && needsBypassAcceptance()) {
       await guideBypassAcceptance();
@@ -2502,6 +2607,10 @@ export async function initCommand(args) {
     console.log(`  ${success(`Upgrades will come from ${bold(recordedReleaseSource)}`)}`);
   }
 
+  // The console port has to be settled before the Caddyfile names it and before
+  // the service is started under it.
+  await settleWebConsolePort({ quiet });
+
   // Step 8: Configure timezone
   if (!quiet) console.log(`\n${heading('Timezone configuration...')}`);
   await configureTimezone(skipConfirm, false, opts.timezone, quiet);
@@ -2539,20 +2648,26 @@ export async function initCommand(args) {
 
   // Step 11: Start services
   if (!quiet) console.log(`\n${heading('Starting services...')}`);
-  const servicesStarted = startCoreServices(opts.webPassword);
+  const serviceOutcome = startCoreServices(opts.webPassword);
+  const servicesStarted = serviceOutcome.started;
 
   if (servicesStarted > 0) {
     setupPm2Startup();
   }
+  exitCode = reportServiceOutcome(serviceOutcome, { quiet }) || exitCode;
 
   // First-time Claude bypass acceptance (only if Claude runtime and authenticated)
   if (selectedRuntime === 'claude' && claudeAuthenticated && !skipConfirm && needsBypassAcceptance()) {
     await guideBypassAcceptance();
   }
 
-  // Done
+  // Done — but "successfully" has to mean it. A machine whose console never
+  // came up is not an initialized machine, and the user is about to be handed
+  // a URL for it.
   if (!quiet) {
-    console.log(`\n${success(bold('YOS initialized successfully!'))}\n`);
+    console.log(serviceOutcome.failed.length === 0
+      ? `\n${success(bold('YOS initialized successfully!'))}\n`
+      : `\n${warn(bold('YOS initialized, but not everything is running — see above.'))}\n`);
   }
 
   if (servicesStarted > 0 && !quiet) {

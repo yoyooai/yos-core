@@ -117,10 +117,48 @@ export function assertInstructionReady(runtime, { yosDir = YOS_DIR } = {}) {
   return true;
 }
 
-function unsupportedInstructionLayout(markerPath) {
-  return new Error(
-    `Unsupported instruction layout: current YOS split marker is missing at ${markerPath}; initialize a fresh YOS installation.`,
-  );
+/**
+ * The marker is missing but instruction files are already on disk. Two very
+ * different situations look identical from here: an installation predating the
+ * split layout, whose YOS.md and CLAUDE.md may be hand-maintained, or an init
+ * that stopped after writing those files and before writing the marker.
+ *
+ * Converting either one automatically would risk overwriting content we did not
+ * write, so this stays a refusal — but a refusal has to leave the user a way
+ * out. "Initialize a fresh YOS installation" named no files, no commands and no
+ * way to tell which situation this is, which meant a machine whose init failed
+ * once could not be re-initialized by the person who owned it.
+ */
+function unsupportedInstructionLayout(markerPath, { existingFiles = [] } = {}) {
+  const found = existingFiles.filter((filePath) => {
+    try { return fs.existsSync(filePath); } catch { return false; }
+  });
+
+  const lines = [
+    `Unsupported instruction layout: current YOS split marker is missing at ${markerPath}.`,
+  ];
+
+  if (found.length > 0) {
+    lines.push(
+      '',
+      'These instruction files already exist, so this install will not overwrite them:',
+      ...found.map((filePath) => `  ${filePath}`),
+      '',
+      'That happens either on an installation older than the split instruction',
+      'layout, or when an earlier "yos init" stopped before it finished.',
+      '',
+      'To continue, move them aside and initialize again:',
+      ...found.map((filePath) => `  mv ${filePath} ${filePath}.bak`),
+      '  yos init',
+      '',
+      'Nothing is deleted by those commands. If you had edited YOS.md, copy your',
+      'changes back into it after init — it stays the file you edit.',
+    );
+  } else {
+    lines.push('Run "yos init" to create it.');
+  }
+
+  return new Error(lines.join('\n'));
 }
 
 export function buildAllInstructionFiles(options = {}) {
@@ -332,7 +370,7 @@ export function activateFreshSplitInstructions({
 
   const legacyArtifacts = [claude.userPath, claude.outputPath, instructionPaths('codex', { yosDir }).outputPath];
   if (!hadTransactionResidue && legacyArtifacts.some(filePath => fs.existsSync(filePath))) {
-    throw unsupportedInstructionLayout(claude.markerPath);
+    throw unsupportedInstructionLayout(claude.markerPath, { existingFiles: legacyArtifacts });
   }
 
   const userContent = fs.existsSync(claude.userPath)
@@ -392,7 +430,9 @@ export function refreshSplitInstructions({
   recoverSplitTransaction(yosDir, faultInjector);
   const claude = instructionPaths('claude', { yosDir });
   if (!fs.existsSync(claude.markerPath)) {
-    throw unsupportedInstructionLayout(claude.markerPath);
+    throw unsupportedInstructionLayout(claude.markerPath, {
+      existingFiles: [claude.userPath, claude.outputPath, instructionPaths('codex', { yosDir }).outputPath],
+    });
   }
   const marker = JSON.parse(fs.readFileSync(claude.markerPath, 'utf8'));
   const userContent = fs.readFileSync(claude.userPath, 'utf8');

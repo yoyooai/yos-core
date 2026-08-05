@@ -566,6 +566,56 @@ record_release_source() {
 }
 
 # ── Install YOS ─────────────────────────────────────────────
+# An interrupted `npm install -g` leaves its own scratch directory behind
+# (`.yos-XXXXXXXX`, npm's staging name for our package). Every later attempt
+# then dies with ENOTEMPTY or ENOTDIR and prints npm's raw error, so a machine
+# that failed once can never install again without someone logging in to delete
+# a directory. Clear only what is unambiguously ours: that scratch prefix, and a
+# `yos` entry that is a symlink pointing at nothing.
+# Can we install into this npm prefix without sudo?
+#
+# Testing `-w` on the path alone answers "no" for a directory that does not
+# exist yet — which is exactly the state of ~/.local on a fresh account, the
+# very directory this installer tells people to switch to when sudo is
+# unavailable. That made our own advice fail on the retry. A prefix we are
+# allowed to create counts as usable, and is created here so npm does not have
+# to guess either.
+prefix_installable() {
+  local prefix="$1" parent
+  [ -n "$prefix" ] || return 1
+  if [ -d "$prefix" ]; then
+    [ -w "$prefix" ]
+    return
+  fi
+
+  parent="$prefix"
+  while [ ! -e "$parent" ] && [ "$parent" != "/" ]; do
+    parent="$(dirname "$parent")"
+  done
+  [ -w "$parent" ] || return 1
+  mkdir -p "$prefix" 2>/dev/null || return 1
+}
+
+clear_global_leftovers() {
+  local runner="$1" root entry cleared=0
+  root="$(npm root -g 2>/dev/null || echo "")"
+  [ -n "$root" ] && [ -d "$root" ] || return 0
+
+  for entry in "$root"/.yos-*; do
+    [ -e "$entry" ] || [ -L "$entry" ] || continue
+    if ${runner:+$runner} rm -rf "$entry" 2>/dev/null; then cleared=1; fi
+  done
+
+  if [ -L "$root/yos" ] && [ ! -e "$root/yos" ]; then
+    if ${runner:+$runner} rm -f "$root/yos" 2>/dev/null; then cleared=1; fi
+  fi
+
+  if [ "$cleared" -eq 1 ]; then
+    info "Cleared leftovers from an interrupted earlier install in $root"
+  fi
+  return 0
+}
+
 install_yos() {
   if command -v yos &>/dev/null; then
     local current_version
@@ -594,15 +644,31 @@ install_yos() {
   # use sudo for npm install -g
   local npm_prefix
   npm_prefix="$(npm config get prefix 2>/dev/null || echo "")"
-  if [ -n "$npm_prefix" ] && [ -w "$npm_prefix" ]; then
+  if prefix_installable "$npm_prefix"; then
+    clear_global_leftovers ""
+    npm install -g --install-links "$install_url"
+  elif [ "$(id -u)" -eq 0 ]; then
+    clear_global_leftovers ""
     npm install -g --install-links "$install_url"
   else
     warn "npm global directory (${npm_prefix:-unknown}) requires elevated permissions, using sudo..."
-    if [ "$(id -u)" -eq 0 ]; then
-      npm install -g --install-links "$install_url"
-    else
-      sudo npm install -g --install-links "$install_url"
+    # `sudo` that cannot read a password prints its own advice about terminals
+    # and stops, leaving the machine on the version it already had. Say what
+    # went wrong and name the two ways out before that happens.
+    if ! sudo -n true 2>/dev/null; then
+      fail "$(cat <<EOF
+Installing yos needs write access to ${npm_prefix:-the npm global directory}, and sudo here needs a password this install cannot ask for.
+Two ways forward:
+  1. Run the install again from a terminal you can type into, or as a user with passwordless sudo.
+  2. Install without sudo, into your own directory:
+       npm config set prefix "\$HOME/.local"
+       export PATH="\$HOME/.local/bin:\$PATH"
+     then re-run this installer. Add that PATH line to your shell profile to keep it.
+EOF
+)"
     fi
+    clear_global_leftovers "sudo"
+    sudo npm install -g --install-links "$install_url"
   fi
 
   ok "yos: $(yos --version 2>/dev/null || echo 'installed')"

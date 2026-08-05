@@ -43,6 +43,45 @@ describe('yos add reports what actually happened', () => {
   });
 });
 
+describe('a service that cannot run says what is missing and what to type', () => {
+  it('names the values the component declared as required', () => {
+    // The component's SKILL.md already lists them (FEISHU_APP_ID/SECRET). The
+    // old message sent the user to read crash logs for something we knew.
+    const branch = addSource.slice(
+      addSource.indexOf('} else if (svcResult.crashLooping) {'),
+      addSource.indexOf('// "installed successfully" directly under'),
+    );
+    assert.match(branch, /findUnsetRequiredConfig\(config\.required\)/);
+    assert.match(branch, /Required and not set in ~\/yos\/\.env/);
+    assert.match(branch, /yos start/);
+    assert.match(addSource, /import \{ writeEnvEntries, findUnsetRequiredConfig \}/);
+  });
+
+  it('tells the user the loop was stopped, so "not running" is not read as "still trying"', () => {
+    const branch = addSource.slice(
+      addSource.indexOf('} else if (svcResult.crashLooping) {'),
+      addSource.indexOf('// "installed successfully" directly under'),
+    );
+    assert.match(branch, /svcResult\.stopped/);
+    assert.match(branch, /not restarting in the background/);
+  });
+
+  it('watches the process name the component declared', () => {
+    // serviceName must be computed before the start call and handed to it —
+    // registerService otherwise guesses "yos-<name>" and checks the wrong
+    // process, which reports a healthy service as missing.
+    const block = addSource.slice(
+      addSource.indexOf("console.log(`\\n${heading('Starting service...')}`);"),
+      addSource.indexOf('serviceRunning = Boolean(svcResult.success)'),
+    );
+    const nameAt = block.indexOf('const serviceName =');
+    const startAt = block.indexOf('registerService({');
+    assert.ok(nameAt >= 0 && startAt > nameAt,
+      'the service name must be resolved before the service is started');
+    assert.match(block, /serviceName,/);
+  });
+});
+
 describe('a component that cannot be recorded is not left behind', () => {
   it('undoes the install when the registration write fails', () => {
     const registration = addSource.slice(

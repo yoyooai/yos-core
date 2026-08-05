@@ -37,6 +37,35 @@ export function readEnvFile() {
 }
 
 /**
+ * Of the config keys a component declares as required, which ones are not set.
+ *
+ * Checked against the process environment and `~/yos/.env` only — a component
+ * whose configure hook stores values elsewhere can be fully configured and
+ * still show up here, so callers must describe the result as "not found in
+ * .env", never as proof that the component is misconfigured.
+ *
+ * @param {Array<string|{name: string}>} required - SKILL.md `config.required`
+ * @param {{ env?: Record<string, string>, readEnv?: () => Map<string, string> }} [deps]
+ * @returns {string[]} declared names with no value in either place
+ */
+export function findUnsetRequiredConfig(required, { env = process.env, readEnv = readEnvFile } = {}) {
+  if (!Array.isArray(required) || required.length === 0) return [];
+
+  const fromFile = readEnv();
+  const names = required
+    .map((item) => (typeof item === 'string' ? item : item?.name))
+    .filter((name) => typeof name === 'string' && name.length > 0);
+
+  return names.filter((name) => {
+    const fileValue = fromFile.get(name);
+    const envValue = env[name];
+    const hasFileValue = typeof fileValue === 'string' && fileValue.trim() !== '';
+    const hasEnvValue = typeof envValue === 'string' && envValue.trim() !== '';
+    return !hasFileValue && !hasEnvValue;
+  });
+}
+
+/**
  * Append environment entries to .env file.
  * Skips keys that already exist (append-only, never overwrites).
  *
