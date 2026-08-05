@@ -9,7 +9,7 @@ import { YOS_DIR, SKILLS_DIR, COMPONENTS_DIR, getYosConfig } from '../lib/config
 import { bold, dim, green, red, yellow, cyan, success, error, warn, heading } from '../lib/colors.js';
 import { loadRegistry } from '../lib/registry.js';
 import { loadComponents, saveComponents } from '../lib/components.js';
-import { checkForUpdates, getLocalSourceUpgradeError, getRepo, runUpgrade, downloadToTemp, readChangelog, filterChangelog, cleanupTemp } from '../lib/upgrade.js';
+import { checkForUpdates, getLocalSourceUpgradeError, getRepo, getComponentSourceMeta, runUpgrade, downloadToTemp, readChangelog, filterChangelog, cleanupTemp } from '../lib/upgrade.js';
 import {
   checkForCoreUpdates, recoverSelfUpgrade, runSelfUpgrade,
   downloadCoreToTemp, readChangelog as readCoreChangelog,
@@ -471,7 +471,7 @@ async function handleCheckOnly(component, { jsonOutput, branch, beta = false }) 
     if (repo) {
       let dlResult;
       try {
-        dlResult = downloadToTemp(repo, result.latest, branch);
+        dlResult = downloadToTemp(repo, result.latest, branch, getComponentSourceMeta(component));
       } catch (err) {
         dlResult = { success: false, error: err.message };
       }
@@ -652,7 +652,7 @@ async function handleUpgradeFlow(component, { jsonOutput, skipConfirm, skipEval,
 
     let dlResult;
     try {
-      dlResult = downloadToTemp(repo, check.latest, branch);
+      dlResult = downloadToTemp(repo, check.latest, branch, getComponentSourceMeta(component));
     } catch (err) {
       dlResult = { success: false, error: err.message };
     }
@@ -1750,9 +1750,11 @@ export async function searchComponents(args) {
 
   for (const comp of results) {
     const status = installed[comp.name] ? green('[installed]') : '';
+    // Components that share a repository are only distinguishable by their path.
+    const source = comp.path ? `${comp.repo} (${comp.path})` : comp.repo;
     console.log(`${bold(comp.name)} ${status}`);
     console.log(`  ${comp.description}`);
-    console.log(`  Type: ${comp.type} | Repo: ${dim(comp.repo)}`);
+    console.log(`  Type: ${comp.type} | Repo: ${dim(source)}`);
     console.log('');
   }
 

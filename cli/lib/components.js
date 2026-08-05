@@ -5,9 +5,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { COMPONENTS_FILE } from './config.js';
+import { COMPONENTS_FILE, CONFIG_DIR } from './config.js';
 import { loadRegistry } from './registry.js';
-import { fetchLatestTag } from './github.js';
+import { fetchInstallVersion } from './github.js';
 import { inspectLocalSource, resolveLocalPath } from './download.js';
 
 /**
@@ -28,6 +28,13 @@ export function loadComponents() {
  * Save installed components to components.json
  */
 export function saveComponents(components) {
+  // `yos init` creates this directory, but `yos add` can legitimately run before
+  // it exists — installing with --no-init, or an init that did not finish. The
+  // write then failed with a raw ENOENT *after* the component was already on
+  // disk, so it was installed but unrecorded, and the next `yos add` refused to
+  // continue because the skill directory was already there. Same guard as
+  // updateYosConfig in config.js.
+  fs.mkdirSync(CONFIG_DIR, { recursive: true });
   fs.writeFileSync(COMPONENTS_FILE, JSON.stringify(components, null, 2));
 }
 
@@ -81,12 +88,13 @@ export async function resolveTarget(nameOrUrl, { branch = null } = {}) {
     version = nameOrUrl.substring(atIndex + 1);
   }
 
-  // Helper: try fetchLatestTag, capture network errors separately
-  function tryFetchLatestTag(repo) {
+  // Helper: resolve the version to install, capturing network errors separately
+  function tryFetchLatestTag(repo, tagPrefix = null) {
     try {
-      return { version: fetchLatestTag(repo) || null, fetchError: null };
+      const picked = fetchInstallVersion(repo, { tagPrefix });
+      return { version: picked.version, fetchError: null, prerelease: picked.prerelease };
     } catch (err) {
-      return { version: null, fetchError: err.message };
+      return { version: null, fetchError: err.message, prerelease: false };
     }
   }
 
@@ -115,6 +123,10 @@ export async function resolveTarget(nameOrUrl, { branch = null } = {}) {
       tryFetchLatestTag,
       installTarget: nameOrUrl,
       isThirdParty: registry[target].official !== true,
+      // A repository may ship several components, one per subdirectory, each
+      // with its own version line.
+      subdir: registry[target].path || null,
+      tagPrefix: registry[target].tagPrefix || null,
     });
   }
 
@@ -149,10 +161,12 @@ function resolveGitHubTarget({
   tryFetchLatestTag,
   installTarget,
   isThirdParty = true,
+  subdir = null,
+  tagPrefix = null,
 }) {
   const tag = branch
     ? { version: null, fetchError: null }
-    : (version ? { version, fetchError: null } : tryFetchLatestTag(repo));
+    : (version ? { version, fetchError: null } : tryFetchLatestTag(repo, tagPrefix));
   const resolvedVersion = tag.version;
   const ref = branch || resolvedVersion;
   return {
@@ -160,14 +174,23 @@ function resolveGitHubTarget({
     repo,
     version: resolvedVersion,
     fetchError: tag.fetchError,
+    // Only set when resolution fell back to a prerelease on its own; an
+    // explicitly requested version is the caller's own choice to report.
+    isPrerelease: Boolean(tag.prerelease),
     isThirdParty,
+    subdir,
+    tagPrefix,
     source: ref ? {
       type: 'github-release',
       repo,
       ref,
       refType: branch ? 'branch' : 'tag',
+      ...(subdir ? { path: subdir } : {}),
+      ...(tagPrefix ? { tagPrefix } : {}),
     } : null,
-    sourceLabel: `https://github.com/${repo}`,
+    sourceLabel: subdir
+      ? `https://github.com/${repo} (${subdir})`
+      : `https://github.com/${repo}`,
     sourceHeading: 'Repository:',
     sourceReplyLabel: 'Repo',
     installTarget,

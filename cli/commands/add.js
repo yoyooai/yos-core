@@ -166,6 +166,7 @@ export async function addComponent(args) {
         repo: resolved.repo,
         source: resolved.source,
         isThirdParty: resolved.isThirdParty || false,
+        isPrerelease: resolved.isPrerelease || false,
       };
       let reply = `${resolved.name}`;
       if (branch) reply += ` (branch: ${branch})`;
@@ -174,6 +175,7 @@ export async function addComponent(args) {
       reply += `\nType: ${regInfo.type || 'unknown'}`;
       reply += `\n${resolved.sourceReplyLabel}: ${resolved.sourceLabel}`;
       if (resolved.isThirdParty) reply += '\nWarning: Third-party component';
+      if (resolved.isPrerelease) reply += `\nNote: prerelease — ${resolved.version} is the newest version published; no stable release exists yet`;
       if (fetchFailed) {
         output.error = 'fetch_failed';
         output.message = resolved.fetchError;
@@ -197,6 +199,9 @@ export async function addComponent(args) {
       console.log(`${heading(resolved.sourceHeading)} ${dim(resolved.sourceLabel)}`);
       if (resolved.isThirdParty) {
         console.log(warn('Third-party component — not verified by YOS team.'));
+      }
+      if (resolved.isPrerelease) {
+        console.log(warn(`Prerelease — ${resolved.version} is the newest version published; no stable release exists yet.`));
       }
       if (regInfo.description) console.log(`${heading('Description:')} ${regInfo.description}`);
       if (regInfo.type) console.log(`${heading('Type:')} ${regInfo.type}`);
@@ -225,6 +230,10 @@ export async function addComponent(args) {
 
     if (resolved.isThirdParty) {
       console.log(warn('Third-party component — not verified by YOS team.'));
+    }
+
+    if (resolved.isPrerelease) {
+      console.log(warn(`Prerelease — ${resolved.version} is the newest version published; no stable release exists yet.`));
     }
 
     if (regInfo.description) console.log(`${heading('Description:')} ${regInfo.description}`);

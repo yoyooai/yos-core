@@ -250,14 +250,45 @@ export function compareSemverDesc(a, b) {
   return 0;
 }
 
-function parseTagsResponse(jsonStr, { includePrerelease = false } = {}) {
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Build the git tag name for a component version.
+ *
+ * A repository that ships several components needs one version line per
+ * component, so those components carry a tag prefix (`feishu-v0.1.0`).
+ * Single-component repositories keep the bare `v0.1.0` form.
+ *
+ * @param {string} version - Version with or without a leading "v"
+ * @param {string|null} [tagPrefix] - Per-component tag prefix
+ * @returns {string} Full tag name
+ */
+export function buildTagName(version, tagPrefix = null) {
+  const bare = String(version).replace(/^v/, '');
+  return tagPrefix ? `${tagPrefix}-v${bare}` : `v${bare}`;
+}
+
+/**
+ * Match a tag name against the version line selected by `tagPrefix`.
+ * Returns the bare version, or null when the tag belongs to another line.
+ */
+export function matchTagVersion(tagName, tagPrefix = null) {
+  const pattern = tagPrefix
+    ? new RegExp(`^${escapeRegExp(tagPrefix)}-v?(\\d+\\.\\d+\\.\\d+.*)$`)
+    : /^v?(\d+\.\d+\.\d+.*)$/;
+  const match = tagName.match(pattern);
+  return match ? match[1] : null;
+}
+
+function parseTagsResponse(jsonStr, { includePrerelease = false, tagPrefix = null } = {}) {
   const tags = JSON.parse(jsonStr);
   if (!Array.isArray(tags) || tags.length === 0) return null;
 
   let versions = tags
-    .map(t => t.name)
-    .filter(name => /^v?\d+\.\d+\.\d+/.test(name))
-    .map(name => name.replace(/^v/, ''));
+    .map(t => matchTagVersion(t.name, tagPrefix))
+    .filter(v => v !== null);
 
   if (!includePrerelease) {
     versions = versions.filter(v => !v.includes('-'));
@@ -265,6 +296,55 @@ function parseTagsResponse(jsonStr, { includePrerelease = false } = {}) {
 
   versions.sort(compareSemverDesc);
   return versions[0] || null;
+}
+
+/**
+ * Choose the version an install should resolve to from a component's tag line.
+ *
+ * A stable release always wins. A component that has only ever published
+ * prereleases would otherwise resolve to nothing, so its newest prerelease is
+ * used and flagged — a prerelease can never shadow a stable version, because
+ * this only reaches for one when no stable version exists.
+ *
+ * Kept separate from fetching so the choice is testable without a network.
+ *
+ * @param {string[]} tagNames - Tag names as published by the repository
+ * @param {{ tagPrefix?: string | null }} [options]
+ * @returns {{ version: string | null, prerelease: boolean }}
+ */
+export function selectInstallVersion(tagNames, { tagPrefix = null } = {}) {
+  const versions = (tagNames || [])
+    .map(name => matchTagVersion(name, tagPrefix))
+    .filter(v => v !== null);
+
+  const stable = versions.filter(v => !v.includes('-')).sort(compareSemverDesc);
+  if (stable.length > 0) return { version: stable[0], prerelease: false };
+
+  const newest = [...versions].sort(compareSemverDesc);
+  return newest.length > 0
+    ? { version: newest[0], prerelease: true }
+    : { version: null, prerelease: false };
+}
+
+/**
+ * Fetch a repository's tag names and choose the version to install.
+ *
+ * @param {string} repo - GitHub repo in "org/name" format
+ * @param {{ tagPrefix?: string | null }} [options]
+ * @returns {{ version: string | null, prerelease: boolean }}
+ * @throws {Error} On network/API failures
+ */
+export function fetchInstallVersion(repo, { tagPrefix = null } = {}) {
+  let tags;
+  try {
+    const json = withRateLimitRetrySync(() => fetchTagsJsonSync(repo), `${repo} tags`);
+    tags = JSON.parse(json);
+  } catch (err) {
+    const msg = err.stderr?.toString().trim() || err.message || 'unknown error';
+    throw new Error(`Failed to fetch tags for ${repo}: ${sanitizeError(msg)}`);
+  }
+  if (!Array.isArray(tags)) return { version: null, prerelease: false };
+  return selectInstallVersion(tags.map(t => t.name), { tagPrefix });
 }
 
 function fetchTagsJsonSync(repo) {
@@ -331,10 +411,10 @@ async function fetchTagsJsonAsync(repo) {
  * @returns {string|null} Latest version (without 'v' prefix) or null if no matching tags
  * @throws {Error} On network/API failures (callers should catch and handle)
  */
-export function fetchLatestTag(repo, { includePrerelease = false } = {}) {
+export function fetchLatestTag(repo, { includePrerelease = false, tagPrefix = null } = {}) {
   try {
     const json = withRateLimitRetrySync(() => fetchTagsJsonSync(repo), `${repo} tags`);
-    return parseTagsResponse(json, { includePrerelease });
+    return parseTagsResponse(json, { includePrerelease, tagPrefix });
   } catch (err) {
     const msg = err.stderr?.toString().trim() || err.message || 'unknown error';
     throw new Error(`Failed to fetch tags for ${repo}: ${sanitizeError(msg)}`);
@@ -352,10 +432,10 @@ export function fetchLatestTag(repo, { includePrerelease = false } = {}) {
  * @returns {Promise<string|null>} Latest version (without 'v' prefix) or null
  * @throws {Error} On network/API failures
  */
-export async function fetchLatestTagAsync(repo, { includePrerelease = false } = {}) {
+export async function fetchLatestTagAsync(repo, { includePrerelease = false, tagPrefix = null } = {}) {
   try {
     const json = await withRateLimitRetryAsync(() => fetchTagsJsonAsync(repo), `${repo} tags`);
-    return parseTagsResponse(json, { includePrerelease });
+    return parseTagsResponse(json, { includePrerelease, tagPrefix });
   } catch (err) {
     const msg = err.stderr?.toString().trim() || err.message || 'unknown error';
     throw new Error(`Failed to fetch tags for ${repo}: ${sanitizeError(msg)}`);

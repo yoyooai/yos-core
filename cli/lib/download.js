@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
-import { getGitHubToken, sanitizeError, withRateLimitRetrySync } from './github.js';
+import { getGitHubToken, sanitizeError, withRateLimitRetrySync, buildTagName } from './github.js';
 import { copyTree } from './fs-utils.js';
 import { parseSkillMd } from './skill.js';
 
@@ -85,10 +85,11 @@ function curlDownloadOnce(repo, ref, refType, tarballPath) {
  * @param {string} repo - GitHub repo in "org/name" format
  * @param {string} version - Version tag (e.g. "1.0.0", will be prefixed with "v")
  * @param {string} destDir - Destination directory to extract into
+ * @param {{ subdir?: string | null, tagPrefix?: string | null }} [options]
  * @returns {{ success: boolean, extractedDir: string, error?: string }}
  */
-export function downloadArchive(repo, version, destDir) {
-  const tag = version.startsWith('v') ? version : `v${version}`;
+export function downloadArchive(repo, version, destDir, { subdir = null, tagPrefix = null } = {}) {
+  const tag = buildTagName(version, tagPrefix);
   let tmpDir;
   try {
     tmpDir = createDownloadTmpDir();
@@ -104,7 +105,7 @@ export function downloadArchive(repo, version, destDir) {
   try {
     fs.mkdirSync(destDir, { recursive: true });
     curlDownload(repo, tag, 'tag', tarballPath);
-    const result = extractTarball(tarballPath, destDir);
+    const result = extractTarball(tarballPath, destDir, { subdir });
     fs.rmSync(tmpDir, { recursive: true, force: true });
     return result;
   } catch (err) {
@@ -216,9 +217,12 @@ const SOURCE_RESOLVERS = new Map();
 registerSourceResolver('github-release', {
   acquire(source, destDir) {
     if (source.refType === 'branch') {
-      return downloadBranch(source.repo, source.ref, destDir);
+      return downloadBranch(source.repo, source.ref, destDir, { subdir: source.path || null });
     }
-    return downloadArchive(source.repo, source.ref, destDir);
+    return downloadArchive(source.repo, source.ref, destDir, {
+      subdir: source.path || null,
+      tagPrefix: source.tagPrefix || null,
+    });
   },
 });
 
@@ -241,9 +245,10 @@ registerSourceResolver('local-tarball', {
  * @param {string} repo - GitHub repo in "org/name" format
  * @param {string} branch - Branch name (e.g. "main")
  * @param {string} destDir - Destination directory to extract into
+ * @param {{ subdir?: string | null }} [options]
  * @returns {{ success: boolean, extractedDir: string, error?: string }}
  */
-export function downloadBranch(repo, branch, destDir) {
+export function downloadBranch(repo, branch, destDir, { subdir = null } = {}) {
   let tmpDir;
   try {
     tmpDir = createDownloadTmpDir();
@@ -259,7 +264,7 @@ export function downloadBranch(repo, branch, destDir) {
   try {
     fs.mkdirSync(destDir, { recursive: true });
     curlDownload(repo, branch, 'branch', tarballPath);
-    const result = extractTarball(tarballPath, destDir);
+    const result = extractTarball(tarballPath, destDir, { subdir });
     fs.rmSync(tmpDir, { recursive: true, force: true });
     return result;
   } catch (err) {
@@ -277,21 +282,58 @@ export function downloadBranch(repo, branch, destDir) {
  * GitHub archive tarballs contain a top-level directory (e.g. "repo-name-v1.0.0/"),
  * so we strip the first path component.
  *
+ * When `subdir` is set the archive holds several components and only that
+ * subtree is the component; it is staged in a temp directory and its contents
+ * become the installation directory, so nothing downstream has to know that the
+ * component shared a repository with its siblings.
+ *
  * @param {string} tarballPath - Path to the .tar.gz file
  * @param {string} destDir - Directory to extract into
+ * @param {{ subdir?: string | null }} [options]
  * @returns {{ success: boolean, extractedDir: string, error?: string }}
  */
-export function extractTarball(tarballPath, destDir) {
+export function extractTarball(tarballPath, destDir, { subdir = null } = {}) {
   try {
     fs.mkdirSync(destDir, { recursive: true });
 
-    // Extract with strip-components to remove top-level directory
-    execFileSync('tar', ['xzf', tarballPath, '-C', destDir, '--strip-components=1'], {
-      timeout: 30000,
-      stdio: 'pipe',
-    });
+    if (!subdir) {
+      // Extract with strip-components to remove top-level directory
+      execFileSync('tar', ['xzf', tarballPath, '-C', destDir, '--strip-components=1'], {
+        timeout: 30000,
+        stdio: 'pipe',
+      });
 
-    return { success: true, extractedDir: destDir };
+      return { success: true, extractedDir: destDir };
+    }
+
+    const stageDir = fs.mkdtempSync(path.join(getWritableTmpBase(), 'yos-extract-'));
+    try {
+      execFileSync('tar', ['xzf', tarballPath, '-C', stageDir, '--strip-components=1'], {
+        timeout: 30000,
+        stdio: 'pipe',
+      });
+
+      const componentDir = resolveArchiveSubdir(stageDir, subdir);
+      if (!fs.existsSync(componentDir)) {
+        return {
+          success: false,
+          extractedDir: null,
+          error: `Component path not found in archive: ${subdir}`,
+        };
+      }
+      if (!fs.statSync(componentDir).isDirectory()) {
+        return {
+          success: false,
+          extractedDir: null,
+          error: `Component path is not a directory: ${subdir}`,
+        };
+      }
+
+      copyTree(componentDir, destDir, { excludes: ['.git', 'node_modules', '.yos', '.backup'] });
+      return { success: true, extractedDir: destDir };
+    } finally {
+      fs.rmSync(stageDir, { recursive: true, force: true });
+    }
   } catch (err) {
     return {
       success: false,
@@ -299,6 +341,23 @@ export function extractTarball(tarballPath, destDir) {
       error: `Failed to extract tarball: ${err.message}`,
     };
   }
+}
+
+/**
+ * Resolve a component subdirectory inside an extracted archive.
+ * Registry entries are data, so the path is confined to the archive root:
+ * an absolute or `..` path must never let an install write outside it.
+ */
+function resolveArchiveSubdir(rootDir, subdir) {
+  const normalized = String(subdir).replace(/^[/\\]+/, '');
+  if (!normalized) throw new Error('Component path is empty');
+  const root = path.resolve(rootDir);
+  const target = path.resolve(root, normalized);
+  if (target !== root && !target.startsWith(root + path.sep)) {
+    throw new Error(`Component path escapes the archive: ${subdir}`);
+  }
+  if (target === root) throw new Error(`Component path must name a subdirectory: ${subdir}`);
+  return target;
 }
 
 export function resolveLocalPath(localPath) {

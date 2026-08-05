@@ -60,6 +60,33 @@ export function getRepo(component) {
   return null;
 }
 
+/**
+ * Read where a component lives inside its repository.
+ *
+ * Components that share a repository sit in a subdirectory and carry their own
+ * tag prefix, so every remote lookup an upgrade performs — tags, raw SKILL.md,
+ * archive extraction — has to be scoped the same way the install was.
+ * The install source is authoritative; the registry covers components whose
+ * install predates the recorded source.
+ *
+ * @param {string} component
+ * @returns {{ subdir: string | null, tagPrefix: string | null }}
+ */
+export function getComponentSourceMeta(component) {
+  const installed = loadComponents()[component];
+  if (installed?.source?.path || installed?.source?.tagPrefix) {
+    return {
+      subdir: installed.source.path || null,
+      tagPrefix: installed.source.tagPrefix || null,
+    };
+  }
+  const entry = loadLocalRegistry()[component];
+  return {
+    subdir: entry?.path || null,
+    tagPrefix: entry?.tagPrefix || null,
+  };
+}
+
 export function getLocalSourceUpgradeError(component, installed = loadComponents()[component]) {
   if (!installed?.source?.type?.startsWith('local-')) return null;
   const sourcePath = installed.source.path || 'the original local source';
@@ -80,12 +107,12 @@ export function getLocalSourceUpgradeError(component, installed = loadComponents
  * @param {object} [opts]
  * @param {boolean} [opts.beta=false] - Include prerelease (beta) tags
  */
-function getLatestVersion(component, repo, { beta = false } = {}) {
+function getLatestVersion(component, repo, { beta = false, subdir = null, tagPrefix = null } = {}) {
   if (!repo) return { success: false, error: 'No repo configured for component' };
 
   // Primary: fetch latest tag from GitHub
   try {
-    const tagVersion = fetchLatestTag(repo, { includePrerelease: beta });
+    const tagVersion = fetchLatestTag(repo, { includePrerelease: beta, tagPrefix });
     if (tagVersion) {
       return { success: true, version: tagVersion };
     }
@@ -96,7 +123,7 @@ function getLatestVersion(component, repo, { beta = false } = {}) {
   // Fallback: fetch raw SKILL.md from GitHub (only for non-beta, as SKILL.md has no prerelease info)
   if (!beta) {
     try {
-      const content = fetchRawFile(repo, 'SKILL.md');
+      const content = fetchRawFile(repo, subdir ? `${subdir}/SKILL.md` : 'SKILL.md');
       const match = content.match(/^---\n([\s\S]*?)\n---/);
       if (match) {
         const versionMatch = match[1].match(/^version:\s*(.+)$/m);
@@ -150,7 +177,8 @@ export function checkForUpdates(component, { beta = false } = {}) {
   }
 
   const repo = getRepo(component);
-  const latest = getLatestVersion(component, repo, { beta });
+  const { subdir, tagPrefix } = getComponentSourceMeta(component);
+  const latest = getLatestVersion(component, repo, { beta, subdir, tagPrefix });
   if (!latest.success) {
     return {
       success: false,
@@ -169,6 +197,8 @@ export function checkForUpdates(component, { beta = false } = {}) {
     current: localVersion.version,
     latest: latest.version,
     repo,
+    subdir,
+    tagPrefix,
   };
 }
 
@@ -203,9 +233,10 @@ export function getAllowedTmpRoots() {
  * @param {string} repo - GitHub repo (org/name)
  * @param {string} version - Version to download
  * @param {string} [branch] - Optional branch to download from (skips version tag)
+ * @param {{ subdir?: string | null, tagPrefix?: string | null }} [options]
  * @returns {{ success: boolean, tempDir?: string, error?: string }}
  */
-export function downloadToTemp(repo, version, branch) {
+export function downloadToTemp(repo, version, branch, { subdir = null, tagPrefix = null } = {}) {
   let base = os.tmpdir();
   try {
     const probe = fs.mkdtempSync(path.join(base, 'yos-upgrade-probe-'));
@@ -218,7 +249,7 @@ export function downloadToTemp(repo, version, branch) {
   const tempDir = fs.mkdtempSync(path.join(base, 'yos-upgrade-'));
 
   if (branch) {
-    const branchResult = downloadBranch(repo, branch, tempDir);
+    const branchResult = downloadBranch(repo, branch, tempDir, { subdir });
     if (!branchResult.success) {
       fs.rmSync(tempDir, { recursive: true, force: true });
       return { success: false, error: branchResult.error };
@@ -226,10 +257,10 @@ export function downloadToTemp(repo, version, branch) {
     return { success: true, tempDir };
   }
 
-  const result = downloadArchive(repo, version, tempDir);
+  const result = downloadArchive(repo, version, tempDir, { subdir, tagPrefix });
   if (!result.success) {
     // Fallback: try downloading main branch
-    const branchResult = downloadBranch(repo, 'main', tempDir);
+    const branchResult = downloadBranch(repo, 'main', tempDir, { subdir });
     if (!branchResult.success) {
       fs.rmSync(tempDir, { recursive: true, force: true });
       return { success: false, error: result.error };
