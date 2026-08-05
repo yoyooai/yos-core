@@ -24,6 +24,7 @@ import {
 } from '../lib/runtime/instruction-builder.js';
 import { deployManifestTemplate } from '../lib/runtime/tmux-env.js';
 import { npmInstallEnv } from '../lib/npm-env.js';
+import { writeEnvEntries } from '../lib/env.js';
 import { distVendorUrl, noteMirrorFallback } from '../lib/dist-origin.js';
 import {
   installGlobalPackage,
@@ -236,6 +237,24 @@ function readEnvTimezone() {
   } catch {
     return null;
   }
+}
+
+/**
+ * Record where this machine was installed from, so upgrades come from the same
+ * place. install.sh knows the answer (it resolved the release repository to
+ * install), but the CLI had no way to learn it: `yos upgrade --self` failed with
+ * "YOS_RELEASE_REPO is not configured" on every fresh machine, so a customer
+ * could install YOS and then had no way to update it.
+ *
+ * Recorded rather than defaulted on purpose: a machine installed from a fork
+ * must keep upgrading from that fork, not from ours.
+ */
+function recordReleaseSource() {
+  const repo = (process.env.YOS_RELEASE_REPO || '').trim();
+  if (!repo) return null;
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(repo)) return null;
+  const { written } = writeEnvEntries({ YOS_RELEASE_REPO: repo }, 'YOS release source');
+  return written.includes('YOS_RELEASE_REPO') ? repo : null;
 }
 
 /**
@@ -2369,6 +2388,8 @@ export async function initCommand(args) {
       writeCodexConfig(YOS_DIR, { openaiBaseUrl: pendingCodexBaseUrl });
     }
 
+    recordReleaseSource();
+
     // Timezone: use resolved value or show current
     if (!quiet) console.log(heading('Checking timezone...'));
     await configureTimezone(skipConfirm, true, opts.timezone, quiet);
@@ -2476,6 +2497,11 @@ export async function initCommand(args) {
     saveCodexBaseUrlToEnv(pendingCodexBaseUrl);
     writeCodexConfig(YOS_DIR, { openaiBaseUrl: pendingCodexBaseUrl });
   }
+  const recordedReleaseSource = recordReleaseSource();
+  if (recordedReleaseSource && !quiet) {
+    console.log(`  ${success(`Upgrades will come from ${bold(recordedReleaseSource)}`)}`);
+  }
+
   // Step 8: Configure timezone
   if (!quiet) console.log(`\n${heading('Timezone configuration...')}`);
   await configureTimezone(skipConfirm, false, opts.timezone, quiet);

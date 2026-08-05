@@ -117,3 +117,32 @@ describe('upgrade check does not require GitHub', () => {
     assert.match(runnable, /mirror miss for/);
   });
 });
+
+describe('a machine records where it was installed from', () => {
+  it('hands the resolved release repository to yos init', () => {
+    // Without this, `yos upgrade --self` on a fresh machine answers
+    // "YOS_RELEASE_REPO is not configured": a customer can install YOS and then
+    // has no way to update it.
+    const initCall = installSh.indexOf('Running yos init');
+    const exportLine = installSh.indexOf('export YOS_RELEASE_REPO');
+    assert.ok(exportLine > 0, 'scripts/install.sh must export YOS_RELEASE_REPO');
+    assert.ok(exportLine > initCall, 'the export must be in the init step');
+  });
+
+  it('persists it from init rather than defaulting to our repository', () => {
+    const initSource = fs.readFileSync(path.join(ROOT, 'cli', 'commands', 'init.js'), 'utf8');
+    assert.match(initSource, /function recordReleaseSource\(\)/);
+    assert.match(initSource, /writeEnvEntries\(\{ YOS_RELEASE_REPO: repo \}/);
+    // A fork's machine must keep upgrading from the fork, so the value is
+    // recorded from the environment, never hard-coded here.
+    const recorder = initSource.slice(
+      initSource.indexOf('function recordReleaseSource()'),
+      initSource.indexOf('function recordReleaseSource()') + 700,
+    );
+    assert.doesNotMatch(recorder, /yoyooai/);
+    assert.match(recorder, /process\.env\.YOS_RELEASE_REPO/);
+    // Both init paths have to record it, fresh install and re-init alike:
+    // one definition plus one call from each path.
+    assert.equal([...initSource.matchAll(/recordReleaseSource\(\)/g)].length, 3);
+  });
+});

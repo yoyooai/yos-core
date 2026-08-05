@@ -754,6 +754,9 @@ if [ "$NO_INIT" = true ]; then
 else
   # Always run yos init after installation (environment is ready at this point).
   info "Running yos init..."
+  # Hand the resolved release repository to init so the machine records where it
+  # was installed from; otherwise `yos upgrade --self` has nothing to go on.
+  export YOS_RELEASE_REPO
   echo ""
   local init_exit=0
   if _tty_readable; then
