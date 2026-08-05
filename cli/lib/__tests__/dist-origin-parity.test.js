@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { DEFAULT_DIST_BASE, DEFAULT_DIST_OWNERS } from '../dist-origin.js';
+import { DEFAULT_DIST_BASE, DEFAULT_DIST_OWNERS, normalizeDistBase } from '../dist-origin.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..', '..');
 const installSh = fs.readFileSync(path.join(ROOT, 'scripts', 'install.sh'), 'utf8');
@@ -92,6 +92,16 @@ describe('installer does not require GitHub', () => {
   it('validates the mirror URL it is handed', () => {
     assert.match(installSh, /validate_dist_base/);
     assert.match(installSh, /credential-free HTTPS URL/);
+  });
+
+  it('accepts the same loopback exception as the CLI', () => {
+    // An acceptance run serves a copy of the mirror over http on loopback. The
+    // installer used to reject that while the CLI accepted it, so a from-zero
+    // acceptance install could not be performed at all.
+    assert.equal(normalizeDistBase('http://127.0.0.1:8080/dist'), 'http://127.0.0.1:8080/dist');
+    const validator = installSh.match(/validate_dist_base\(\) \{[^}]*\}/s);
+    assert.ok(validator, 'scripts/install.sh must define validate_dist_base');
+    assert.match(validator[0], /127\\\.0\\\.0\\\.1\|localhost/);
   });
 });
 

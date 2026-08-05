@@ -132,9 +132,12 @@ _tty_readable() { (: < /dev/tty) 2>/dev/null; }
 
 # ── Distribution mirror ───────────────────────────────────────
 # A credential-free HTTPS URL with no query string or fragment: artifact URLs
-# have to stay copy-pasteable, cacheable and safe to print in a log.
+# have to stay copy-pasteable, cacheable and safe to print in a log. Plain http
+# is accepted for loopback only, which is how an acceptance run serves a copy of
+# the mirror locally — the same exception cli/lib/dist-origin.js makes.
 validate_dist_base() {
-  [[ "$1" =~ ^https://[^/@?#[:space:]]+(/[^@?#[:space:]]*)?$ ]]
+  [[ "$1" =~ ^https://[^/@?#[:space:]]+(/[^@?#[:space:]]*)?$ ]] && return 0
+  [[ "$1" =~ ^http://(127\.0\.0\.1|localhost)(:[0-9]+)?(/[^@?#[:space:]]*)?$ ]]
 }
 
 if [ -n "$YOS_DIST_BASE" ] && ! validate_dist_base "$YOS_DIST_BASE"; then

@@ -57,7 +57,7 @@
     },
     {
       "path": "cli/lib/__tests__/dist-origin-parity.test.js",
-      "minimumTests": 9
+      "minimumTests": 10
     },
     {
       "path": "cli/lib/__tests__/npm-env.test.js",
