@@ -27,7 +27,7 @@ import { parseSkillMd, detectComponentType } from '../lib/skill.js';
 import { linkBins } from '../lib/bin.js';
 import { applyCaddyRoutes } from '../lib/caddy.js';
 import { promptYesNo, prompt, promptSecret } from '../lib/prompts.js';
-import { writeEnvEntries } from '../lib/env.js';
+import { writeEnvEntries, findUnsetRequiredConfig } from '../lib/env.js';
 import { hasConfigureHook, runConfigureHook } from '../lib/configure-hook.js';
 import { registerService } from '../lib/service.js';
 import { npmInstallEnv } from '../lib/npm-env.js';
@@ -580,13 +580,14 @@ async function installDeclarative(resolved, skillDir, skipConfirm, jsonOutput, b
   const service = lifecycle.service;
   if (service && service.entry) {
     console.log(`\n${heading('Starting service...')}`);
+    const serviceName = service.name || ('yos-' + resolved.name);
     const svcResult = registerService({
       name: resolved.name,
       entry: service.entry,
       skillDir,
       type: service.type || 'pm2',
+      serviceName,
     });
-    const serviceName = service.name || ('yos-' + resolved.name);
     serviceRunning = Boolean(svcResult.success);
     if (svcResult.success) {
       console.log(`  ${success(`${bold(serviceName)} started`)}`);
@@ -595,9 +596,20 @@ async function installDeclarative(resolved, skillDir, skipConfirm, jsonOutput, b
       // here would send the user away believing the work is done, while a
       // process restarts forever in the background.
       console.log(`  ${error(`${bold(serviceName)} does not stay running — ${svcResult.error}`)}`);
-      console.log(`  ${dim('Almost always missing configuration. Check what it needs:')}`);
-      console.log(`  ${dim(`  pm2 logs ${serviceName} --err --lines 20`)}`);
-      console.log(`  ${dim(`then fill in ~/yos/.env and run: pm2 restart ${serviceName}`)}`);
+      if (svcResult.stopped) {
+        console.log(`  ${dim('Stopped it, so it is not restarting in the background.')}`);
+      }
+      // The component already told us which values it needs. Naming them beats
+      // sending the user to read crash logs for something we know.
+      const unset = findUnsetRequiredConfig(config.required);
+      if (unset.length > 0) {
+        console.log(`  ${dim(`Required and not set in ~/yos/.env: ${unset.join(', ')}`)}`);
+        console.log(`  ${dim(`Add them to ~/yos/.env, then run: yos start`)}`);
+      } else {
+        console.log(`  ${dim('Almost always missing configuration. Check what it needs:')}`);
+        console.log(`  ${dim(`  pm2 logs ${serviceName} --err --lines 20`)}`);
+        console.log(`  ${dim('then fix it and run: yos start')}`);
+      }
     } else {
       console.log(`  ${error(`Failed to start service: ${svcResult.error}`)}`);
       console.log(`  ${dim('You can start it manually later.')}`);

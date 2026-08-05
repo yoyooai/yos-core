@@ -114,6 +114,48 @@ function parseSkillService(skillMdPath) {
   return { name: serviceProps.name, entry: serviceProps.entry };
 }
 
+// Restart policy floor for component services.
+//
+// Kept in sync with cli/lib/restart-policy.js — the CLI cannot be imported from
+// here, because this file is a standalone artifact in the user's home directory
+// that PM2 evaluates with only Node builtins available. Parity is asserted by
+// cli/lib/__tests__/restart-floor-template.test.js.
+//
+// `max_restarts` without `min_uptime` is toothless: PM2 only counts a restart
+// against the cap when the process died sooner than `min_uptime` (default 1s),
+// so anything that takes a second or two to fail restarts forever. Components
+// are not trusted to get this pair right — the platform enforces it.
+const RESTART_FLOOR = { max_restarts: 10, min_uptime: '10s', min_uptime_ms: 10000 };
+
+function parseUptimeMs(value) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value >= 0 ? value : null;
+  }
+  if (typeof value !== 'string') return null;
+  const match = value.trim().match(/^(\d+(?:\.\d+)?)\s*(ms|s|m|h)?$/i);
+  if (!match) return null;
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount)) return null;
+  const unit = (match[2] || 'ms').toLowerCase();
+  const scale = { ms: 1, s: 1000, m: 60000, h: 3600000 }[unit];
+  return amount * scale;
+}
+
+function applyRestartFloor(app) {
+  if (!app || typeof app !== 'object') return app;
+  const floored = { ...app };
+  if (floored.autorestart === false) return floored;
+  const cap = Number(floored.max_restarts);
+  if (!Number.isInteger(cap) || cap < 0 || cap > RESTART_FLOOR.max_restarts) {
+    floored.max_restarts = RESTART_FLOOR.max_restarts;
+  }
+  const uptimeMs = parseUptimeMs(floored.min_uptime);
+  if (uptimeMs === null || uptimeMs < RESTART_FLOOR.min_uptime_ms) {
+    floored.min_uptime = RESTART_FLOOR.min_uptime;
+  }
+  return floored;
+}
+
 // Load PM2 configs for installed components that declare a service.
 // Each component can provide its own ecosystem.config.cjs in its skill directory.
 // Falls back to generating a config from SKILL.md frontmatter if no ecosystem file exists.
@@ -143,7 +185,7 @@ function loadComponentServices() {
                 continue;
               }
               // Copy app to avoid mutating the require() cached object
-              const safeApp = { ...app, env: { ...app.env, PATH: ENHANCED_PATH } };
+              const safeApp = applyRestartFloor({ ...app, env: { ...app.env, PATH: ENHANCED_PATH } });
               usedNames.add(safeApp.name);
               apps.push(safeApp);
             }
@@ -164,7 +206,7 @@ function loadComponentServices() {
         }
         const dataDir = (meta && meta.dataDir) || path.join(YOS_DIR, 'components', name);
         usedNames.add(service.name);
-        apps.push({
+        apps.push(applyRestartFloor({
           name: service.name,
           script: service.entry,
           cwd: skillDir,
@@ -173,12 +215,10 @@ function loadComponentServices() {
             NODE_ENV: 'production',
           },
           autorestart: true,
-          max_restarts: 10,
-          min_uptime: '10s',
           error_file: path.join(dataDir, 'logs', 'error.log'),
           out_file: path.join(dataDir, 'logs', 'out.log'),
           log_date_format: 'YYYY-MM-DD HH:mm:ss',
-        });
+        }));
       } catch (err) {
         console.warn(`[ecosystem] Skipping component "${name}": ${err.message}`);
       }
