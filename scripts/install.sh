@@ -2,7 +2,10 @@
 # ──────────────────────────────────────────────────────────────
 # YOS One-Click Installer
 #
-# Usage with an explicitly configured YOS release repository:
+# Usage (installs the latest release of yoyooai/yos-core):
+#   curl -fsSL <install-script-url> | bash
+#
+# Install from a different release repository:
 #   curl -fsSL <install-script-url> | YOS_RELEASE_REPO=owner/repository bash
 #
 # Install from a specific branch:
@@ -75,7 +78,10 @@ done
 
 # ── Configuration ─────────────────────────────────────────────
 YOS_REPO="${YOS_REPO:-}"
-YOS_RELEASE_REPO="${YOS_RELEASE_REPO:-}"
+# Default source of record. Keeping it here — rather than only in the copy we
+# host on the download page — means the hosted copy is a byte-identical copy of
+# this file, so the two cannot drift apart unnoticed.
+YOS_RELEASE_REPO="${YOS_RELEASE_REPO:-yoyooai/yos-core}"
 NODE_VERSION="24"               # LTS-track major version
 MIN_NODE_MAJOR=20
 NVM_INSTALL_URL="https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh"

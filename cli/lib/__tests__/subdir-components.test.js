@@ -145,7 +145,7 @@ describe('registry entries for components inside a repository', () => {
     // An explicit version keeps resolution offline.
     const resolved = await resolveTarget('feishu@0.1.0');
 
-    assert.equal(resolved.repo, 'Qingjingyu/YOS-Channels');
+    assert.equal(resolved.repo, 'yoyooai/yos-components');
     assert.equal(resolved.source.type, 'github-release');
     assert.equal(resolved.source.path, 'channels/001_feishu');
     assert.equal(resolved.source.tagPrefix, 'feishu');

@@ -1,7 +1,7 @@
 {
   "components": {
     "feishu": {
-      "repo": "Qingjingyu/YOS-Channels",
+      "repo": "yoyooai/yos-components",
       "path": "channels/001_feishu",
       "tagPrefix": "feishu",
       "official": true,
@@ -9,7 +9,7 @@
       "description": "Feishu (飞书) communication channel — DM and group messaging, productivity surfaces"
     },
     "weixin": {
-      "repo": "Qingjingyu/YOS-Channels",
+      "repo": "yoyooai/yos-components",
       "path": "channels/002_weixin",
       "tagPrefix": "weixin",
       "official": true,
