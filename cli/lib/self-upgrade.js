@@ -28,6 +28,7 @@ import { deployManifestTemplate } from './runtime/tmux-env.js';
 import { writeCodexConfig } from './runtime-setup.js';
 import { getCoreEcosystemPath, restartManagedProcess } from './pm2.js';
 import { resolveReleaseRepo } from './release-source.js';
+import { npmInstallEnv } from './npm-env.js';
 
 // ---------------------------------------------------------------------------
 // Version helpers
@@ -551,6 +552,7 @@ function prepareSkillDependencies(ctx, deps = {}) {
       cwd: targetDir,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: npmInstallEnv(),
       timeout: 120000,
     });
   }
@@ -794,7 +796,7 @@ function step4_npmInstallGlobal(ctx, deps = {}) {
     execFile(npmExecutable(), ['install', '-g', ctx.preparedPackage], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, YOS_SKIP_POSTINSTALL: '1' },  // Skip postinstall — we sync skills ourselves
+      env: { ...npmInstallEnv(), YOS_SKIP_POSTINSTALL: '1' },  // Skip postinstall — we sync skills ourselves
       timeout: 120000,
     });
     return { step: 4, name: 'npm_install_global', status: 'done', duration: Date.now() - startTime };
@@ -911,6 +913,7 @@ function installSkillDependencies(skillsRoot, deps = {}) {
         cwd: skillDir,
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
+        env: npmInstallEnv(),
         timeout: 120000,
       });
       installed++;
@@ -1628,7 +1631,7 @@ function installPreviousCore(archivePath, deps = {}) {
   execFile(npmExecutable(), ['install', '-g', archivePath], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, YOS_SKIP_POSTINSTALL: '1' },
+    env: { ...npmInstallEnv(), YOS_SKIP_POSTINSTALL: '1' },
     timeout: 120000,
   });
 }
