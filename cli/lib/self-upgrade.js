@@ -77,7 +77,23 @@ function getLatestVersion({ branch, beta = false } = {}) {
     if (tagVersion) {
       return { success: true, version: tagVersion };
     }
-    return { success: false, error: 'No release tags found' };
+    // No stable release. While YOS itself is pre-1.0 that is the normal state,
+    // and reporting "No release tags found" was simply untrue: releases exist,
+    // they are prereleases. Upgrading to one stays opt-in — moving a running
+    // system onto a prerelease is a decision for its operator — but the check
+    // has to say what it found and which flag acts on it.
+    if (!beta) {
+      const prerelease = fetchLatestTag(repo, { includePrerelease: true });
+      if (prerelease) {
+        return {
+          success: true,
+          version: prerelease,
+          prereleaseOnly: true,
+          note: `${prerelease} is a prerelease; no stable release exists yet. Install it with: yos upgrade --self --beta`,
+        };
+      }
+    }
+    return { success: false, error: `No releases found in ${repo}` };
   } catch (err) {
     return { success: false, error: `Cannot fetch latest version: ${sanitizeError(err.message)}` };
   }
@@ -120,6 +136,9 @@ export function checkForCoreUpdates({ branch, beta = false } = {}) {
     hasUpdate,
     current: current.version,
     latest: latest.version,
+    // Present only when the newest release is a prerelease and --beta was not
+    // asked for: the caller reports it instead of claiming nothing was found.
+    ...(latest.prereleaseOnly ? { prereleaseOnly: true, note: latest.note } : {}),
   };
 }
 

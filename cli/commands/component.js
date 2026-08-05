@@ -1029,6 +1029,9 @@ function handleSelfCheckOnly({ jsonOutput, branch, beta = false }) {
   } else {
     if (!check.hasUpdate && !branch) {
       console.log(success(`${bold('YOS core')} is up to date (v${check.current})`));
+      // Saying only "up to date" on a prerelease line hides which line the
+      // machine is even on.
+      if (check.prereleaseOnly) console.log(dim(check.note));
     } else {
       console.log(`${bold('YOS core')}: ${dim(check.current)} → ${bold(check.latest)}`);
 
@@ -1046,7 +1049,10 @@ function handleSelfCheckOnly({ jsonOutput, branch, beta = false }) {
         console.log(`\n${heading('Changelog:')}\n${changelog}`);
       }
 
-      console.log(`\n${dim('Run "yos upgrade --self --yes" to upgrade.')}`);
+      // Without --beta the upgrade would refuse the very version just named.
+      console.log(check.prereleaseOnly
+        ? `\n${dim('Run "yos upgrade --self --beta --yes" to upgrade (this release is a prerelease).')}`
+        : `\n${dim('Run "yos upgrade --self --yes" to upgrade.')}`);
     }
   }
 

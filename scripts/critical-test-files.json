@@ -86,6 +86,10 @@
     {
       "path": "cli/lib/__tests__/release-source-machine-config.test.js",
       "minimumTests": 5
+    },
+    {
+      "path": "cli/lib/__tests__/self-check-prerelease-only.test.js",
+      "minimumTests": 3
     }
   ]
 }
