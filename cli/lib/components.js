@@ -82,9 +82,9 @@ export async function resolveTarget(nameOrUrl, { branch = null } = {}) {
   }
 
   // Helper: try fetchLatestTag, capture network errors separately
-  function tryFetchLatestTag(repo) {
+  function tryFetchLatestTag(repo, tagPrefix = null) {
     try {
-      return { version: fetchLatestTag(repo) || null, fetchError: null };
+      return { version: fetchLatestTag(repo, { tagPrefix }) || null, fetchError: null };
     } catch (err) {
       return { version: null, fetchError: err.message };
     }
@@ -115,6 +115,10 @@ export async function resolveTarget(nameOrUrl, { branch = null } = {}) {
       tryFetchLatestTag,
       installTarget: nameOrUrl,
       isThirdParty: registry[target].official !== true,
+      // A repository may ship several components, one per subdirectory, each
+      // with its own version line.
+      subdir: registry[target].path || null,
+      tagPrefix: registry[target].tagPrefix || null,
     });
   }
 
@@ -149,10 +153,12 @@ function resolveGitHubTarget({
   tryFetchLatestTag,
   installTarget,
   isThirdParty = true,
+  subdir = null,
+  tagPrefix = null,
 }) {
   const tag = branch
     ? { version: null, fetchError: null }
-    : (version ? { version, fetchError: null } : tryFetchLatestTag(repo));
+    : (version ? { version, fetchError: null } : tryFetchLatestTag(repo, tagPrefix));
   const resolvedVersion = tag.version;
   const ref = branch || resolvedVersion;
   return {
@@ -161,13 +167,19 @@ function resolveGitHubTarget({
     version: resolvedVersion,
     fetchError: tag.fetchError,
     isThirdParty,
+    subdir,
+    tagPrefix,
     source: ref ? {
       type: 'github-release',
       repo,
       ref,
       refType: branch ? 'branch' : 'tag',
+      ...(subdir ? { path: subdir } : {}),
+      ...(tagPrefix ? { tagPrefix } : {}),
     } : null,
-    sourceLabel: `https://github.com/${repo}`,
+    sourceLabel: subdir
+      ? `https://github.com/${repo} (${subdir})`
+      : `https://github.com/${repo}`,
     sourceHeading: 'Repository:',
     sourceReplyLabel: 'Repo',
     installTarget,

@@ -816,12 +816,19 @@ export async function doctorCommand(args) {
 
       for (const [name, info] of Object.entries(components)) {
         if (!info.repo || !info.version) continue;
-        targets.push({ name, repo: info.repo, current: info.version });
+        // Components sharing a repository each have their own tag line; without
+        // the prefix this would compare against a sibling's version.
+        targets.push({
+          name,
+          repo: info.repo,
+          current: info.version,
+          tagPrefix: info.source?.tagPrefix || null,
+        });
       }
 
       const results = await concurrentMap(targets, async (target) => {
         try {
-          const latest = await fetchLatestTagAsync(target.repo);
+          const latest = await fetchLatestTagAsync(target.repo, { tagPrefix: target.tagPrefix || null });
           if (latest && compareSemverDesc(target.current, latest) > 0) {
             return { ...target, latest };
           }
