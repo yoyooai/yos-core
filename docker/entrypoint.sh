@@ -101,6 +101,22 @@ upsert_env() {
   fi
 }
 
+# The port the web console is actually on. `yos init` moves the console off 3456
+# when 3456 is taken and records the move in .env, so the literal 3456 printed
+# here would send people to a port nothing is listening on. Precedence matches
+# cli/lib/web-console-port.js: environment, then the recorded value, then default.
+recorded_console_port() {
+  local port="${WEB_CONSOLE_PORT:-}"
+  if ! printf '%s' "${port}" | grep -qE '^[0-9]+$'; then
+    port="$(sed -n 's/^[[:space:]]*WEB_CONSOLE_PORT[[:space:]]*=[[:space:]]*\([0-9]\{1,\}\)[[:space:]]*$/\1/p' "${ENV_FILE}" 2>/dev/null | tail -1)"
+  fi
+  if printf '%s' "${port}" | grep -qE '^[0-9]+$' && [ "${port}" -gt 0 ] && [ "${port}" -lt 65536 ]; then
+    printf '%s' "${port}"
+  else
+    printf '3456'
+  fi
+}
+
 upsert_env "TELEGRAM_BOT_TOKEN" "${TELEGRAM_BOT_TOKEN:-}"
 upsert_env "LARK_APP_ID" "${LARK_APP_ID:-}"
 upsert_env "LARK_APP_SECRET" "${LARK_APP_SECRET:-}"
@@ -188,7 +204,7 @@ info "=========================================="
 ok "YOS is ready!"
 info "=========================================="
 echo ""
-info "Web console: http://localhost:3456"
+info "Web console: http://localhost:$(recorded_console_port)"
 info "Use 'docker exec <container> pm2 list' to check services."
 info "Monitoring PM2..."
 while kill -0 "${PM2_PID}" 2>/dev/null; do

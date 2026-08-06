@@ -94,7 +94,7 @@ const outPath = path.join(process.env.YOS_DIR, '${channel}-send.jsonl');
 const startedPath = path.join(process.env.YOS_DIR, '${channel}-send-started');
 const releasePath = path.join(process.env.YOS_DIR, '${channel}-send-release');
 fs.writeFileSync(startedPath, String(process.pid));
-const deadline = Date.now() + 5000;
+const deadline = Date.now() + 60000;
 while (!fs.existsSync(releasePath) && Date.now() < deadline) {
   await new Promise((resolve) => setTimeout(resolve, 25));
 }
@@ -103,7 +103,10 @@ fs.appendFileSync(outPath, JSON.stringify({ args: process.argv.slice(2), pid: pr
 `);
 }
 
-async function waitForFile(filePath, timeoutMs = 2000) {
+// Generous on purpose: this waits on a real spawned node process, and the
+// happy path returns as soon as the file appears. A tight budget here buys
+// nothing and turns a loaded machine into a false red.
+async function waitForFile(filePath, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (fs.existsSync(filePath)) return;

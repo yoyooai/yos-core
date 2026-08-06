@@ -102,6 +102,18 @@
     {
       "path": "cli/lib/__tests__/boot-autostart.test.js",
       "minimumTests": 16
+    },
+    {
+      "path": "cli/lib/__tests__/component-engines.test.js",
+      "minimumTests": 1
+    },
+    {
+      "path": "test/node-test-failure-evidence.test.js",
+      "minimumTests": 1
+    },
+    {
+      "path": "cli/lib/__tests__/half-finished-install-recovery.test.js",
+      "minimumTests": 1
     }
   ]
 }

@@ -31,6 +31,7 @@ import { writeEnvEntries, findUnsetRequiredConfig, describeRequiredConfig } from
 import { hasConfigureHook, runConfigureHook } from '../lib/configure-hook.js';
 import { registerService } from '../lib/service.js';
 import { npmInstallEnv } from '../lib/npm-env.js';
+import { checkNodeEngine, describeEngineMismatch, readDeclaredNodeRange } from '../lib/component-engines.js';
 import { bold, dim, green, red, yellow, cyan, success, error, warn, heading } from '../lib/colors.js';
 
 function printManualCaddyRoutes(result) {
@@ -355,6 +356,29 @@ async function installDeclarative(resolved, skillDir, skipConfirm, jsonOutput, b
       } catch { return null; }
     })()
     || '0.0.0';
+
+  // Step 0: does this machine's Node satisfy what the component declares?
+  // Checked before npm install, the data directory and the registry entry, so a
+  // refusal leaves nothing behind to clean up by hand.
+  const engine = checkNodeEngine(readDeclaredNodeRange(skillDir));
+  if (engine.checked && !engine.satisfied) {
+    const lines = describeEngineMismatch(engine, resolved.name);
+    if (jsonOutput) {
+      console.log(JSON.stringify({
+        action: 'add', component: resolved.name, success: false,
+        error: 'node_engine_mismatch',
+        message: `${resolved.name} requires Node ${engine.range}; this machine runs Node ${engine.running}`,
+        requiredNode: engine.range,
+        runningNode: engine.running,
+        reply: lines.join(' '),
+      }, null, 2));
+    } else {
+      console.error(`  ${error(lines[0])}`);
+      for (const line of lines.slice(1)) console.error(`  ${dim(line)}`);
+    }
+    cleanup(skillDir);
+    process.exit(1);
+  }
 
   // Step 1: npm install
   if (lifecycle.npm) {

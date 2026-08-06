@@ -220,6 +220,56 @@ describe('yos init does not report success over a service that is down', () => {
     const template = fs.readFileSync(path.join(ROOT, 'templates', 'pm2', 'ecosystem.config.cjs'), 'utf8');
     assert.match(template, /WEB_CONSOLE_PORT: readEnvValue\('WEB_CONSOLE_PORT', '3456'\)/);
   });
+
+  it('the Docker entrypoint prints the port the console is actually on', () => {
+    // The fifth copy of 3456: everything else read the recorded port while the
+    // container's closing "YOS is ready" banner still printed the literal.
+    // Docker documents WEB_CONSOLE_PORT, so this could hand out a dead URL.
+    const entrypoint = fs.readFileSync(path.join(ROOT, 'docker', 'entrypoint.sh'), 'utf8');
+    assert.doesNotMatch(entrypoint, /localhost:3456/, 'the entrypoint still hardcodes the console URL');
+    assert.match(entrypoint, /Web console: http:\/\/localhost:\$\(recorded_console_port\)/);
+  });
+});
+
+describe('the port the Docker entrypoint reports', () => {
+  /** Run the entrypoint's own shell function against a fixture .env, for real. */
+  function recordedConsolePort(envContent, env = {}) {
+    const entrypoint = fs.readFileSync(path.join(ROOT, 'docker', 'entrypoint.sh'), 'utf8');
+    const start = entrypoint.indexOf('recorded_console_port() {');
+    const fn = entrypoint.slice(start, entrypoint.indexOf('\n}\n', start) + 3);
+    assert.ok(start > 0, 'the entrypoint no longer defines recorded_console_port');
+
+    const dir = tmpDir('yos-entrypoint-port-');
+    const envFile = path.join(dir, '.env');
+    if (envContent !== null) fs.writeFileSync(envFile, envContent);
+
+    const result = spawnSync('bash', ['-c', `set -uo pipefail\nENV_FILE="$1"\n${fn}\nrecorded_console_port`, 'bash', envFile], {
+      encoding: 'utf8',
+      timeout: 20_000,
+      env: { ...process.env, WEB_CONSOLE_PORT: '', ...env },
+    });
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    return result.stdout.trim();
+  }
+
+  it('reports the moved port that init recorded', () => {
+    assert.equal(recordedConsolePort('YOS_WEB_PASSWORD=x\nWEB_CONSOLE_PORT=3459\n'), '3459');
+  });
+
+  it('prefers the environment over the recorded value, like the CLI does', () => {
+    assert.equal(recordedConsolePort('WEB_CONSOLE_PORT=3459\n', { WEB_CONSOLE_PORT: '4000' }), '4000');
+  });
+
+  it('falls back to 3456 when nothing recorded a port', () => {
+    assert.equal(recordedConsolePort('YOS_WEB_PASSWORD=x\n'), '3456');
+    assert.equal(recordedConsolePort(null), '3456');
+  });
+
+  it('ignores a junk or out-of-range value instead of printing it', () => {
+    assert.equal(recordedConsolePort('WEB_CONSOLE_PORT=not-a-port\n'), '3456');
+    assert.equal(recordedConsolePort('WEB_CONSOLE_PORT=99999\n'), '3456');
+    assert.equal(recordedConsolePort('WEB_CONSOLE_PORT=0\n'), '3456');
+  });
 });
 
 describe('deciding whether npm can install without sudo', () => {
