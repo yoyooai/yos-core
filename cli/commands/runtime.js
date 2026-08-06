@@ -21,6 +21,7 @@ import { getCoreEcosystemPath, restartManagedProcess } from '../lib/pm2.js';
 import {
   installClaude,
   describeClaudeInstallFailure,
+  describeNpmInstallFailure,
   installCodex,
   isValidBaseUrl,
   saveApiKey,
@@ -264,12 +265,17 @@ async function switchRuntime(target, flags) {
   if (!commandExists(target)) {
     console.log(`${bold(target)} CLI not found — installing...`);
     if (target === 'codex') {
-      if (!installCodex() || !commandExists(target)) {
+      const result = installCodex({
+        onAttempt: source => console.log(`  trying ${source.label}...`),
+      });
+      if (!result.ok) {
         console.error(red(`\nFailed to install ${bold(target)} CLI.`));
-        console.error(`  ${dim('Install manually: npm install -g @openai/codex')}`);
+        for (const line of describeNpmInstallFailure('@openai/codex', result)) {
+          console.error(`  ${dim(line)}`);
+        }
         process.exit(1);
       }
-      console.log(`  ${green('✓')} installed`);
+      console.log(`  ${green('✓')} installed from ${result.label}`);
     } else {
       const result = installClaude({
         onAttempt: step => console.log(`  trying ${step.label}...`),

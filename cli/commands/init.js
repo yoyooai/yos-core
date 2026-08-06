@@ -29,7 +29,8 @@ import { resolveWebConsolePort, readRecordedConsolePort, DEFAULT_WEB_CONSOLE_POR
 import { readServiceState, judgeSettle } from '../lib/service.js';
 import { distVendorUrl, noteMirrorFallback } from '../lib/dist-origin.js';
 import {
-  installGlobalPackage,
+  installGlobalPackageWithFallback,
+  describeNpmInstallFailure,
   installCodex,
   installClaude,
   describeClaudeInstallFailure,
@@ -2102,12 +2103,24 @@ export async function initCommand(args) {
     if (!quiet) console.log(`  ${success('PM2 installed')}`);
   } else {
     if (!quiet) console.log(`  ${error('PM2 not found')}`);
-    if (!quiet) console.log(`    ${cyan('Installing pm2...')}`);
-    if (installGlobalPackage('pm2')) {
-      if (!quiet) console.log(`  ${success('PM2 installed')}`);
+    // PM2 sits ahead of the runtime, so a single unreachable registry here
+    // ends the install before the runtime's own fallback ever gets a turn.
+    const pm2Result = installGlobalPackageWithFallback('pm2', {
+      binary: 'pm2',
+      onAttempt: source => {
+        if (!quiet) console.log(`    ${cyan(`Installing pm2 from ${source.label}...`)}`);
+      },
+    });
+    if (pm2Result.ok) {
+      if (!quiet) console.log(`  ${success(`PM2 installed from ${pm2Result.label}`)}`);
+      if (pm2Result.fellBack && !quiet) {
+        console.warn(`    ${dim('The configured registry did not answer — used the mirror instead.')}`);
+      }
     } else {
       console.error(`  ${error('Failed to install PM2')}`);
-      console.error(`    ${dim('Install manually: npm install -g pm2')}`);
+      for (const line of describeNpmInstallFailure('pm2', pm2Result)) {
+        console.error(`    ${dim(line)}`);
+      }
       process.exit(1);
     }
   }
@@ -2158,18 +2171,21 @@ export async function initCommand(args) {
       if (!quiet) console.log(`  ${success('Codex installed')}`);
     } else {
       if (!quiet) console.log(`  ${error('Codex not found')}`);
-      if (!quiet) console.log(`    ${cyan('Installing @openai/codex...')}`);
-      if (installCodex()) {
-        if (commandExists('codex')) {
-          if (!quiet) console.log(`  ${success('Codex installed')}`);
-        } else {
-          console.error(`  ${error('Codex installed but not found in PATH')}`);
-          console.error(`    ${dim('Ensure npm global bin is in PATH, then run yos init again.')}`);
-          process.exit(1);
+      const codexResult = installCodex({
+        onAttempt: source => {
+          if (!quiet) console.log(`    ${cyan(`Installing @openai/codex from ${source.label}...`)}`);
+        },
+      });
+      if (codexResult.ok) {
+        if (!quiet) console.log(`  ${success(`Codex installed from ${codexResult.label}`)}`);
+        if (codexResult.fellBack && !quiet) {
+          console.warn(`    ${dim('The configured registry did not answer — used the mirror instead.')}`);
         }
       } else {
         console.error(`  ${error('Failed to install Codex')}`);
-        console.error(`    ${dim('Install manually: npm install -g @openai/codex')}`);
+        for (const line of describeNpmInstallFailure('@openai/codex', codexResult)) {
+          console.error(`    ${dim(line)}`);
+        }
         process.exit(1);
       }
     }
