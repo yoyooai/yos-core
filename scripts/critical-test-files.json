@@ -146,6 +146,10 @@
     {
       "path": "test/dist-pinned-installers.test.js",
       "minimumTests": 1
+    },
+    {
+      "path": "test/dist-catalog.test.js",
+      "minimumTests": 19
     }
   ]
 }

@@ -34,6 +34,13 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import {
+  catalogPaths,
+  catalogRows,
+  missingCatalogAddresses,
+  renderCatalogHtml,
+  renderCatalogMarkdown,
+} from './lib/dist-catalog.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -50,6 +57,10 @@ function parseArgs(argv) {
     // additive publishing, and until that exists main() prints what fell off.
     output: null, repos: [], tags: 20, defaultBranch: 'main',
     skipVendor: false, allowMissingVendor: false, vendorCache: null,
+    // Public address the catalog prints in its copy-paste install commands.
+    // A default is deliberate: a catalog whose commands point at nothing is
+    // worse than no catalog, and the mirror has exactly one public home.
+    baseUrl: 'https://yoyooai.com/dist',
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -73,6 +84,7 @@ function parseArgs(argv) {
     else if (arg === '--skip-vendor') options.skipVendor = true;
     else if (arg === '--allow-missing-vendor') options.allowMissingVendor = true;
     else if (arg === '--vendor-cache') options.vendorCache = path.resolve(value());
+    else if (arg === '--base-url') options.baseUrl = value();
     else throw new Error(`Unknown argument: ${arg}`);
   }
   if (!options.output) throw new Error('--output is required');
@@ -416,6 +428,68 @@ function buildVendor(options, record) {
   return summary;
 }
 
+/**
+ * The registry the CLI resolves `yos add <name>` against, read from the released
+ * core rather than from this build machine's working tree — the catalog must
+ * describe what customers can actually install, not what is checked out here.
+ */
+function releasedRegistry(options) {
+  const core = options.repos.find(entry => entry.repo.endsWith('/yos-core'));
+  if (!core) return { components: {} };
+  const { kept } = listTags(core.dir, options.tags);
+  const newest = [...kept].sort((a, b) => compareVersionsDesc(versionOf(a), versionOf(b)))[0];
+  for (const ref of [newest, options.defaultBranch]) {
+    if (!ref) continue;
+    try {
+      return JSON.parse(git(core.dir, ['show', `${ref}:registry.json`]));
+    } catch {
+      // Try the next ref. A core without a registry is possible (an old tag),
+      // and the catalog says "unregistered" rather than inventing names.
+    }
+  }
+  return { components: {} };
+}
+
+/**
+ * Write the human-readable catalog, and refuse to publish one that promises a
+ * file that is not on the mirror.
+ *
+ * The existence check reads the OUTPUT DIRECTORY, deliberately not the index the
+ * rows came from: index.json is what the build believes it wrote, and the point
+ * of the gate is to catch the case where that belief is wrong. Checking a claim
+ * against its own source is how you get a green light that means nothing.
+ */
+function publishCatalog(index, options, record) {
+  const registry = releasedRegistry(options);
+  const rows = catalogRows(index, registry);
+  const promised = catalogPaths(rows);
+  const onMirror = p => fs.existsSync(path.join(options.output, p));
+  // Canary: prove the oracle actually answers "no" to something before trusting
+  // it to answer "yes". Without this, replacing the check with `() => true`
+  // passes every test — the gate would report success without looking.
+  if (onMirror('__catalog-gate-canary-never-published__')) {
+    throw new Error('the version catalog gate is not checking anything — its existence oracle answers yes to everything');
+  }
+  const absent = missingCatalogAddresses(rows, onMirror);
+  if (absent.length > 0) {
+    throw new Error(
+      `the version catalog names ${absent.length} address(es) that are not on the mirror: ${absent.join(', ')}`
+    );
+  }
+
+  const renderOptions = { baseUrl: options.baseUrl, registry, builtAt: new Date().toISOString() };
+  const markdownPath = path.join(options.output, 'VERSIONS.md');
+  writeFileWithDirs(markdownPath, renderCatalogMarkdown(index, renderOptions));
+  record(markdownPath);
+  const htmlPath = path.join(options.output, 'index.html');
+  writeFileWithDirs(htmlPath, renderCatalogHtml(index, renderOptions));
+  record(htmlPath);
+
+  const named = rows.rows.map(row => `${row.id} ${row.latestVersion || '?'}`).join(', ');
+  console.log(`[dist] catalog: ${rows.rows.length} component(s) — ${named}`);
+  console.log(`[dist] catalog: ${promised.length} artifact address(es) verified present on the mirror`);
+}
+
 function main() {
   const options = parseArgs(process.argv.slice(2));
   fs.mkdirSync(options.output, { recursive: true });
@@ -480,14 +554,20 @@ function main() {
     console.log('[dist] vendor: skipped');
   }
 
-  const indexPath = path.join(options.output, 'index.json');
-  writeJson(indexPath, {
+  const index = {
     schemaVersion: 1,
     generator: 'scripts/build-dist.mjs',
     repos,
     vendor,
     files: files.sort((a, b) => a.path.localeCompare(b.path, 'en')),
-  });
+  };
+
+  publishCatalog(index, options, record);
+
+  const indexPath = path.join(options.output, 'index.json');
+  // Re-sorted because the catalog files were recorded after the first sort.
+  index.files = files.sort((a, b) => a.path.localeCompare(b.path, 'en'));
+  writeJson(indexPath, index);
   console.log(`[dist] ${files.length} file(s) → ${options.output}`);
   console.log(`[dist] index: ${indexPath}`);
 }
