@@ -12,22 +12,31 @@ import { describe, it, mock } from 'node:test';
 
 // ── Module mocks ───────────────────────────────────────────────────────────
 // Recorded per import; the harness below resets them for every case.
-const calls = { exec: [], execFile: [] };
+const calls = { curl: [], bash: [], npm: [] };
 const behavior = {
-  scriptOk: false,
+  downloadOk: false,  // the installer script could be fetched
+  scriptRunOk: true,  // the fetched installer script ran without error
   npmOk: new Map(),   // registry key ('default' | url) → boolean
   claudeOnPath: false,
 };
 
 mock.module('node:child_process', {
   namedExports: {
-    execSync(cmd, opts) {
-      calls.exec.push({ cmd, opts });
-      if (!behavior.scriptOk) throw new Error('curl failed');
+    execSync() {
       return Buffer.from('');
     },
     execFileSync(file, args, opts) {
-      calls.execFile.push({ file, args, opts });
+      if (file === 'curl') {
+        calls.curl.push({ file, args, opts });
+        if (!behavior.downloadOk) throw new Error('curl failed');
+        return Buffer.from('');
+      }
+      if (file === 'bash') {
+        calls.bash.push({ file, args, opts });
+        if (!behavior.scriptRunOk) throw new Error('installer script failed');
+        return Buffer.from('');
+      }
+      calls.npm.push({ file, args, opts });
       const registryArg = (args || []).find(a => String(a).startsWith('--registry='));
       const key = registryArg ? registryArg.slice('--registry='.length) : 'default';
       if (!behavior.npmOk.get(key)) throw new Error('npm failed');
@@ -57,9 +66,11 @@ const {
 } = await import('../runtime-setup.js');
 
 function reset() {
-  calls.exec.length = 0;
-  calls.execFile.length = 0;
-  behavior.scriptOk = false;
+  calls.curl.length = 0;
+  calls.bash.length = 0;
+  calls.npm.length = 0;
+  behavior.downloadOk = false;
+  behavior.scriptRunOk = true;
   behavior.npmOk = new Map();
   behavior.claudeOnPath = false;
 }
@@ -112,19 +123,19 @@ describe('planClaudeInstall', () => {
 describe('installClaude', () => {
   it('stops at the first source that works and does not touch the others', () => {
     reset();
-    behavior.scriptOk = true;
+    behavior.downloadOk = true;
     behavior.claudeOnPath = true;
 
     const result = installClaude({ env: {} });
     assert.equal(result.ok, true);
     assert.equal(result.via, 'native');
     assert.equal(result.fellBack, false);
-    assert.equal(calls.execFile.length, 0, 'npm must not run once the native installer worked');
+    assert.equal(calls.npm.length, 0, 'npm must not run once the native installer worked');
   });
 
   it('falls back to npm when claude.ai cannot be reached', () => {
     reset();
-    behavior.scriptOk = false;          // claude.ai unreachable
+    behavior.downloadOk = false;          // claude.ai unreachable
     behavior.npmOk.set('default', true);
     behavior.claudeOnPath = true;
 
@@ -134,12 +145,12 @@ describe('installClaude', () => {
     assert.equal(result.fellBack, true);
     assert.equal(result.attempts.length, 2);
     assert.equal(result.attempts[0].installed, false);
-    assert.equal(calls.execFile[0].args.includes(CLAUDE_NPM_PACKAGE), true);
+    assert.equal(calls.npm[0].args.includes(CLAUDE_NPM_PACKAGE), true);
   });
 
   it('falls back again to the mirror registry when the default registry fails', () => {
     reset();
-    behavior.scriptOk = false;
+    behavior.downloadOk = false;
     behavior.npmOk.set(DEFAULT_NPM_MIRROR, true);   // only the mirror answers
     behavior.claudeOnPath = true;
 
@@ -147,23 +158,40 @@ describe('installClaude', () => {
     assert.equal(result.ok, true);
     assert.equal(result.via, 'npm-mirror');
     assert.equal(result.attempts.length, 3);
-    const last = calls.execFile.at(-1);
+    const last = calls.npm.at(-1);
     assert.ok(last.args.includes(`--registry=${DEFAULT_NPM_MIRROR}`));
   });
 
   it('passes no --registry on the default npm step', () => {
     reset();
-    behavior.scriptOk = false;
+    behavior.downloadOk = false;
     behavior.npmOk.set('default', true);
     behavior.claudeOnPath = true;
 
     installClaude({ env: {} });
-    assert.equal(calls.execFile[0].args.some(a => String(a).startsWith('--registry=')), false);
+    assert.equal(calls.npm[0].args.some(a => String(a).startsWith('--registry=')), false);
+  });
+
+  it('does not run the installer it failed to download', () => {
+    // `curl … | bash` returns bash's status, so a download that never happened
+    // still exits 0 and looks installed. Fetch and run are separate for exactly
+    // this reason — a blocked host must not be reported as a PATH problem.
+    reset();
+    behavior.downloadOk = false;
+    const result = installClaude({ env: {} });
+    assert.equal(calls.bash.length, 0, 'nothing was downloaded, so nothing may be executed');
+    assert.equal(result.attempts[0].installed, false, 'a failed download is a failed install');
+  });
+
+  it('downloads the installer to a file rather than piping it into a shell', () => {
+    reset();
+    installClaude({ env: {} });
+    assert.ok(calls.curl[0].args.includes('-o'), 'the installer is written to a file first');
   });
 
   it('keeps trying when a source reports success but leaves no runnable claude', () => {
     reset();
-    behavior.scriptOk = true;           // installer exits 0 …
+    behavior.downloadOk = true;           // installer downloads and exits 0 …
     behavior.npmOk.set('default', true);
     behavior.claudeOnPath = false;      // … but nothing usable landed on PATH
 
@@ -184,7 +212,7 @@ describe('installClaude', () => {
 
   it('announces each source before trying it', () => {
     reset();
-    behavior.scriptOk = false;
+    behavior.downloadOk = false;
     behavior.npmOk.set('default', true);
     behavior.claudeOnPath = true;
 
@@ -196,7 +224,7 @@ describe('installClaude', () => {
   it('gives the native installer a connect timeout so an unreachable host cannot eat the whole budget', () => {
     reset();
     installClaude({ env: {} });
-    assert.match(calls.exec[0].cmd, /--connect-timeout \d+/);
+    assert.ok(calls.curl[0].args.includes('--connect-timeout'));
   });
 
   it('honours env overrides end to end, not just in the plan', () => {
@@ -207,7 +235,7 @@ describe('installClaude', () => {
     const result = installClaude({ env: { YOS_CLAUDE_INSTALL_URL: '' } });
     assert.equal(result.ok, true);
     assert.equal(result.via, 'npm');
-    assert.equal(calls.exec.length, 0, 'the native installer must not run when it is disabled');
+    assert.equal(calls.curl.length, 0, 'the native installer must not run when it is disabled');
   });
 });
 
@@ -263,10 +291,19 @@ describe('describeClaudeInstallFailure', () => {
 
   it('calls out a PATH problem instead of blaming the download', () => {
     reset();
-    behavior.scriptOk = true;
+    behavior.downloadOk = true;
     behavior.claudeOnPath = false;
     const result = installClaude({ env: {} });
     const lines = describeClaudeInstallFailure(result).join('\n');
     assert.match(lines, /no \x22claude\x22 on PATH/);
+  });
+
+  it('does not send someone to fix PATH when the download is what failed', () => {
+    reset();
+    behavior.downloadOk = false;
+    const result = installClaude({ env: {} });
+    const lines = describeClaudeInstallFailure(result).join('\n');
+    assert.doesNotMatch(lines, /no \x22claude\x22 on PATH/);
+    assert.match(lines, /Tried native installer[^\n]*failed/);
   });
 });

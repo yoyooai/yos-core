@@ -135,18 +135,36 @@ export function planClaudeInstall(env = process.env) {
   return steps;
 }
 
+/**
+ * Fetch the installer, then run it — deliberately two steps.
+ *
+ * `curl … | bash` reports the exit status of bash, so a download that never
+ * happened still looks like a success: bash reads empty stdin and exits 0. That
+ * turns "the host was unreachable" into "installed but not on PATH", which
+ * sends the customer to fix the wrong thing. Downloading first keeps the two
+ * failures distinguishable, and keeps a half-downloaded error page from being
+ * executed.
+ *
+ * --connect-timeout keeps an unreachable host from burning the whole budget
+ * before the next source gets a turn; a slow-but-alive download is untouched.
+ */
 function runInstallScript(url) {
-  // --connect-timeout keeps an unreachable host from burning the whole budget
-  // before the next source gets a turn; a slow-but-alive download is untouched.
-  const quoted = `'${String(url).replace(/'/g, `'\\''`)}'`;
+  const scriptPath = path.join(os.tmpdir(), `yos-runtime-install-${process.pid}.sh`);
   try {
-    execSync(`curl -fsSL --connect-timeout 20 ${quoted} | bash`, {
+    execFileSync('curl', ['-fsSL', '--connect-timeout', '20', url, '-o', scriptPath], {
       stdio: 'pipe',
       timeout: CLAUDE_INSTALL_TIMEOUT_MS,
     });
+  } catch {
+    return false;
+  }
+  try {
+    execFileSync('bash', [scriptPath], { stdio: 'pipe', timeout: CLAUDE_INSTALL_TIMEOUT_MS });
     return true;
   } catch {
     return false;
+  } finally {
+    try { fs.rmSync(scriptPath, { force: true }); } catch { /* best effort */ }
   }
 }
 

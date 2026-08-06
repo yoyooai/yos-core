@@ -93,7 +93,7 @@
     },
     {
       "path": "cli/lib/__tests__/claude-install-fallback.test.js",
-      "minimumTests": 20
+      "minimumTests": 23
     }
   ]
 }
