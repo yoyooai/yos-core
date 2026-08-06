@@ -4,6 +4,60 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
+## [0.1.3] - 2026-08-06
+
+Five things a customer could actually hit, found by reading the shipped code
+against the debt ledger rather than trusting what the ledger said. Two of them
+existed because a fix recorded as "done" had never reached this line at all.
+
+### Fixed
+
+- `npm ci` inside a source checkout no longer edits a live installation. npm runs
+  `postinstall` for a clone exactly as it does for a real install, and both of
+  postinstall's jobs write into `~/yos` — so a development action replaced live
+  skill directories and rewrote Codex configs on a machine whose services kept
+  serving the old code from memory. An installed copy is now told apart from a
+  checkout by where the package sits, and an unrecognised layout declines instead
+  of guessing. `YOS_POSTINSTALL_FORCE=1` overrides it.
+- When skills on disk do change, the output now says the running services are
+  still on the old code until they restart.
+- A component whose declared Node range does not match the running Node is
+  refused at `yos add`, with the version it needs, instead of installing and
+  never starting.
+- `yos upgrade --self --check` no longer downloads the entire release to read the
+  update notes: 859 KB fetched for a 10 KB file, on links measured at 62–175
+  KB/s. The notes are read from the version's own tag — never `main`, never a
+  moving `stable/` pointer, so they still describe the version being offered
+  after the next release lands.
+- Archives fetched from the distribution mirror are checked against the sha256 it
+  already publishes for every file. gzip's CRC already rejects a damaged archive;
+  this catches the archive that is well-formed and simply is not the one asked
+  for — the mirror caught mid-publish, or a stale copy held by a proxy. Where the
+  digest cannot be checked, that is printed rather than passing quietly. It is
+  not a supply-chain control: digest and file share an origin.
+- A machine installed from a non-default mirror remembers it. Only the repository
+  was recorded before, so the mirror fell back to the built-in default on the
+  next upgrade and the machine left the origin it came from — on a host that
+  cannot reach the default, it silently stopped upgrading. The default itself is
+  deliberately not recorded, so the origin behind it stays re-pointable; an
+  explicitly empty value is recorded, because "use GitHub, not the mirror" is a
+  choice.
+- `install-<tag>.sh` is published for every mirrored tag, each read from that tag.
+  Only the newest had one, and publishing uses `rsync --delete`, so a pinned
+  address died at the next release — measured, `install-v0.1.0.sh` and
+  `install-v0.1.1.sh` were already 404.
+- Mirror retention goes from 5 to 20 versions per line, and the build now prints
+  which tags fell outside it and names them in `index.json`. At recent release
+  rates a version left the mirror days after shipping, so a machine could no
+  longer be reinstalled at the version it was running, and nothing said so.
+
+### Changed
+
+- A failing test run leaves its full output in `.test-logs/` instead of being
+  unreproducible after the fact.
+- The official `docker run` banner reports the port the console is actually on
+  rather than a hardcoded 3456.
+
 ## [0.1.2] - 2026-08-06
 
 On a machine where the customer is not an administrator, no boot hook could be
