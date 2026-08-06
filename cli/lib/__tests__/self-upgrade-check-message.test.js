@@ -47,7 +47,11 @@ describe('checkForCoreUpdates when no release source is configured', () => {
     // The token itself is still part of the library contract; only the text the
     // CLI shows changed.
     assert.equal(resolveReleaseRepo({}).error, 'release_source_not_configured');
-    assert.equal(resolveReleaseRepo({}).message, 'YOS_RELEASE_REPO is not configured');
+    // The message is asserted by content, not as a whole string: it now carries
+    // the repair as well (TD-19), and pinning the exact sentence made this test
+    // the thing that broke when the message became more useful.
+    assert.match(resolveReleaseRepo({}).message, /YOS_RELEASE_REPO is not configured/);
+    assert.match(resolveReleaseRepo({}).message, /export YOS_RELEASE_REPO=/);
   });
 
   it('surfaces the operator-facing text for an invalid release source', () => {

@@ -4,11 +4,15 @@ import { resolveRegistryRepo, resolveReleaseRepo } from '../release-source.js';
 
 describe('YOS release source', () => {
   it('fails closed when no release repository is configured', () => {
-    assert.deepEqual(resolveReleaseRepo({}), {
-      success: false,
-      error: 'release_source_not_configured',
-      message: 'YOS_RELEASE_REPO is not configured',
-    });
+    const result = resolveReleaseRepo({});
+    // The machine-readable code is pinned exactly — callers branch on it.
+    assert.equal(result.success, false);
+    assert.equal(result.error, 'release_source_not_configured');
+    // The human-readable half is pinned by content, not by exact string: it now
+    // carries the repair, and asserting the whole sentence made this test the
+    // thing that broke when the message got more useful (2026-08-06).
+    assert.match(result.message, /YOS_RELEASE_REPO is not configured/);
+    assert.match(result.message, /export YOS_RELEASE_REPO=/);
   });
 
   it('accepts an explicit GitHub owner/repository pair', () => {
