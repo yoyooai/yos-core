@@ -4,6 +4,37 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
+## [0.1.5] - 2026-08-06
+
+"What is the latest version, and where do I get it?" had no single place to read.
+It was answered from memory, from chat history, or from a table somebody kept by
+hand — and a hand-kept table does not fail loudly. It goes stale in silence while
+everyone still treats it as the source of truth.
+
+### Added
+
+- The distribution mirror publishes a version catalog: `VERSIONS.md` and a
+  browser page at the mirror root. Per component it states the newest version, a
+  copy-paste install command, how to pin an older version, whether every mirrored
+  version can be installed offline, and which tags fell outside retention — a
+  retention limit must not be met as a 404.
+- The catalog is rendered from `index.json` inside the same build that writes it.
+  There is no second place to update, therefore no second place to forget. It is
+  digest-covered in `index.json` like every other mirrored file.
+- The build refuses to publish a catalog naming an address that is not on the
+  mirror. The existence check reads the output directory, deliberately not the
+  index the rows were derived from: a check that consults the same source as the
+  claim it checks cannot fail. A canary proves the check answers "no" to
+  something before its "yes" is trusted.
+- `registry.json` carries `displayName`, so the catalog and `yos add <name>` call
+  a component by the same name, from one file.
+- `build-dist.mjs` takes `--base-url` for the address printed in install commands.
+
+### Fixed
+
+- A piped install command no longer shreds its own table row: the unescaped pipe
+  in `curl … | bash` ended the markdown cell and cut the command in half.
+
 ## [0.1.4] - 2026-08-06
 
 Accepting 0.1.3 turned up the half of the pinned-address problem that 0.1.3 did
