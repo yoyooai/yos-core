@@ -4,6 +4,31 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
+## [0.1.4] - 2026-08-06
+
+Accepting 0.1.3 turned up the half of the pinned-address problem that 0.1.3 did
+not fix: pinning an older version still needed GitHub.
+
+### Fixed
+
+- The distribution mirror carries an npm package for every mirrored version, not
+  only the newest. The installer prefers that package and falls back to git,
+  which needs GitHub — so with only one package mirrored, only the newest version
+  could be installed without GitHub. Measured with GitHub blackholed:
+  `install.sh --branch v0.1.2` printed "No release package for v0.1.2 on the
+  distribution mirror — installing from git" and died reaching github.com over
+  ssh. Reinstalling a machine at the version it was running was impossible for
+  exactly the machines the mirror exists for.
+
+### Note on install-<tag>.sh
+
+The pinned installer is the installer **as it was at that tag** — it is not a
+request to install that version. Run unchanged it still resolves the newest
+release; use `--branch <tag>` to pin the version itself. The name reads like a
+promise it does not make, which is worth knowing before anyone writes it into a
+document.
+
+
 ## [0.1.3] - 2026-08-06
 
 Five things a customer could actually hit, found by reading the shipped code

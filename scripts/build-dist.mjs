@@ -313,12 +313,25 @@ function publishInstallers({ repo, dir }, tags, newest, options, record) {
 /**
  * Pack the npm artifact for a tag from a throwaway worktree, so the package is
  * built from exactly the released tree and never from local edits.
+ *
+ * Called for every mirrored tag. The installer prefers this package and only
+ * falls back to git, which needs GitHub — so a version without one cannot be
+ * installed on the machines the mirror exists for.
+ *
+ * @returns {string|null} the package file name, or null when the tag has nothing
+ *   to pack (an old tag from before the package existed)
  */
 function packRelease({ repo, dir }, tag, outDir, record) {
   const worktree = fs.mkdtempSync(path.join(fs.realpathSync(process.env.TMPDIR || '/tmp'), 'yos-dist-pack-'));
   const stage = fs.mkdtempSync(path.join(fs.realpathSync(process.env.TMPDIR || '/tmp'), 'yos-dist-out-'));
   try {
     git(dir, ['worktree', 'add', '--detach', worktree, tag]);
+    if (!fs.existsSync(path.join(worktree, 'package.json'))) {
+      // A tag from before the package existed has nothing to pack. Say so and
+      // carry on: one unpackable old tag must not stop the release.
+      console.error(`[dist] ${repo}@${tag}: no package.json at that tag — no npm package mirrored`);
+      return null;
+    }
     const output = execFileSync('npm', ['pack', '--ignore-scripts', '--pack-destination', stage], {
       cwd: worktree,
       encoding: 'utf8',
@@ -422,7 +435,18 @@ function main() {
     // Only the core package is installed by npm; components are installed from
     // their source subdirectory, so packing them would be dead weight.
     if (entry.repo.endsWith('/yos-core')) {
-      built.summary.packages.push(packRelease(entry, built.newest, built.outDir, record));
+      // A package per mirrored tag, not just the newest. The installer prefers
+      // the npm package and only falls back to git — which needs GitHub — so
+      // mirroring one package meant only the newest version was installable
+      // without GitHub. Measured 2026-08-06 with GitHub blackholed:
+      // `install.sh --branch v0.1.2` printed "No release package for v0.1.2 on
+      // the distribution mirror — installing from git" and died on ssh to
+      // github.com. Pinning an older version was impossible for exactly the
+      // machines the mirror exists for.
+      for (const tag of built.summary.tags) {
+        const packed = packRelease(entry, tag, built.outDir, record);
+        if (packed) built.summary.packages.push(packed);
+      }
       const installers = publishInstallers(entry, built.summary.tags, built.newest, options, record);
       built.summary.installer = installers.latest;
       built.summary.pinnedInstallers = installers.pinned;

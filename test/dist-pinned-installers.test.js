@@ -118,6 +118,29 @@ describe('pinned installers', () => {
     );
   });
 
+  // The deeper half of the same defect, found while accepting 0.1.3: the
+  // installer prefers the npm package and only falls back to git, which needs
+  // GitHub. Mirroring a package for the newest tag alone meant only the newest
+  // version could be installed without GitHub. Measured with GitHub blackholed,
+  // `install.sh --branch v0.1.2` printed "No release package for v0.1.2 on the
+  // distribution mirror — installing from git" and died on ssh to github.com.
+  // Pinning an older version was impossible for exactly the machines the mirror
+  // exists for.
+  test('every mirrored tag has its own npm package, not just the newest', () => {
+    const packageDir = path.join(output, 'yoyooai', 'yos-core', 'package');
+    const packed = fs.readdirSync(packageDir).sort();
+    expect(packed).toEqual(['yos-0.1.1.tgz', 'yos-0.1.2.tgz', 'yos-0.1.3.tgz']);
+  });
+
+  test('index.json lists a package per mirrored tag', () => {
+    const index = JSON.parse(fs.readFileSync(path.join(output, 'index.json'), 'utf8'));
+    const core = index.repos.find(r => r.repo === 'yoyooai/yos-core');
+    expect(core.packages).toEqual(
+      expect.arrayContaining(['yos-0.1.3.tgz', 'yos-0.1.2.tgz', 'yos-0.1.1.tgz'])
+    );
+    expect(core.packages).not.toContain('yos-0.1.0.tgz'); // outside retention
+  });
+
   test('every published installer carries a digest, like every other mirrored file', () => {
     const index = JSON.parse(fs.readFileSync(path.join(output, 'index.json'), 'utf8'));
     const installers = index.files.filter(f => f.path.startsWith('install'));
