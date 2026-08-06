@@ -90,7 +90,8 @@ YOS_RELEASE_REPO="${YOS_RELEASE_REPO:-yoyooai/yos-core}"
 # the source of record and is still tried as a fallback.
 # Keep the default in sync with cli/lib/dist-origin.js — one dash, so that an
 # explicitly empty value disables the mirror instead of restoring the default.
-YOS_DIST_BASE="${YOS_DIST_BASE-https://yoyooai.com/dist}"
+DEFAULT_DIST_BASE="https://yoyooai.com/dist"
+YOS_DIST_BASE="${YOS_DIST_BASE-$DEFAULT_DIST_BASE}"
 
 # Node.js is pinned and SHA-256 verified rather than installed through nvm:
 # nvm's own installer lives on raw.githubusercontent and then clones from
@@ -565,6 +566,32 @@ record_release_source() {
   } >> "$env_file" || return 0
 }
 
+# Record the mirror this machine was installed from, when it is not the built-in
+# default. Recording "which repository" was never enough: a machine installed
+# from a private mirror resolved the default mirror on its next upgrade and left
+# the one it came from — and on a host that cannot reach the default, that means
+# it silently stops upgrading.
+#
+# The DEFAULT is deliberately not recorded. Clients are meant to know only a
+# stable domain so the origin behind it can be re-pointed without touching a
+# single machine; writing today's default into every .env would freeze them all
+# onto it. An empty value IS recorded, because "use GitHub, not the mirror" is a
+# deliberate choice and losing it is the same class of bug.
+record_dist_base() {
+  local env_file="$HOME/yos/.env"
+  # Equal to the default means either "no opinion" or "the default, explicitly";
+  # both resolve the same way later, so there is nothing worth remembering.
+  [ "$YOS_DIST_BASE" != "$DEFAULT_DIST_BASE" ] || return 0
+  if [ -f "$env_file" ] && grep -q '^YOS_DIST_BASE=' "$env_file" 2>/dev/null; then
+    return 0
+  fi
+  mkdir -p "$HOME/yos" || return 0
+  {
+    printf '\n# Distribution mirror this machine was installed from (recorded by the installer)\n'
+    printf 'YOS_DIST_BASE=%s\n' "$YOS_DIST_BASE"
+  } >> "$env_file" || return 0
+}
+
 # ── Install YOS ─────────────────────────────────────────────
 # An interrupted `npm install -g` leaves its own scratch directory behind
 # (`.yos-XXXXXXXX`, npm's staging name for our package). Every later attempt
@@ -825,6 +852,7 @@ if [ "$NO_INIT" = true ]; then
   shell_rc="$(_detect_shell_rc)"
   info "Skipping yos init (--no-init)."
   record_release_source
+  record_dist_base
   echo ""
   if [ -n "$shell_rc" ]; then
     info "To initialize later, open a new terminal or run:"
@@ -843,6 +871,7 @@ else
   # was installed from; otherwise `yos upgrade --self` has nothing to go on.
   export YOS_RELEASE_REPO
   record_release_source
+  record_dist_base
   echo ""
   local init_exit=0
   if _tty_readable; then

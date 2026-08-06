@@ -12,12 +12,14 @@
  *   node scripts/build-dist.mjs --output <dir> \
  *     --repo yoyooai/yos-core=. \
  *     --repo yoyooai/yos-components=../yos-components \
- *     [--tags 5] [--default-branch main] [--skip-vendor] [--vendor-cache <dir>]
+ *     [--tags 20] [--default-branch main] [--skip-vendor] [--vendor-cache <dir>]
  *     [--allow-missing-vendor]
  *
  * Output layout (under <dir>):
  *   install.sh                                   installer from the newest core release
- *   install-<tag>.sh                             the same installer, pinned
+ *   install-<tag>.sh                             the same installer, pinned — one
+ *                                                per mirrored tag, each taken
+ *                                                from that tag
  *   index.json                                  what this build contains, with sha256 per file
  *   <owner>/<repo>/tags.json                     every mirrored tag
  *   <owner>/<repo>/releases/latest.json          newest tag, for the installer
@@ -41,7 +43,12 @@ const RAW_MAX_DEPTH = 3;
 
 function parseArgs(argv) {
   const options = {
-    output: null, repos: [], tags: 5, defaultBranch: 'main',
+    // Retention per version line. Was 5, which at the release rate of early
+    // August meant a version left the mirror within days of shipping — a machine
+    // could no longer be reinstalled at the version it was running. 20 is not a
+    // principle, it is breathing room: the honest fix for "forever" would be
+    // additive publishing, and until that exists main() prints what fell off.
+    output: null, repos: [], tags: 20, defaultBranch: 'main',
     skipVendor: false, allowMissingVendor: false, vendorCache: null,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -108,6 +115,18 @@ function versionOf(tag) {
 }
 
 /** Tags of a repository, newest first, keeping any component prefix intact. */
+/**
+ * Which tags this build mirrors, and which it leaves behind.
+ *
+ * Retention is a real limit with a real consequence: publishing uses
+ * `rsync --delete`, so a tag that falls out of this list disappears from the
+ * mirror — its archive, its raw files and its pinned installer. Measured on
+ * 2026-08-06 with a retention of 5: install-v0.1.0.sh and install-v0.1.1.sh were
+ * already 404 while install-v0.1.2.sh answered.
+ *
+ * So the dropped list is returned rather than discarded, and main() prints it. A
+ * cap nobody is told about reads as "everything is here" right up to the 404.
+ */
 function listTags(dir, limit) {
   const all = git(dir, ['tag', '--list'])
     .split('\n')
@@ -125,11 +144,13 @@ function listTags(dir, limit) {
     byPrefix.get(prefix).push(tag);
   }
   const kept = [];
+  const dropped = [];
   for (const tags of byPrefix.values()) {
     tags.sort((a, b) => compareVersionsDesc(versionOf(a), versionOf(b)));
     kept.push(...tags.slice(0, limit));
+    dropped.push(...tags.slice(limit));
   }
-  return kept;
+  return { kept, dropped };
 }
 
 function writeFileWithDirs(filePath, contents) {
@@ -166,10 +187,19 @@ function buildRepo({ repo, dir }, options, record) {
     throw new Error(`${dir} is not a git checkout (needed for ${repo})`);
   }
   const outDir = path.join(options.output, repo);
-  const tags = listTags(dir, options.tags);
+  const { kept: tags, dropped } = listTags(dir, options.tags);
   if (tags.length === 0) throw new Error(`${repo} has no version tags to mirror`);
 
-  const summary = { repo, tags: [], rawFiles: 0, packages: [] };
+  const summary = {
+    repo,
+    tags: [],
+    rawFiles: 0,
+    packages: [],
+    tagRetention: options.tags,
+    // Stated so a reader — or a script — can tell what is reachable without
+    // discovering it as a 404.
+    droppedTags: dropped,
+  };
 
   // tags.json — GitHub's /tags shape; only `name` is consumed, `commit.sha`
   // is kept so a human can tell what a mirrored tag actually points at.
@@ -223,21 +253,61 @@ function buildRepo({ repo, dir }, options, record) {
 }
 
 /**
- * Publish the installer that goes with a release.
+ * Publish the installers: `install.sh` for the newest release, plus a pinned
+ * `install-<tag>.sh` for every tag the mirror carries.
  *
- * The download page serves this exact file, so it is built from the released
- * tag rather than copied by hand: a hand-copied installer is how the page and
- * the release drift apart without anyone noticing.
+ * Each pinned copy comes from its own tag, which is the entire point — a pinned
+ * address that serves a different version's installer is worse than no pinned
+ * address at all.
+ *
+ * Only the newest tag used to get one, so a pinned URL stopped working at the
+ * very next release: measured 2026-08-06, install-v0.1.0.sh and
+ * install-v0.1.1.sh were 404 while install-v0.1.2.sh answered. Any pinned
+ * address written into a document or a script rotted within one release.
+ *
+ * A tag from before install.sh moved to its current path simply has no installer
+ * to publish; that is reported and skipped rather than failing the build.
  */
-function publishInstaller({ repo, dir }, tag, options, record) {
-  const contents = git(dir, ['show', `${tag}:scripts/install.sh`], { encoding: 'buffer' });
-  for (const name of ['install.sh', `install-${tag}.sh`]) {
+function publishInstallers({ repo, dir }, tags, newest, options, record) {
+  const readInstaller = (tag) => {
+    try {
+      return git(dir, ['show', `${tag}:scripts/install.sh`], { encoding: 'buffer' });
+    } catch {
+      return null;
+    }
+  };
+
+  const newestContents = readInstaller(newest);
+  if (!newestContents) {
+    throw new Error(`${repo}@${newest} has no scripts/install.sh to publish as install.sh`);
+  }
+
+  const write = (name, contents) => {
     const target = path.join(options.output, name);
     writeFileWithDirs(target, contents);
     fs.chmodSync(target, 0o644);
     record(target);
+  };
+
+  write('install.sh', newestContents);
+
+  const published = [];
+  const missing = [];
+  for (const tag of tags) {
+    const contents = tag === newest ? newestContents : readInstaller(tag);
+    if (!contents) {
+      missing.push(tag);
+      continue;
+    }
+    write(`install-${tag}.sh`, contents);
+    published.push(`install-${tag}.sh`);
   }
-  return `install-${tag}.sh`;
+
+  for (const tag of missing) {
+    console.error(`[dist] ${repo}@${tag}: no scripts/install.sh at that tag — no pinned installer published`);
+  }
+
+  return { latest: `install-${newest}.sh`, pinned: published };
 }
 
 /**
@@ -353,10 +423,20 @@ function main() {
     // their source subdirectory, so packing them would be dead weight.
     if (entry.repo.endsWith('/yos-core')) {
       built.summary.packages.push(packRelease(entry, built.newest, built.outDir, record));
-      built.summary.installer = publishInstaller(entry, built.newest, options, record);
+      const installers = publishInstallers(entry, built.summary.tags, built.newest, options, record);
+      built.summary.installer = installers.latest;
+      built.summary.pinnedInstallers = installers.pinned;
     }
     repos.push(built.summary);
     console.log(`[dist] ${entry.repo}: ${built.summary.tags.length} tag(s), newest ${built.newest}`);
+    // Say what fell outside the window. Silence here reads as "everything is
+    // mirrored", and the first sign otherwise is a 404 on somebody's machine.
+    if (built.summary.droppedTags.length > 0) {
+      console.log(
+        `[dist] ${entry.repo}: NOT mirrored (retention ${options.tags}): `
+        + built.summary.droppedTags.join(', ')
+      );
+    }
   }
 
   let vendor = null;

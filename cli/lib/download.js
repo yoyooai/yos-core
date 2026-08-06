@@ -9,6 +9,7 @@ import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import { getGitHubToken, sanitizeError, withRateLimitRetrySync, buildTagName } from './github.js';
 import { distMirrorUrl, isDistOnly, noteMirrorFallback } from './dist-origin.js';
+import { verifyMirrorDownload } from './dist-integrity.js';
 import { copyTree } from './fs-utils.js';
 import { parseSkillMd } from './skill.js';
 
@@ -41,6 +42,30 @@ function createDownloadTmpDir() {
  * @param {'tag'|'branch'} refType - Whether the ref is a tag or branch
  * @param {string} tarballPath - Destination file path for the tarball
  */
+/**
+ * Fail the download when the bytes do not match the digest the mirror published.
+ *
+ * Deliberately silent on the happy path — an extra "verified" line every
+ * download trains people to skim. The cases worth saying out loud are the two
+ * where the check could not be made, because "not checked" quietly reading as
+ * "checked" is how this defect stayed invisible in the first place.
+ *
+ * @throws {Error} on a digest mismatch
+ */
+function assertMirrorIntegrity(filePath, url, deps = {}) {
+  const verify = deps.verifyMirrorDownload ?? verifyMirrorDownload;
+  const write = deps.write ?? (message => process.stderr.write(message));
+  const result = verify({ filePath, url });
+
+  if (result.status === 'mismatch') {
+    throw new Error(result.message);
+  }
+  if (result.status !== 'match') {
+    write(`Note: ${result.message}\n`);
+  }
+  return result;
+}
+
 function curlDownload(repo, ref, refType, tarballPath) {
   withRateLimitRetrySync(
     () => curlDownloadOnce(repo, ref, refType, tarballPath),
@@ -58,6 +83,11 @@ function curlDownloadOnce(repo, ref, refType, tarballPath) {
         timeout: 60000,
         stdio: 'pipe',
       });
+      // The mirror publishes a sha256 for every file it carries. gzip's own CRC
+      // already rejects a damaged archive; this catches the archive that is
+      // well-formed but is not the one we asked for — a mirror caught
+      // mid-publish, or a stale copy held by something in between.
+      assertMirrorIntegrity(tarballPath, mirrorUrl);
       return;
     } catch (err) {
       if (isDistOnly()) {

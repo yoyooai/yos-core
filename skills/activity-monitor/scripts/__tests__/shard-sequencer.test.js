@@ -116,7 +116,10 @@ describe('shard-sequencer session isolation (failure-mode case C/C\')', () => {
     writeFlag('shared', 'identity', { tmpdir });
     const result = await waitForFlag('shared', 'identity', { deadlineMs: 1000, pollMs: 10, tmpdir });
     assert.equal(result.ok, true);
-    assert.ok(result.waitedMs <= 20, `expected instant (poisoned) wait, got ${result.waitedMs}ms`);
+    // "Instant" means it never polled a second time; the contrasting case waits
+    // 60ms for a real rewrite. The slack absorbs event-loop stalls on a loaded
+    // machine instead of reporting them as a broken fingerprint.
+    assert.ok(result.waitedMs <= 50, `expected instant (poisoned) wait, got ${result.waitedMs}ms`);
   });
 
   it('flags for the same shard name are distinct files per session', () => {

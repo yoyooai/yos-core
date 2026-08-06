@@ -12,7 +12,7 @@ import { execFileSync, execSync, spawnSync } from 'node:child_process';
 import { SKILLS_DIR, YOS_DIR, getYosConfig } from './config.js';
 import { downloadArchive, downloadBranch } from './download.js';
 import { generateManifest, saveMergeBaseline } from './manifest.js';
-import { fetchRawFile, fetchLatestTag, compareSemverDesc, sanitizeError } from './github.js';
+import { fetchRawFile, fetchLatestTag, compareSemverDesc, sanitizeError, buildTagName } from './github.js';
 import { copyTree, syncTree } from './fs-utils.js';
 import { getCommandHooks, hookScriptKey } from './hook-utils.js';
 import { isCoreManaged } from './sync-settings-hooks.js';
@@ -164,6 +164,45 @@ function getWritableTmpBase(prefix = 'yos-self-upgrade-probe-') {
     fs.mkdirSync(base, { recursive: true });
   }
   return base;
+}
+
+/**
+ * Fetch just CHANGELOG.md for a core version — no release download.
+ *
+ * `yos upgrade --self --check` used to download the entire release (measured
+ * 2026-08-06 against production: 859 KB tarball) so it could read one 10 KB
+ * file. On the cross-border links these machines actually sit on that is
+ * minutes of waiting to answer "is there an update, and what changed" — a
+ * question that should cost one small GET.
+ *
+ * The reference is the version's own tag, never `main` and never a moving
+ * `stable/` pointer: the notes shown must be the notes belonging to the version
+ * being offered, and an immutable ref is the only way that stays true after the
+ * next release. fetchRawFile tries our mirror first, GitHub second.
+ *
+ * @param {string} version
+ * @param {string} [branch] when set, read the notes from that branch instead
+ * @returns {{ success: boolean, changelog?: string, error?: string }}
+ */
+export function fetchCoreChangelog(version, branch, deps = {}) {
+  const resolveRepo = deps.resolveReleaseRepo ?? resolveReleaseRepo;
+  const fetchFile = deps.fetchRawFile ?? fetchRawFile;
+
+  const releaseSource = resolveRepo();
+  if (!releaseSource.success) {
+    return { success: false, error: releaseSource.message };
+  }
+
+  const ref = branch || buildTagName(version);
+  try {
+    const changelog = fetchFile(releaseSource.repo, 'CHANGELOG.md', ref);
+    if (typeof changelog !== 'string' || changelog.trim() === '') {
+      return { success: false, error: `CHANGELOG.md at ${ref} was empty` };
+    }
+    return { success: true, changelog };
+  } catch (err) {
+    return { success: false, error: sanitizeError(err.message) };
+  }
 }
 
 export function downloadCoreToTemp(version, branch) {

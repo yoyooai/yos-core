@@ -14,6 +14,8 @@
  * format regardless of which origin answered.
  */
 
+import { readEnvFile } from './env.js';
+
 const DEFAULT_DIST_BASE = 'https://yoyooai.com/dist';
 
 /** Owners whose repositories the mirror carries. `*` means "every owner". */
@@ -40,8 +42,30 @@ export class DistOriginError extends Error {
  * @param {Record<string, string|undefined>} [env]
  * @returns {{ enabled: boolean, base: string|null }}
  */
-export function resolveDistBase(env = process.env) {
-  const configured = env.YOS_DIST_BASE;
+export function resolveDistBase(env = process.env, deps = {}) {
+  let configured = env.YOS_DIST_BASE;
+
+  // The installer records a non-default mirror in ~/yos/.env. Without this the
+  // CLI is invoked from a plain shell that never loads that file, so a machine
+  // installed from a private mirror would resolve the built-in default on its
+  // very next upgrade and quietly leave the mirror it was installed from —
+  // which, on a host that cannot reach the default, means it stops upgrading.
+  //
+  // Only the real process environment gets this fallback. Callers that pass an
+  // explicit env object are stating the whole environment on purpose, and must
+  // not have this machine's file read behind their back.
+  if (configured === undefined && env === process.env) {
+    try {
+      // An unreadable ~/yos/.env means "no recorded value", not "the command
+      // fails": every yos command resolves this, so throwing here would take the
+      // whole CLI down over a file permission.
+      const recorded = (deps.readEnvFile ?? readEnvFile)();
+      if (recorded.has('YOS_DIST_BASE')) configured = recorded.get('YOS_DIST_BASE');
+    } catch {
+      configured = undefined;
+    }
+  }
+
   const raw = configured === undefined ? DEFAULT_DIST_BASE : String(configured).trim();
   if (!raw) return { enabled: false, base: null };
   return { enabled: true, base: normalizeDistBase(raw) };
