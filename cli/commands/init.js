@@ -27,6 +27,7 @@ import { npmInstallEnv } from '../lib/npm-env.js';
 import { writeEnvEntries } from '../lib/env.js';
 import { resolveWebConsolePort, readRecordedConsolePort, DEFAULT_WEB_CONSOLE_PORT } from '../lib/web-console-port.js';
 import { looksIsolated, classifyUnitWrite, backupUnitPath } from '../lib/pm2-unit-guard.js';
+import { parseJlist, classifyLeftovers, describeLeftovers } from '../lib/pm2-leftovers.js';
 import { readServiceState, judgeSettle } from '../lib/service.js';
 import { distVendorUrl, noteMirrorFallback } from '../lib/dist-origin.js';
 import { installRebootCrontab } from '../lib/boot-autostart.js';
@@ -1362,6 +1363,56 @@ function setupBootAutostartWithoutRoot(why) {
 }
 
 /**
+ * Report PM2 processes that this install did not start.
+ *
+ * TD-21: a machine reinstalled by wiping the home directory left three PM2 God
+ * Daemons running, still holding the Web Console port, and init had no idea —
+ * it never looked for a PM2 process it had not started, so the failure surfaced
+ * later as an unexplained port conflict.
+ *
+ * Deliberately read-only. The processes belong to the account, a reinstall is
+ * the worst moment to guess wrong, and killing something an operator runs on
+ * purpose is not recoverable from a log line. So this states what is there and
+ * hands over the exact command; the decision stays with the person.
+ */
+function reportPm2Leftovers({ quiet = false } = {}) {
+  let read;
+  try {
+    const result = spawnSync('pm2', ['jlist'], { encoding: 'utf8', stdio: 'pipe', timeout: 20000 });
+    read = parseJlist(result.stdout);
+  } catch {
+    read = { ok: false, processes: [] };
+  }
+
+  if (!read.ok) {
+    // "Could not tell" is not "nothing there" — saying the machine is clean on
+    // the strength of an unreadable answer is the failure mode this codebase
+    // keeps rediscovering, so say which one this is.
+    if (!quiet) console.log(`  ${dim('Could not read the PM2 process list — skipped the leftover check.')}`);
+    return;
+  }
+
+  const classified = classifyLeftovers({
+    processes: read.processes,
+    yosDir: YOS_DIR,
+    exists: (p) => fs.existsSync(p),
+  });
+  const described = describeLeftovers(classified);
+  if (!described) {
+    if (!quiet) console.log(`  ${success('No PM2 processes from a previous install')}`);
+    return;
+  }
+
+  // Always shown, quiet or not: it changes what the rest of this run means.
+  console.log(`  ${warn(described.headline)}`);
+  for (const line of described.details) console.log(`    ${dim(line)}`);
+  console.log(`    ${cyan('This install will not stop them. To clear them yourself:')} ${bold(described.command)}`);
+  if (classified.stale.length > 0) {
+    console.log(`    ${dim('Until then they keep holding whatever ports they bound, which can make this install fail to start its own services.')}`);
+  }
+}
+
+/**
  * Configure PM2 to auto-start on system boot.
  * - Linux with systemd: generates a stable unit directly (avoids PIDFile issues)
  * - Other platforms (macOS, etc.): falls back to `pm2 startup`
@@ -2201,6 +2252,9 @@ export async function initCommand(args) {
       process.exit(1);
     }
   }
+
+  // Step 4.1: PM2 processes this install did not start (TD-21)
+  reportPm2Leftovers({ quiet });
 
   // Step 4.5: Select agent runtime
   // Resolution: --runtime flag > YOS_RUNTIME env > existing config > interactive prompt
