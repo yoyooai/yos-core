@@ -4,6 +4,34 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
+## [0.1.2] - 2026-08-06
+
+On a machine where the customer is not an administrator, no boot hook could be
+installed — and the install called that optional and said nothing was lost by
+it. That was false. After a reboot every service was down, the bot was silent,
+and the one command that would have fixed it had never been written down where
+anyone would look.
+
+### Fixed
+
+- When no privileged boot hook can be installed, the boot hook is installed in
+  the customer's own crontab instead (`@reboot pm2 resurrect`). cron runs as a
+  system service and fires `@reboot` per user with no linger and no polkit
+  prompt, so a non-root account can own its own boot recovery. Verified by
+  rebooting a machine with no sudo: all four services came back with nobody
+  typing anything.
+- Every privileged route that fails now hands off to that fallback instead of
+  printing a warning and returning.
+- When even the crontab route is impossible, the message says outright that the
+  services will not come back after a reboot, gives the command that brings them
+  back now, and names the two ways to fix it for good. It no longer claims the
+  machine is fine without a boot hook.
+- Re-running `yos init` replaces its own crontab entry instead of stacking
+  copies, and entries belonging to anything else are preserved exactly.
+- The `@reboot` command carries its own HOME, PM2_HOME, PATH and an absolute
+  pm2 path — cron supplies almost no environment — and logs to
+  `~/yos/pm2/reboot.log` rather than mailing the customer.
+
 ## [0.1.1] - 2026-08-06
 
 Installing YOS needed two downloads that each had exactly one origin, and a

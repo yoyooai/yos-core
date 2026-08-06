@@ -28,6 +28,7 @@ import { writeEnvEntries } from '../lib/env.js';
 import { resolveWebConsolePort, readRecordedConsolePort, DEFAULT_WEB_CONSOLE_PORT } from '../lib/web-console-port.js';
 import { readServiceState, judgeSettle } from '../lib/service.js';
 import { distVendorUrl, noteMirrorFallback } from '../lib/dist-origin.js';
+import { installRebootCrontab } from '../lib/boot-autostart.js';
 import {
   installGlobalPackageWithFallback,
   describeNpmInstallFailure,
@@ -1312,9 +1313,7 @@ function setupPm2StartupViaCommand() {
     if (sudoResult.status === 0) {
       console.log(`  ${success('PM2 boot auto-start configured')}`);
     } else {
-      console.log(`  ${warn('PM2 boot auto-start: sudo did not complete.')}`);
-      console.log(`    This is optional — YOS works fine without it.`);
-      console.log(`    ${cyan('To enable later, run:')} ${bold(sudoMatch[1])}`);
+      setupBootAutostartWithoutRoot('`pm2 startup` needs an administrator and sudo did not complete');
     }
     return;
   }
@@ -1323,15 +1322,49 @@ function setupPm2StartupViaCommand() {
     console.log(`  ${success('PM2 boot auto-start configured')}`);
   } else {
     const msg = output.trim().split('\n')[0] || 'unknown error';
-    console.log(`  ${warn(`PM2 boot auto-start setup failed: ${msg}`)}`);
-    console.log(`    ${dim('Fix manually: pm2 startup (then run the sudo command it outputs)')}`);
+    setupBootAutostartWithoutRoot(`\`pm2 startup\` failed: ${msg}`);
   }
+}
+
+/**
+ * Last resort when no privileged boot hook could be installed: a user crontab
+ * `@reboot` entry, which a non-root account owns outright.
+ *
+ * Says plainly what is and is not true. The message that used to print here
+ * called a missing boot hook optional and claimed nothing was lost by it. That
+ * was false: without a boot hook the machine comes back from a reboot with every
+ * service down and no notice to anyone.
+ *
+ * @param {string} why - What failed before we got here, for the log line
+ */
+function setupBootAutostartWithoutRoot(why) {
+  const result = installRebootCrontab({
+    pm2Path: findPm2Binary(),
+    home: os.homedir(),
+    logPath: path.join(YOS_DIR, 'pm2', 'reboot.log'),
+  });
+
+  if (result.ok) {
+    console.log(`  ${success('Boot auto-start configured via your user crontab (no root needed)')}`);
+    console.log(`    ${dim(`${why} — used @reboot instead, which needs no privileges.`)}`);
+    console.log(`    ${dim('Check it any time with: crontab -l')}`);
+    return;
+  }
+
+  // Nothing is in place. Do not call that "optional".
+  console.log(`  ${warn('No boot auto-start is in place — after a reboot the services will NOT come back.')}`);
+  console.log(`    ${dim(`${why}; the crontab fallback also failed: ${result.reason}.`)}`);
+  console.log(`    ${cyan('To bring them back after a reboot:')} ${bold('pm2 resurrect')}`);
+  console.log(`    ${cyan('To fix it for good, either:')}`);
+  console.log(`      ${bold('pm2 startup')} ${dim('(then run the sudo command it prints — needs an administrator)')}`);
+  console.log(`      ${dim('or ask an administrator for: ')}${bold(`loginctl enable-linger ${os.userInfo().username}`)}`);
 }
 
 /**
  * Configure PM2 to auto-start on system boot.
  * - Linux with systemd: generates a stable unit directly (avoids PIDFile issues)
  * - Other platforms (macOS, etc.): falls back to `pm2 startup`
+ * - No privileges anywhere: falls back to a user crontab `@reboot` entry
  */
 function setupPm2Startup() {
   if (process.platform !== 'linux' || !commandExists('systemctl')) {
@@ -1360,9 +1393,7 @@ function setupPm2Startup() {
         timeout: 60000,
       });
       if (result.status !== 0) {
-        console.log(`  ${warn('PM2 boot auto-start: sudo did not complete.')}`);
-        console.log(`    This is optional — YOS works fine without it.`);
-        console.log(`    ${cyan('To enable later, run:')} ${bold('yos init')}`);
+        setupBootAutostartWithoutRoot('The systemd route needs an administrator and sudo did not complete');
         return;
       }
     }
@@ -1371,8 +1402,7 @@ function setupPm2Startup() {
     console.log(`    ${dim(`Unit: ${unitPath}`)}`);
     warnIfForeignCgroup();
   } catch (err) {
-    console.log(`  ${warn(`PM2 boot auto-start setup failed: ${err.message}`)}`);
-    console.log(`    ${dim('Fix manually: pm2 startup (then run the sudo command it outputs)')}`);
+    setupBootAutostartWithoutRoot(`The systemd route failed: ${err.message}`);
   } finally {
     try { fs.unlinkSync(tempUnitPath); } catch { /* ignore */ }
   }

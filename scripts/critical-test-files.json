@@ -98,6 +98,10 @@
     {
       "path": "cli/lib/__tests__/npm-install-fallback.test.js",
       "minimumTests": 13
+    },
+    {
+      "path": "cli/lib/__tests__/boot-autostart.test.js",
+      "minimumTests": 16
     }
   ]
 }
