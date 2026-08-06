@@ -39,11 +39,15 @@ export function isValidBaseUrl(value) {
 /**
  * Install an npm global package.
  * @param {string} pkg - Package name (e.g. "@openai/codex")
+ * @param {{ registry?: string|null, timeout?: number }} opts
  * @returns {boolean}
  */
-export function installGlobalPackage(pkg) {
+export function installGlobalPackage(pkg, opts = {}) {
+  const { registry = null, timeout = 120000 } = opts;
+  const args = ['install', '-g', pkg];
+  if (registry) args.push(`--registry=${registry}`);
   try {
-    execFileSync('npm', ['install', '-g', pkg], { stdio: 'pipe', timeout: 120000 });
+    execFileSync('npm', args, { stdio: 'pipe', timeout });
     return true;
   } catch {
     return false;
@@ -58,20 +62,151 @@ export function installCodex() {
   return installGlobalPackage('@openai/codex');
 }
 
-/**
- * Install Claude Code via the official installer script.
- * @returns {boolean}
- */
-export function installClaude() {
+// The runtime is the one download a fresh machine cannot skip, so it must not
+// hang off a single host. Claude Code ships from two independent places: the
+// native installer script, and the npm package (which carries the same native
+// binary as a platform optionalDependency). A registry mirror therefore serves
+// a complete runtime — verified with claude.ai black-holed.
+export const CLAUDE_NATIVE_INSTALL_URL = 'https://claude.ai/install.sh';
+export const CLAUDE_NPM_PACKAGE = '@anthropic-ai/claude-code';
+export const DEFAULT_NPM_MIRROR = 'https://registry.npmmirror.com';
+
+// ~278MB through npm, so the npm sources get more room than a normal package.
+const CLAUDE_INSTALL_TIMEOUT_MS = 600000;
+
+function sourceHost(value) {
   try {
-    execSync('curl -fsSL https://claude.ai/install.sh | bash', {
-      stdio: 'pipe',
-      timeout: 300000, // 5 min — downloads ~213MB native binary
+    return new URL(value).host;
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * Ordered list of sources to try when installing Claude Code.
+ *
+ * Pure, so the ordering and the env overrides are testable without a network:
+ * the executor below only walks whatever this returns.
+ *
+ * Overrides — an explicitly empty value drops that source rather than
+ * restoring the default, the same rule YOS_DIST_BASE follows:
+ *   YOS_CLAUDE_INSTALL_URL  native installer URL   ("" → skip the native step)
+ *   YOS_NPM_REGISTRY        mirror registry        ("" → skip the mirror step)
+ *
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {Array<{id: string, kind: 'script'|'npm', label: string, url?: string, pkg?: string, registry?: string|null}>}
+ */
+export function planClaudeInstall(env = process.env) {
+  const steps = [];
+
+  const nativeUrl = env.YOS_CLAUDE_INSTALL_URL === undefined
+    ? CLAUDE_NATIVE_INSTALL_URL
+    : String(env.YOS_CLAUDE_INSTALL_URL).trim();
+  if (nativeUrl) {
+    steps.push({
+      id: 'native',
+      kind: 'script',
+      url: nativeUrl,
+      label: `native installer (${sourceHost(nativeUrl)})`,
     });
-    return commandExists('claude');
+  }
+
+  steps.push({
+    id: 'npm',
+    kind: 'npm',
+    pkg: CLAUDE_NPM_PACKAGE,
+    registry: null,
+    label: 'npm (configured registry)',
+  });
+
+  const mirror = env.YOS_NPM_REGISTRY === undefined
+    ? DEFAULT_NPM_MIRROR
+    : String(env.YOS_NPM_REGISTRY).trim();
+  if (mirror) {
+    steps.push({
+      id: 'npm-mirror',
+      kind: 'npm',
+      pkg: CLAUDE_NPM_PACKAGE,
+      registry: mirror,
+      label: `npm (${sourceHost(mirror)})`,
+    });
+  }
+
+  return steps;
+}
+
+function runInstallScript(url) {
+  // --connect-timeout keeps an unreachable host from burning the whole budget
+  // before the next source gets a turn; a slow-but-alive download is untouched.
+  const quoted = `'${String(url).replace(/'/g, `'\\''`)}'`;
+  try {
+    execSync(`curl -fsSL --connect-timeout 20 ${quoted} | bash`, {
+      stdio: 'pipe',
+      timeout: CLAUDE_INSTALL_TIMEOUT_MS,
+    });
+    return true;
   } catch {
     return false;
   }
+}
+
+/**
+ * Install Claude Code, trying every source in order until one yields a usable
+ * `claude` on PATH.
+ *
+ * A source that reports success but leaves no runnable binary is not accepted —
+ * the next source gets a turn, and the attempt is recorded as installed-but-not-found
+ * so the caller can tell a download failure from a PATH problem.
+ *
+ * @param {{ env?: NodeJS.ProcessEnv, onAttempt?: (step: object) => void }} opts
+ * @returns {{ ok: boolean, via: string|null, label: string|null, fellBack: boolean, attempts: Array<{id: string, label: string, installed: boolean, found: boolean}> }}
+ */
+export function installClaude(opts = {}) {
+  const { env = process.env, onAttempt = null } = opts;
+  const steps = planClaudeInstall(env);
+  const attempts = [];
+
+  for (const step of steps) {
+    if (onAttempt) onAttempt(step);
+    const installed = step.kind === 'script'
+      ? runInstallScript(step.url)
+      : installGlobalPackage(step.pkg, {
+        registry: step.registry,
+        timeout: CLAUDE_INSTALL_TIMEOUT_MS,
+      });
+    const found = installed ? commandExists('claude') : false;
+    attempts.push({ id: step.id, label: step.label, installed, found });
+    if (found) {
+      return {
+        ok: true,
+        via: step.id,
+        label: step.label,
+        fellBack: attempts.length > 1,
+        attempts,
+      };
+    }
+  }
+
+  return { ok: false, via: null, label: null, fellBack: false, attempts };
+}
+
+/**
+ * Human-readable repair lines for a failed installClaude() run.
+ * Leads with what actually happened, then the manual routes.
+ * @param {{ attempts: Array<{label: string, installed: boolean, found: boolean}> }} result
+ * @returns {string[]}
+ */
+export function describeClaudeInstallFailure(result) {
+  const attempts = result?.attempts ?? [];
+  const lines = attempts.map(a => (
+    a.installed && !a.found
+      ? `Tried ${a.label}: reported success but no "claude" on PATH — add ~/.local/bin to your PATH.`
+      : `Tried ${a.label}: failed.`
+  ));
+  lines.push(`Install manually: curl -fsSL ${CLAUDE_NATIVE_INSTALL_URL} | bash`);
+  lines.push(`Or via npm: npm install -g ${CLAUDE_NPM_PACKAGE}`);
+  lines.push(`Behind a slow link, point npm at a reachable mirror: npm install -g ${CLAUDE_NPM_PACKAGE} --registry=${DEFAULT_NPM_MIRROR}`);
+  return lines;
 }
 
 // ── Auth checks ────────────────────────────────────────────────────────────

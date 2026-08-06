@@ -31,6 +31,8 @@ import { distVendorUrl, noteMirrorFallback } from '../lib/dist-origin.js';
 import {
   installGlobalPackage,
   installCodex,
+  installClaude,
+  describeClaudeInstallFailure,
   isClaudeAuthenticated,
   isCodexAuthenticated,
   isValidBaseUrl,
@@ -2273,23 +2275,24 @@ export async function initCommand(args) {
       if (!quiet) console.log(`  ${success('Claude Code installed')}`);
     } else {
       if (!quiet) console.log(`  ${error('Claude Code not found')}`);
-      if (!quiet) console.log(`    ${cyan('Installing Claude Code (native installer)...')}`);
-      try {
-        execSync('curl -fsSL https://claude.ai/install.sh | bash', {
-          stdio: 'pipe',
-          timeout: 300000, // 5 min — downloads ~213MB native binary
-        });
-        if (commandExists('claude')) {
-          if (!quiet) console.log(`  ${success('Claude Code installed')}`);
-          claudeJustInstalled = true;
-        } else {
-          console.error(`  ${error('Claude Code installed but not found in PATH')}`);
-          console.error(`    ${dim('Add ~/.local/bin to your PATH, then run yos init again.')}`);
-          process.exit(1);
+      // Sources are tried in order (see planClaudeInstall) — say which one is
+      // being used rather than announcing one and silently using another.
+      const result = installClaude({
+        onAttempt: step => {
+          if (!quiet) console.log(`    ${cyan(`Installing Claude Code from ${step.label}...`)}`);
+        },
+      });
+      if (result.ok) {
+        if (!quiet) console.log(`  ${success(`Claude Code installed from ${result.label}`)}`);
+        if (result.fellBack) {
+          console.warn(`    ${dim('The first source did not answer — fell back. Nothing to do, just so you know where it came from.')}`);
         }
-      } catch {
+        claudeJustInstalled = true;
+      } else {
         console.error(`  ${error('Failed to install Claude Code')}`);
-        console.error(`    ${dim('Install manually: curl -fsSL https://claude.ai/install.sh | bash')}`);
+        for (const line of describeClaudeInstallFailure(result)) {
+          console.error(`    ${dim(line)}`);
+        }
         process.exit(1);
       }
     }
