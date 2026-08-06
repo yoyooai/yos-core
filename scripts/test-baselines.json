@@ -5,8 +5,8 @@
       "minimumPassed": 199
     },
     "node": {
-      "minimumPassed": 1251
+      "minimumPassed": 1267
     }
   },
-  "approvedDigest": "f9d180d7aac0b6484b4c6654e7aa358107ce60b2e58d5ed841a32f40ccab46c5"
+  "approvedDigest": "f34f88c3c6b06264bc11b325103ae78671aecaf235e86b085201983cc2ae7ed5"
 }
