@@ -33,11 +33,33 @@ function executableLines(source) {
     .filter(line => !/^\s*(#|\/\/|\*|\/\*)/.test(line));
 }
 
+/**
+ * The installer's effective default mirror.
+ *
+ * The default may be written on the YOS_DIST_BASE line itself, or held in a
+ * variable that line expands — the installer needs the value in a variable so
+ * that "is this the default?" (asked when deciding whether to record the mirror
+ * in ~/yos/.env) cannot drift from the default itself. One level of indirection
+ * is resolved here so this parity check keeps comparing values rather than
+ * spellings; anything deeper is refused, because a chain of variables is a place
+ * for the two to disagree again.
+ */
+function installerDefaultDistBase() {
+  const line = installSh.match(/YOS_DIST_BASE=\x22\$\{YOS_DIST_BASE-([^}\x22]+)\}\x22/);
+  if (!line) return null;
+  const raw = line[1];
+  if (!raw.startsWith('$')) return raw;
+
+  const name = raw.replace(/^\$\{?/, '').replace(/\}$/, '');
+  const assigned = installSh.match(new RegExp(`^${name}=\\x22([^\\x22$]+)\\x22$`, 'm'));
+  return assigned ? assigned[1] : null;
+}
+
 describe('distribution base parity', () => {
   it('agrees between the CLI, the installer and the upgrade check', () => {
-    const fromInstaller = installSh.match(/YOS_DIST_BASE=\x22\$\{YOS_DIST_BASE-([^}\x22]+)\}\x22/);
+    const fromInstaller = installerDefaultDistBase();
     assert.ok(fromInstaller, 'scripts/install.sh must define a default YOS_DIST_BASE');
-    assert.equal(fromInstaller[1], DEFAULT_DIST_BASE);
+    assert.equal(fromInstaller, DEFAULT_DIST_BASE);
 
     const fromUpgradeCheck = upgradeCheck.match(/const DEFAULT_DIST_BASE = \x27([^\x27]+)\x27/);
     assert.ok(fromUpgradeCheck, 'upgrade-check.js must define DEFAULT_DIST_BASE');

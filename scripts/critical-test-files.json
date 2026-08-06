@@ -118,6 +118,34 @@
     {
       "path": "test/docker-entrypoint-unbound.test.js",
       "minimumTests": 1
+    },
+    {
+      "path": "test/postinstall-checkout-safety.test.js",
+      "minimumTests": 1
+    },
+    {
+      "path": "cli/lib/__tests__/install-context.test.js",
+      "minimumTests": 1
+    },
+    {
+      "path": "cli/lib/__tests__/self-check-no-download.test.js",
+      "minimumTests": 1
+    },
+    {
+      "path": "cli/lib/__tests__/dist-integrity.test.js",
+      "minimumTests": 1
+    },
+    {
+      "path": "cli/lib/__tests__/dist-base-recorded.test.js",
+      "minimumTests": 1
+    },
+    {
+      "path": "test/install-records-mirror.test.js",
+      "minimumTests": 1
+    },
+    {
+      "path": "test/dist-pinned-installers.test.js",
+      "minimumTests": 1
     }
   ]
 }
