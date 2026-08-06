@@ -6,6 +6,7 @@
       "tagPrefix": "feishu",
       "official": true,
       "type": "communication",
+      "displayName": "飞书渠道",
       "description": "Feishu (飞书) communication channel — DM and group messaging, productivity surfaces"
     },
     "weixin": {
@@ -14,6 +15,7 @@
       "tagPrefix": "weixin",
       "official": true,
       "type": "communication",
+      "displayName": "微信渠道",
       "description": "Personal Weixin (微信) direct-message communication channel"
     }
   }
