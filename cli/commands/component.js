@@ -13,7 +13,7 @@ import { checkForUpdates, getLocalSourceUpgradeError, getRepo, getComponentSourc
 import {
   checkForCoreUpdates, recoverSelfUpgrade, runSelfUpgrade,
   downloadCoreToTemp, readChangelog as readCoreChangelog,
-  cleanupTemp as cleanupCoreTemp,
+  cleanupTemp as cleanupCoreTemp, fetchCoreChangelog,
 } from '../lib/self-upgrade.js';
 import { detectChanges } from '../lib/manifest.js';
 import { parseSkillMd } from '../lib/skill.js';
@@ -952,6 +952,33 @@ function detectCoreSkillChanges() {
   return results;
 }
 
+/**
+ * Read the update notes for a core version without downloading the release.
+ *
+ * Used by `--check`, where the release is not needed for anything else. The
+ * upgrade path still uses readOptionalCoreChangelog() below, because by then it
+ * has the tree on disk anyway.
+ *
+ * Notes that cannot be fetched are reported as unavailable and the check still
+ * succeeds: "I could not show you the notes" must not become "I could not tell
+ * you there is an update".
+ */
+export function readOptionalCoreChangelogFromSource(version, branch, currentVersion, deps = {}) {
+  const fetchFn = deps.fetchCoreChangelog ?? fetchCoreChangelog;
+  const filterChangelogFn = deps.filterChangelog ?? filterChangelog;
+
+  const result = fetchFn(version, branch);
+  if (!result?.success) {
+    return { changelog: null, warning: 'Update notes unavailable; continuing without them.' };
+  }
+
+  try {
+    return { changelog: filterChangelogFn(result.changelog, currentVersion), warning: null };
+  } catch {
+    return { changelog: null, warning: 'Update notes unavailable; continuing without them.' };
+  }
+}
+
 export function readOptionalCoreChangelog(downloadResult, currentVersion, deps = {}) {
   const unavailable = {
     changelog: null,
@@ -974,7 +1001,10 @@ export function readOptionalCoreChangelog(downloadResult, currentVersion, deps =
 
 /**
  * Handle --self --check: check for yos-core updates only (no lock needed).
- * Downloads new version to temp dir for file comparison by Claude.
+ *
+ * Answering "is there an update, and what changed" costs one small GET for the
+ * new version's CHANGELOG.md. It used to download the whole release — 859 KB to
+ * read 10 KB, on links where that is measured in minutes.
  */
 function handleSelfCheckOnly({ jsonOutput, branch, beta = false }) {
   const check = checkForCoreUpdates({ branch, beta });
@@ -990,24 +1020,13 @@ function handleSelfCheckOnly({ jsonOutput, branch, beta = false }) {
     process.exit(1);
   }
 
-  // When update is available (or --branch forces re-check): download to temp, read changelog, detect local changes
+  // When update is available (or --branch forces re-check): read the notes, detect local changes
   let changelog = null;
   let changelogWarning = null;
-  let tempDir = null;
 
   // With --branch, always proceed even if versions match (user wants to install specific branch)
   if (check.hasUpdate || branch) {
-    // Download new version to temp dir (for template/file comparison by Claude)
-    let dlResult;
-    try {
-      dlResult = downloadCoreToTemp(check.latest, branch);
-    } catch (err) {
-      dlResult = { success: false, error: err.message };
-    }
-    if (dlResult.success) {
-      tempDir = dlResult.tempDir;
-    }
-    const notes = readOptionalCoreChangelog(dlResult, check.current);
+    const notes = readOptionalCoreChangelogFromSource(check.latest, branch, check.current);
     changelog = notes.changelog;
     changelogWarning = notes.warning;
   }
@@ -1055,8 +1074,6 @@ function handleSelfCheckOnly({ jsonOutput, branch, beta = false }) {
         : `\n${dim('Run "yos upgrade --self --yes" to upgrade.')}`);
     }
   }
-
-  cleanupCoreTemp(tempDir);
 }
 
 /**
