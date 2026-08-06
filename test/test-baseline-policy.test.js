@@ -9,6 +9,7 @@ import {
   parseNodeTapSummary,
   verifyJestResult,
   verifyNodeTapResult,
+  assertBaselineIsCurrent,
 } from '../scripts/test-baseline-policy.js';
 
 function digest(baselines) {
@@ -16,6 +17,64 @@ function digest(baselines) {
 }
 
 describe('executed test baselines', () => {
+
+  // ── The floor must keep up with reality (TD-84) ──
+  //
+  // minimumPassed is a floor, which is right. But it was raised by hand with a
+  // line in a process document asking people to remember, so tests added and
+  // forgotten sat outside it: deleting them kept the gate green, reopening the
+  // hole the floor exists to close, a few tests at a time.
+
+  test('passing more than the floor fails, and says what number to write down', () => {
+    expect(() => assertBaselineIsCurrent('Node', 1330, { minimumPassed: 1325 }))
+      .toThrow(/passed 1330 tests but the approved floor is 1325/);
+    expect(() => assertBaselineIsCurrent('Node', 1330, { minimumPassed: 1325 }))
+      .toThrow(/set baselines\.Node\.minimumPassed to 1330/);
+  });
+
+  test('passing exactly the floor is the only clean state', () => {
+    expect(assertBaselineIsCurrent('Jest', 249, { minimumPassed: 249 })).toBe(249);
+  });
+
+  test('a declared drift allowance is honoured, and only up to its limit', () => {
+    expect(assertBaselineIsCurrent('Jest', 251, { minimumPassed: 249, driftAllowance: 2 })).toBe(251);
+    expect(() => assertBaselineIsCurrent('Jest', 252, { minimumPassed: 249, driftAllowance: 2 }))
+      .toThrow(/allowed drift/);
+  });
+
+  test('the drift allowance sits inside the approval digest, so it cannot be widened quietly', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-test-drift-'));
+    const policyPath = path.join(root, 'baselines.json');
+    const tight = { jest: { minimumPassed: 10 }, node: { minimumPassed: 20 } };
+    fs.writeFileSync(policyPath, JSON.stringify({ version: 1, baselines: tight, approvedDigest: digest(tight) }));
+    expect(loadApprovedTestBaselines(policyPath)).toEqual(tight);
+
+    // Widen the allowance but keep the old digest: must be rejected.
+    const loose = { jest: { minimumPassed: 10, driftAllowance: 500 }, node: { minimumPassed: 20 } };
+    fs.writeFileSync(policyPath, JSON.stringify({ version: 1, baselines: loose, approvedDigest: digest(tight) }));
+    expect(() => loadApprovedTestBaselines(policyPath)).toThrow(/approval digest mismatch/);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test('a negative drift allowance is not a valid declaration', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-test-drift-neg-'));
+    const policyPath = path.join(root, 'baselines.json');
+    const bad = { jest: { minimumPassed: 10, driftAllowance: -1 }, node: { minimumPassed: 20 } };
+    fs.writeFileSync(policyPath, JSON.stringify({ version: 1, baselines: bad, approvedDigest: digest(bad) }));
+    expect(() => loadApprovedTestBaselines(policyPath)).toThrow(/driftAllowance must be a non-negative integer/);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test('⭐ the two real verifiers route through the lock, not just the helper', () => {
+    // Asserting the helper alone would let someone unwire it and stay green.
+    expect(() => verifyJestResult(
+      { numPassedTests: 300, numFailedTests: 0, numPendingTests: 0, numTodoTests: 0 },
+      { minimumPassed: 249 },
+    )).toThrow(/approved floor is 249/);
+
+    const tap = ['# tests 1400', '# pass 1400', '# fail 0', '# cancelled 0', '# skipped 0', '# todo 0'].join('\n');
+    expect(() => verifyNodeTapResult(tap, { minimumPassed: 1325 })).toThrow(/approved floor is 1325/);
+  });
   test('rejects a baseline change until its approval digest is updated', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-test-baselines-'));
     const policyPath = path.join(root, 'baselines.json');
