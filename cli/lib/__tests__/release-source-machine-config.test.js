@@ -70,6 +70,43 @@ describe('release source falls back to the machine configuration', () => {
     assert.equal(resolveInChild(yosDir).error, 'release_source_not_configured');
   });
 
+  // ── The repair has to point at the place the value actually came from ──
+  //
+  // TD-19, reproduced on a real run 2026-08-06: with a malformed value sitting
+  // in ~/yos/.env and nothing in the environment, the error read
+  // "YOS_RELEASE_REPO must use the GitHub owner/repository format" — so the
+  // obvious move is to export it. That fixes exactly one command, because the
+  // file still holds the value being read. These tests pin the source into the
+  // message; deleting the origin tracking turns them red.
+
+  it('a bad value recorded in the file sends you to the file, and shows the value', () => {
+    const { yosDir } = machineWithEnvFile('YOS_RELEASE_REPO=not a repo\n');
+    const r = resolveInChild(yosDir);
+    assert.equal(r.success, false);
+    assert.equal(r.error, 'invalid_release_source');
+    assert.match(r.message, /not a repo/, 'must quote back what it actually found');
+    assert.match(r.message, /recorded in .*yos.*\.env/, 'must say the value came from the file');
+    assert.match(r.message, /Repair: edit .*yos.*\.env/, 'must tell you to edit the file');
+    assert.doesNotMatch(r.message, /Repair: export/, 'exporting fixes one command only — do not advise it');
+  });
+
+  it('a bad value from the environment sends you to the environment, not the file', () => {
+    const { yosDir } = machineWithEnvFile(null);
+    const r = resolveInChild(yosDir, { YOS_RELEASE_REPO: 'also not a repo' });
+    assert.equal(r.success, false);
+    assert.match(r.message, /also not a repo/);
+    assert.match(r.message, /Repair: export YOS_RELEASE_REPO=/);
+    assert.doesNotMatch(r.message, /recorded in/, 'the file had nothing to do with this one');
+  });
+
+  it('nothing configured anywhere names both places you could set it', () => {
+    const { yosDir } = machineWithEnvFile(null);
+    const r = resolveInChild(yosDir);
+    assert.equal(r.success, false);
+    assert.match(r.message, /export YOS_RELEASE_REPO=/);
+    assert.match(r.message, /\.env/, 'the recorded file is the durable place — say so');
+  });
+
   it('is read by the periodic check as well', () => {
     // That script is spawned by the activity monitor with whatever environment
     // PM2 passes, so it cannot rely on the shell either.
