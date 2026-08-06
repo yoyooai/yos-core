@@ -4,6 +4,56 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
+## [0.1.6] - 2026-08-06
+
+Four things a customer or an operator could walk into, and one gate that was
+asking people to remember a rule instead of enforcing it.
+
+### Fixed
+
+- The release-source error now says which of the two places holds the bad value.
+  It resolves from the process environment or from the recorded `~/yos/.env`, and
+  the message named the variable as if it were always the former. With a
+  malformed value in the file, the obvious repair — export it — fixes exactly one
+  command, because the next one reads the file again. The message now quotes the
+  value back, names the file when the file is the source, and advises editing the
+  file rather than exporting. Machine-readable error codes are unchanged.
+- `yos init` no longer lets an isolated run own the machine's PM2 boot unit. It
+  installed `/etc/systemd/system/pm2-<user>.service` unconditionally, so an
+  init-flavoured test under an isolated HOME repointed the machine's boot hook at
+  a sandbox — a reboot would have started none of the real services. A run whose
+  HOME or PM2_HOME is overridden, or whose pm2 binary lives under the temp
+  directory, now touches neither the unit nor the crontab fallback: a user
+  crontab belongs to the real account whatever HOME the process was given, so
+  that would be the same hijack by another road. `YOS_SKIP_SYSTEMD` opts out
+  explicitly.
+- A real run no longer destroys an existing boot unit silently. Identical
+  content is left alone and asks for no sudo; different content is backed up to a
+  timestamped copy first, and the lines that change are printed. "The original
+  content is not recoverable" was the part of this that actually cost us.
+- `yos init` now notices PM2 processes it did not start. A machine reinstalled by
+  wiping the home directory left three PM2 daemons running — wiping a home does
+  not stop a daemon — still holding the Web Console port, and init had no idea,
+  so the failure surfaced later as an unexplained port conflict. It now sorts the
+  account's processes into stale (script gone from disk), live (a previous install
+  of ours), and foreign (outside this YOS directory, never touched and disclosed
+  only so the count adds up), and hands over the exact command. It kills nothing:
+  the processes belong to the account, and a reinstall is the worst moment to
+  guess wrong. An unreadable process list is reported as "could not tell", never
+  as "nothing there".
+
+### Changed
+
+- The executed-test floor is now mechanical in both directions. `minimumPassed`
+  is a floor by design, but it was raised by hand with a line in a process
+  document asking people to remember; tests added and forgotten sat outside it
+  and could be deleted with the gate still green. Passing more than the floor now
+  fails, and the message carries the number to write down. `driftAllowance`
+  (default 0) is the escape hatch for a suite whose count genuinely moves, and it
+  lives inside the digest-locked baselines so it cannot be widened quietly. The
+  floors are now jest 255 / node 1364 — the counts this tree actually produces.
+
+
 ## [0.1.5] - 2026-08-06
 
 "What is the latest version, and where do I get it?" had no single place to read.
