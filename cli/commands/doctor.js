@@ -633,6 +633,7 @@ function runClaudeFix(diagnosticJson) {
     'Rules:',
     '- For missing packages (tmux, PM2): install via apt-get or brew',
     '- For Claude CLI missing: curl -fsSL https://claude.ai/install.sh | bash',
+    '  (if that host is unreachable: npm install -g @anthropic-ai/claude-code)',
     '- For services offline: pm2 start ~/yos/pm2/ecosystem.config.cjs && pm2 save',
     '- For autonomous mode: set skipDangerousModePermissionPrompt:true in ~/.claude/settings.json',
     '- For auth issues: you cannot fix these — just note it',

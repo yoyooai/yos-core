@@ -20,6 +20,8 @@ import { commandExists } from '../lib/shell-utils.js';
 import { getCoreEcosystemPath, restartManagedProcess } from '../lib/pm2.js';
 import {
   installClaude,
+  describeClaudeInstallFailure,
+  describeNpmInstallFailure,
   installCodex,
   isValidBaseUrl,
   saveApiKey,
@@ -262,17 +264,31 @@ async function switchRuntime(target, flags) {
   // Step 1: Ensure target runtime CLI is installed.
   if (!commandExists(target)) {
     console.log(`${bold(target)} CLI not found — installing...`);
-    const installed = target === 'codex' ? installCodex() : installClaude();
-    if (!installed || !commandExists(target)) {
-      console.error(red(`\nFailed to install ${bold(target)} CLI.`));
-      if (target === 'codex') {
-        console.error(`  ${dim('Install manually: npm install -g @openai/codex')}`);
-      } else {
-        console.error(`  ${dim('Install manually: curl -fsSL https://claude.ai/install.sh | bash')}`);
+    if (target === 'codex') {
+      const result = installCodex({
+        onAttempt: source => console.log(`  trying ${source.label}...`),
+      });
+      if (!result.ok) {
+        console.error(red(`\nFailed to install ${bold(target)} CLI.`));
+        for (const line of describeNpmInstallFailure('@openai/codex', result)) {
+          console.error(`  ${dim(line)}`);
+        }
+        process.exit(1);
       }
-      process.exit(1);
+      console.log(`  ${green('✓')} installed from ${result.label}`);
+    } else {
+      const result = installClaude({
+        onAttempt: step => console.log(`  trying ${step.label}...`),
+      });
+      if (!result.ok) {
+        console.error(red(`\nFailed to install ${bold(target)} CLI.`));
+        for (const line of describeClaudeInstallFailure(result)) {
+          console.error(`  ${dim(line)}`);
+        }
+        process.exit(1);
+      }
+      console.log(`  ${green('✓')} installed from ${result.label}`);
     }
-    console.log(`  ${green('✓')} installed`);
   }
 
   // Step 2: Apply credentials if provided via flags.

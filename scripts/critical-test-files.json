@@ -90,6 +90,14 @@
     {
       "path": "cli/lib/__tests__/self-check-prerelease-only.test.js",
       "minimumTests": 3
+    },
+    {
+      "path": "cli/lib/__tests__/claude-install-fallback.test.js",
+      "minimumTests": 23
+    },
+    {
+      "path": "cli/lib/__tests__/npm-install-fallback.test.js",
+      "minimumTests": 13
     }
   ]
 }

@@ -29,8 +29,11 @@ import { resolveWebConsolePort, readRecordedConsolePort, DEFAULT_WEB_CONSOLE_POR
 import { readServiceState, judgeSettle } from '../lib/service.js';
 import { distVendorUrl, noteMirrorFallback } from '../lib/dist-origin.js';
 import {
-  installGlobalPackage,
+  installGlobalPackageWithFallback,
+  describeNpmInstallFailure,
   installCodex,
+  installClaude,
+  describeClaudeInstallFailure,
   isClaudeAuthenticated,
   isCodexAuthenticated,
   isValidBaseUrl,
@@ -2100,12 +2103,24 @@ export async function initCommand(args) {
     if (!quiet) console.log(`  ${success('PM2 installed')}`);
   } else {
     if (!quiet) console.log(`  ${error('PM2 not found')}`);
-    if (!quiet) console.log(`    ${cyan('Installing pm2...')}`);
-    if (installGlobalPackage('pm2')) {
-      if (!quiet) console.log(`  ${success('PM2 installed')}`);
+    // PM2 sits ahead of the runtime, so a single unreachable registry here
+    // ends the install before the runtime's own fallback ever gets a turn.
+    const pm2Result = installGlobalPackageWithFallback('pm2', {
+      binary: 'pm2',
+      onAttempt: source => {
+        if (!quiet) console.log(`    ${cyan(`Installing pm2 from ${source.label}...`)}`);
+      },
+    });
+    if (pm2Result.ok) {
+      if (!quiet) console.log(`  ${success(`PM2 installed from ${pm2Result.label}`)}`);
+      if (pm2Result.fellBack && !quiet) {
+        console.warn(`    ${dim('The configured registry did not answer — used the mirror instead.')}`);
+      }
     } else {
       console.error(`  ${error('Failed to install PM2')}`);
-      console.error(`    ${dim('Install manually: npm install -g pm2')}`);
+      for (const line of describeNpmInstallFailure('pm2', pm2Result)) {
+        console.error(`    ${dim(line)}`);
+      }
       process.exit(1);
     }
   }
@@ -2156,18 +2171,21 @@ export async function initCommand(args) {
       if (!quiet) console.log(`  ${success('Codex installed')}`);
     } else {
       if (!quiet) console.log(`  ${error('Codex not found')}`);
-      if (!quiet) console.log(`    ${cyan('Installing @openai/codex...')}`);
-      if (installCodex()) {
-        if (commandExists('codex')) {
-          if (!quiet) console.log(`  ${success('Codex installed')}`);
-        } else {
-          console.error(`  ${error('Codex installed but not found in PATH')}`);
-          console.error(`    ${dim('Ensure npm global bin is in PATH, then run yos init again.')}`);
-          process.exit(1);
+      const codexResult = installCodex({
+        onAttempt: source => {
+          if (!quiet) console.log(`    ${cyan(`Installing @openai/codex from ${source.label}...`)}`);
+        },
+      });
+      if (codexResult.ok) {
+        if (!quiet) console.log(`  ${success(`Codex installed from ${codexResult.label}`)}`);
+        if (codexResult.fellBack && !quiet) {
+          console.warn(`    ${dim('The configured registry did not answer — used the mirror instead.')}`);
         }
       } else {
         console.error(`  ${error('Failed to install Codex')}`);
-        console.error(`    ${dim('Install manually: npm install -g @openai/codex')}`);
+        for (const line of describeNpmInstallFailure('@openai/codex', codexResult)) {
+          console.error(`    ${dim(line)}`);
+        }
         process.exit(1);
       }
     }
@@ -2273,23 +2291,24 @@ export async function initCommand(args) {
       if (!quiet) console.log(`  ${success('Claude Code installed')}`);
     } else {
       if (!quiet) console.log(`  ${error('Claude Code not found')}`);
-      if (!quiet) console.log(`    ${cyan('Installing Claude Code (native installer)...')}`);
-      try {
-        execSync('curl -fsSL https://claude.ai/install.sh | bash', {
-          stdio: 'pipe',
-          timeout: 300000, // 5 min — downloads ~213MB native binary
-        });
-        if (commandExists('claude')) {
-          if (!quiet) console.log(`  ${success('Claude Code installed')}`);
-          claudeJustInstalled = true;
-        } else {
-          console.error(`  ${error('Claude Code installed but not found in PATH')}`);
-          console.error(`    ${dim('Add ~/.local/bin to your PATH, then run yos init again.')}`);
-          process.exit(1);
+      // Sources are tried in order (see planClaudeInstall) — say which one is
+      // being used rather than announcing one and silently using another.
+      const result = installClaude({
+        onAttempt: step => {
+          if (!quiet) console.log(`    ${cyan(`Installing Claude Code from ${step.label}...`)}`);
+        },
+      });
+      if (result.ok) {
+        if (!quiet) console.log(`  ${success(`Claude Code installed from ${result.label}`)}`);
+        if (result.fellBack) {
+          console.warn(`    ${dim('The first source did not answer — fell back. Nothing to do, just so you know where it came from.')}`);
         }
-      } catch {
+        claudeJustInstalled = true;
+      } else {
         console.error(`  ${error('Failed to install Claude Code')}`);
-        console.error(`    ${dim('Install manually: curl -fsSL https://claude.ai/install.sh | bash')}`);
+        for (const line of describeClaudeInstallFailure(result)) {
+          console.error(`    ${dim(line)}`);
+        }
         process.exit(1);
       }
     }

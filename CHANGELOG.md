@@ -4,6 +4,47 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
+## [0.1.1] - 2026-08-06
+
+Installing YOS needed two downloads that each had exactly one origin, and a
+failure at either ended the install with no route out. Measured on a machine
+that could reach neither `claude.ai` nor `registry.npmjs.org` — the shape of a
+customer whose network out is poor — `0.1.0` died at the first of them.
+
+### Fixed
+
+- The agent runtime is installed from the first source that works: the native
+  installer, then npm on the configured registry, then npm on a mirror
+  registry. The npm package carries the same native binary as a platform
+  optional dependency, so a mirror serves a complete runtime. Verified with
+  `claude.ai` black-holed.
+- PM2 and the Codex CLI are installed through the same registry chain. PM2 runs
+  before the runtime, so a single unreachable registry there used to end the
+  install before the runtime's own fallback could help.
+- The installer script is downloaded and then run, instead of piped into a
+  shell. `curl … | bash` exits with bash's status, so a download that never
+  happened looked like a success and the failure text blamed PATH instead of the
+  network. A partially downloaded error page is also no longer executed.
+- A source that exits 0 but leaves nothing runnable is no longer accepted as
+  success; the next source is tried.
+- Failure output names every source that was tried, and distinguishes an
+  unreachable host from a command that is installed but not on PATH.
+- `yos init` no longer carries its own copy of the runtime install logic. Both
+  entry points share one path, and the test suite fails if a command file goes
+  back to installing directly.
+
+### Added
+
+- `YOS_CLAUDE_INSTALL_URL` points the runtime install at a different installer
+  script; `YOS_NPM_REGISTRY` points every global npm install at a different
+  mirror. Setting either empty drops that source rather than restoring the
+  default, the same rule `YOS_DIST_BASE` follows.
+
+### Note on outbound hosts
+
+As a fallback only — never when the configured sources answer — an install may
+now contact `registry.npmmirror.com`. Set `YOS_NPM_REGISTRY=` to remove it.
+
 ## [0.1.0-alpha.4] - 2026-08-05
 
 Found by blocking every GitHub host and installing from zero. The result was not
