@@ -114,6 +114,10 @@
     {
       "path": "cli/lib/__tests__/half-finished-install-recovery.test.js",
       "minimumTests": 1
+    },
+    {
+      "path": "test/docker-entrypoint-unbound.test.js",
+      "minimumTests": 1
     }
   ]
 }
