@@ -4,12 +4,18 @@
  * Two responsibilities:
  * 1. Sync Core Skills (skipped during self-upgrade — step 5 handles it)
  * 2. Sync settings.json hooks/statusLine and refresh Codex config backfills
- *    (ALWAYS runs when yos is initialized)
+ *    (runs whenever yos is initialized AND this copy is an install)
  *
  * Settings sync runs even when YOS_SKIP_POSTINSTALL is set because this is
  * the only reliable hook where the NEWLY INSTALLED code executes during
  * self-upgrade. The old version's in-memory upgrader may not know about new
  * config fields or backfills, so this postinstall catches them.
+ *
+ * Neither responsibility belongs to a source checkout. npm runs this same
+ * script for `npm ci` in a clone, and both syncs write to ~/yos — so a plain
+ * development action would edit live skills and configs out from under running
+ * services. classifyInstallContext() decides which situation this is, and an
+ * unrecognised layout declines rather than guesses. See cli/lib/install-context.js.
  */
 
 import fs from 'node:fs';
@@ -20,8 +26,10 @@ import { execFileSync } from 'node:child_process';
 import { smartSync, formatMergeResult } from '../cli/lib/smart-merge.js';
 import { copyTree } from '../cli/lib/fs-utils.js';
 import { generateManifest, saveManifest, saveOriginals } from '../cli/lib/manifest.js';
+import { classifyInstallContext, formatDeclinedMessage } from '../cli/lib/install-context.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PACKAGE_ROOT = path.join(__dirname, '..');
 const YOS_DIR = process.env.YOS_DIR || path.join(process.env.HOME, 'yos');
 const SKILLS_DIR = path.join(YOS_DIR, '.claude', 'skills');
 const CORE_SKILLS_SRC = path.join(__dirname, '..', 'skills');
@@ -86,6 +94,13 @@ function syncSkills() {
   if (added > 0 || updated > 0 || unchanged > 0) {
     console.log(`Core Skills: ${added} added, ${updated} updated, ${unchanged} unchanged.`);
   }
+
+  // Code on disk changed; the services are still running what they loaded at
+  // start. Saying so is the difference between "half-new" and "half-new, and
+  // you know it".
+  if (added > 0 || updated > 0) {
+    console.log('Skill files on disk changed — run "yos restart" so the services pick them up.');
+  }
 }
 
 function syncSettings() {
@@ -114,6 +129,14 @@ function main() {
   const claudeDir = path.join(YOS_DIR, '.claude');
   if (!fs.existsSync(claudeDir)) {
     console.log('YOS not initialized. Run "yos init" to set up.');
+    return;
+  }
+
+  // Whether this copy may write to ~/yos at all. A source checkout may not:
+  // `npm ci` in a clone must stay a development action.
+  const context = classifyInstallContext({ packageRoot: PACKAGE_ROOT });
+  if (!context.isInstall) {
+    console.log(formatDeclinedMessage(context));
     return;
   }
 
