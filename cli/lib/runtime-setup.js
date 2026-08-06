@@ -144,6 +144,33 @@ export const DEFAULT_NPM_MIRROR = 'https://registry.npmmirror.com';
 // ~278MB through npm, so the npm sources get more room than a normal package.
 const CLAUDE_INSTALL_TIMEOUT_MS = 600000;
 
+/**
+ * Everything the native installer puts on disk, so the uninstall can take it
+ * back off.
+ *
+ * TD-62 ④: `yos self-uninstall` ran `npm uninstall -g @anthropic-ai/claude-code`
+ * and deleted `~/.claude`. But the runtime is normally installed by the native
+ * script above, which npm knows nothing about — so the uninstall reported
+ * success while the `claude` binary was still sitting in the account, still on
+ * PATH. "Uninstalled" has to mean uninstalled.
+ *
+ * It lives in this file on purpose: the code that installs the runtime and the
+ * list of what installing it leaves behind must not drift apart, so adding a
+ * path is one edit, here.
+ *
+ * @param {string} home
+ * @returns {string[]} paths to remove, deepest-independent first
+ */
+export function claudeNativeArtifacts(home) {
+  return [
+    // The launcher on PATH — a symlink into the versioned directory below.
+    `${home}/.local/bin/claude`,
+    // The versioned payload the launcher points at.
+    `${home}/.local/share/claude`,
+  ];
+}
+
+
 function sourceHost(value) {
   try {
     return new URL(value).host;

@@ -4,6 +4,21 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
+## [0.1.7] - 2026-08-07
+
+### Fixed
+
+- `yos uninstall --self` now actually removes a natively installed Claude Code.
+  It ran `npm uninstall -g @anthropic-ai/claude-code` and deleted `~/.claude`,
+  then reported success — but the runtime is normally installed by
+  `claude.ai/install.sh`, which npm has never heard of, so the binary stayed in
+  the account and stayed on PATH after an "uninstall". The list of what the
+  native install leaves behind now lives next to the code that installs it, the
+  uninstall removes every path it names, and afterwards it asks the machine
+  whether `claude` still resolves and says so if it does. The confirmation
+  prompt also promised less than it now does; it names the native paths too.
+
+
 ## [0.1.6] - 2026-08-06
 
 Four things a customer or an operator could walk into, and one gate that was

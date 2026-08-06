@@ -16,6 +16,7 @@ import { getActiveAdapter } from '../lib/runtime/index.js';
 import { bold, dim, green, red, cyan, success, warn, heading } from '../lib/colors.js';
 import { promptYesNo } from '../lib/prompts.js';
 import { commandExists } from '../lib/shell-utils.js';
+import { claudeNativeArtifacts } from '../lib/runtime-setup.js';
 
 // Kill both known runtime sessions on uninstall regardless of which is active
 const TMUX_SESSIONS = ['claude-main', 'codex-main'];
@@ -79,7 +80,10 @@ export async function selfUninstall(args) {
 
     if (commandExists('claude')) {
       removeClaude = await promptYesNo(
-        `  Remove Claude CLI? ${dim('(npm uninstall -g + remove ~/.claude/)')} [y/N] `
+        // The prompt is a promise about what will happen. It used to name only
+        // the npm route and ~/.claude, while the runtime is normally installed
+        // natively — so answering yes did less than it said (TD-62 ④).
+        `  Remove Claude CLI? ${dim('(npm uninstall -g, plus ~/.claude/, ~/.local/bin/claude and ~/.local/share/claude/)')} [y/N] `
       );
     }
 
@@ -350,10 +354,46 @@ function uninstallPm2() {
  * Remove Claude CLI and its data directory.
  */
 function uninstallClaudeCli() {
+  // Covers the npm route. Most machines did not take it.
   npmUninstallGlobal('@anthropic-ai/claude-code');
 
   const claudeDir = path.join(os.homedir(), '.claude');
   removeDirectory(claudeDir);
+
+  // TD-62 ④: the runtime is normally installed by claude.ai/install.sh, which
+  // npm has never heard of. Without this, self-uninstall said it was done while
+  // the binary was still in the account and still on PATH.
+  for (const target of claudeNativeArtifacts(os.homedir())) {
+    removePath(target);
+  }
+
+  // Trust the machine, not our own exit codes: if it still resolves, say so
+  // rather than letting "uninstalled" mean "we ran some commands".
+  const leftover = whichSilent('claude');
+  if (leftover) {
+    console.log(warn(`Claude Code still resolves to ${leftover} after uninstall.`));
+    console.log(dim('  Something outside this install owns it — remove that copy by hand if you meant to.'));
+  }
+}
+
+/**
+ * Remove a file, symlink or directory. rmSync handles all three, but a dangling
+ * symlink must still go: existsSync() follows the link and answers false for
+ * one, which is exactly the state a half-removed native install leaves behind.
+ */
+function removePath(target) {
+  try {
+    fs.rmSync(target, { recursive: true, force: true });
+  } catch (err) {
+    console.log(warn(`Could not remove ${target}: ${err.message}`));
+  }
+}
+
+/** Where a command resolves, or null. Never throws. */
+function whichSilent(command) {
+  const result = spawnSync('sh', ['-lc', `command -v ${command}`], { encoding: 'utf8', stdio: 'pipe', timeout: 10000 });
+  const out = (result.stdout || '').trim();
+  return out || null;
 }
 
 /**
