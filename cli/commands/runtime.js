@@ -278,7 +278,7 @@ async function switchRuntime(target, flags) {
       console.log(`  ${green('✓')} installed from ${result.label}`);
     } else {
       const result = installClaude({
-        onAttempt: step => console.log(`  trying ${step.label}...`),
+        onAttempt: step => console.log(`  trying ${step.label}${step.elevate ? ' with sudo' : ''}...`),
       });
       if (!result.ok) {
         console.error(red(`\nFailed to install ${bold(target)} CLI.`));
