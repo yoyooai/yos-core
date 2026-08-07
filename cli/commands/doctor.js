@@ -8,7 +8,6 @@
 
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import https from 'node:https';
 import os from 'node:os';
 import path from 'node:path';
 import dns from 'node:dns/promises';
@@ -23,6 +22,12 @@ import { commandExists } from '../lib/shell-utils.js';
 import { parseSkillMd } from '../lib/skill.js';
 import { bold, dim, green, red, yellow, heading } from '../lib/colors.js';
 import { getActiveAdapter } from '../lib/runtime/index.js';
+import {
+  describeEndpoint,
+  resolveRuntimeBaseUrl,
+  OFFICIAL_CLAUDE_BASE_URL,
+  OFFICIAL_CODEX_BASE_URL,
+} from '../lib/api-endpoint.js';
 
 // Resolve active runtime session name and display name at startup.
 // Falls back to 'claude-main' / 'Claude' if config is missing or unknown runtime.
@@ -38,7 +43,16 @@ try {
 } catch { /* config.json absent or unknown runtime — use Claude defaults */ }
 const LOG_DIR = path.join(YOS_DIR, 'logs');
 const LOG_FILE = path.join(LOG_DIR, 'doctor.log');
-const API_HOST = ACTIVE_RUNTIME === 'codex' ? 'api.openai.com' : 'api.anthropic.com';
+// Probe the endpoint this install actually talks to, not the vendor's official
+// host. A gateway install would otherwise be graded against a host it never
+// uses: green here while the endpoint in use is down, red here while the
+// endpoint in use is fine.
+const API_ENDPOINT = describeEndpoint(
+  resolveRuntimeBaseUrl(ACTIVE_RUNTIME),
+  ACTIVE_RUNTIME === 'codex' ? OFFICIAL_CODEX_BASE_URL : OFFICIAL_CLAUDE_BASE_URL,
+);
+const API_HOST = API_ENDPOINT.hostname;
+const API_ORIGIN = API_ENDPOINT.origin;
 const VERSION_CHECK_CONCURRENCY = 3;
 const CLAUDE_FIX_TIMEOUT = 300000; // 5 minutes
 
@@ -142,14 +156,19 @@ async function checkNetwork(env) {
     results.proxy = proxy;
   }
 
-  // DNS check
-  try {
-    const addrs = await dns.resolve4(API_HOST);
+  // DNS check — meaningless for a literal address (a gateway may be given by IP).
+  if (API_ENDPOINT.isIpLiteral) {
     results.dns = true;
-    results.details.resolved = addrs[0];
-  } catch (err) {
-    results.details.dnsError = err.code || err.message;
-    return results;
+    results.details.resolved = API_HOST;
+  } else {
+    try {
+      const addrs = await dns.resolve4(API_HOST);
+      results.dns = true;
+      results.details.resolved = addrs[0];
+    } catch (err) {
+      results.details.dnsError = err.code || err.message;
+      return results;
+    }
   }
 
   // Reachability check
@@ -158,7 +177,7 @@ async function checkNetwork(env) {
       const curlArgs = ['-s', '--connect-timeout', '5', '--max-time', '10',
         '-o', '/dev/null', '-w', '%{http_code}'];
       if (proxy) curlArgs.push('--proxy', proxy);
-      curlArgs.push(`https://${API_HOST}/`);
+      curlArgs.push(`${API_ORIGIN}/`);
       const code = execFileSync('curl', curlArgs, {
         encoding: 'utf8', timeout: 15000, stdio: ['pipe', 'pipe', 'pipe'],
       }).trim();
@@ -170,7 +189,7 @@ async function checkNetwork(env) {
       if (proxy) {
         try {
           const directArgs = ['-s', '--connect-timeout', '5', '--max-time', '10',
-            '-o', '/dev/null', '-w', '%{http_code}', `https://${API_HOST}/`];
+            '-o', '/dev/null', '-w', '%{http_code}', `${API_ORIGIN}/`];
           execFileSync('curl', directArgs, {
             encoding: 'utf8', timeout: 15000, stdio: ['pipe', 'pipe', 'pipe'],
           });
@@ -181,21 +200,16 @@ async function checkNetwork(env) {
       }
     }
   } else {
-    // Fallback: node https (no proxy support)
+    // Fallback: global fetch (no proxy support)
     try {
-      await new Promise((resolve, reject) => {
-        const req = https.request({
-          hostname: API_HOST, port: 443, path: '/', method: 'HEAD', timeout: 10000,
-        }, (res) => {
-          results.reachable = true;
-          results.details.httpCode = String(res.statusCode);
-          res.resume();
-          resolve();
-        });
-        req.on('error', reject);
-        req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
-        req.end();
+      // Uses the resolved origin so a gateway on a custom scheme/port/path is
+      // probed exactly as configured.
+      const res = await fetch(`${API_ORIGIN}/`, {
+        method: 'HEAD',
+        signal: AbortSignal.timeout(10000),
       });
+      results.reachable = true;
+      results.details.httpCode = String(res.status);
     } catch {
       // Cannot reach — note proxy can't be tested without curl
       if (proxy) {

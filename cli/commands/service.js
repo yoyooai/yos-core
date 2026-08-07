@@ -26,6 +26,59 @@ function buildPm2EnvFlags(envString) {
     .join(' ');
 }
 
+const RUNTIME_RESTART_TIMEOUT_MS = 90_000;
+const RUNTIME_RESTART_POLL_MS = 2_000;
+
+/**
+ * Restart the runtime's main loop — the tmux session the agent actually runs in.
+ *
+ * `yos restart` used to restart four PM2 services and stop there. None of them
+ * is the agent: the main loop lives in a tmux session that the activity-monitor
+ * guardian owns. So "Services restarted." was printed while the thing the user
+ * meant to restart had never been touched.
+ *
+ * We stop the session rather than relaunching it here on purpose — the guardian
+ * owns the launch boundary (it rebuilds the instruction file first), and a
+ * second launcher would drift from it. Then we WAIT and confirm the session
+ * came back, because "restarted" must not be printed on the strength of having
+ * killed something.
+ *
+ * @returns {Promise<{restarted: boolean, reason: string}>}
+ */
+export async function restartRuntimeMainLoop({
+  getAdapter = getActiveAdapter,
+  timeoutMs = RUNTIME_RESTART_TIMEOUT_MS,
+  pollMs = RUNTIME_RESTART_POLL_MS,
+  sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+  now = () => Date.now(),
+} = {}) {
+  let adapter;
+  try {
+    adapter = getAdapter();
+  } catch {
+    return { restarted: false, reason: 'no-runtime-configured' };
+  }
+
+  try {
+    if (!await adapter.isRunning()) {
+      // Nothing to cycle. The guardian starts it; say so instead of pretending.
+      return { restarted: false, reason: 'not-running' };
+    }
+    adapter.stop();
+  } catch (e) {
+    return { restarted: false, reason: `stop-failed: ${e.message}` };
+  }
+
+  const deadline = now() + timeoutMs;
+  while (now() < deadline) {
+    await sleep(pollMs);
+    try {
+      if (await adapter.isRunning()) return { restarted: true, reason: 'guardian-relaunched' };
+    } catch { /* transient tmux error — keep waiting until the deadline */ }
+  }
+  return { restarted: false, reason: 'guardian-did-not-relaunch' };
+}
+
 export function restartServicesWithDeps({
   restartFromEcosystemFn = restartFromEcosystem,
   restartManagedProcessFn = restartManagedProcess,
@@ -332,7 +385,23 @@ export function stopServices() {
   }
 }
 
-export function restartServices() {
+export async function restartServices() {
   console.log(heading('Restarting YOS services...'));
-  restartServicesWithDeps();
+  if (!restartServicesWithDeps()) return;
+
+  // The services above are the scaffolding. Restart the agent itself too —
+  // that is what "restart" means to whoever typed it.
+  console.log(dim('Restarting the agent main loop...'));
+  const runtime = await restartRuntimeMainLoop();
+  if (runtime.restarted) {
+    console.log(success('Agent main loop restarted.'));
+  } else if (runtime.reason === 'not-running') {
+    console.log(warn('Agent main loop was not running; the guardian will start it.'));
+  } else if (runtime.reason === 'no-runtime-configured') {
+    console.log(warn('No runtime configured, so no main loop to restart. Run: yos init'));
+  } else {
+    console.error(error(`Agent main loop did not come back (${runtime.reason}).`));
+    console.error(`  ${dim('Check: pm2 logs activity-monitor')}`);
+    process.exitCode = 1;
+  }
 }
