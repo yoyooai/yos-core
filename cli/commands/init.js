@@ -7,7 +7,6 @@
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import https from 'node:https';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -19,12 +18,19 @@ import { bold, dim, green, red, yellow, cyan, bgGreen, success, error, warn, hea
 import { commandExists } from '../lib/shell-utils.js';
 import { getActiveAdapter } from '../lib/runtime/index.js';
 import {
+  buildProbeUrl,
+  describeEndpoint,
+  resolveClaudeBaseUrl,
+  resolveCodexBaseUrl,
+  OFFICIAL_CODEX_BASE_URL,
+} from '../lib/api-endpoint.js';
+import {
   activateFreshSplitInstructions,
   refreshSplitInstructions,
 } from '../lib/runtime/instruction-builder.js';
 import { deployManifestTemplate } from '../lib/runtime/tmux-env.js';
 import { npmInstallEnv } from '../lib/npm-env.js';
-import { writeEnvEntries } from '../lib/env.js';
+import { readEnvFile, writeEnvEntries } from '../lib/env.js';
 import { resolveWebConsolePort, readRecordedConsolePort, DEFAULT_WEB_CONSOLE_PORT } from '../lib/web-console-port.js';
 import { looksIsolated, classifyUnitWrite, backupUnitPath } from '../lib/pm2-unit-guard.js';
 import { parseJlist, classifyLeftovers, describeLeftovers } from '../lib/pm2-leftovers.js';
@@ -440,59 +446,162 @@ function ensureBinInPath() {
  * @returns {boolean} true if saved successfully
  */
 /**
- * Verify an Anthropic API key by making a lightweight API call.
- * Sends an intentionally empty request — a valid key returns 400 (bad request),
- * an invalid key returns 401 (unauthorized).
+ * Decide what to do with a credential given its probe result.
  *
- * @param {string} apiKey - The API key to verify
- * @returns {Promise<boolean>} true if key is valid
+ * The whole point of this function is that exactly two outcomes justify
+ * throwing a customer's key away: the endpoint rejected it, or the configured
+ * base URL is unusable so there is nothing to check against. Anything else —
+ * unreachable, timeout, a status that proves nothing — leaves the key on disk,
+ * because discarding a credential we never managed to check is what left
+ * installs with no credential at all.
+ *
+ * Saving is not the same as passing: 'save-unverified' must never be reported
+ * as authenticated.
+ *
+ * @param {{ok: boolean, reason: string}} result
+ * @returns {'verified'|'save-unverified'|'refuse'}
  */
-function verifyApiKey(apiKey) {
-  return new Promise((resolve) => {
-    const req = https.request({
-      hostname: 'api.anthropic.com',
-      path: '/v1/messages',
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      timeout: 10000,
-    }, (res) => {
-      res.resume(); // drain response
-      // 401 = invalid key, anything else (400, 200, etc.) = key is valid
-      resolve(res.statusCode !== 401);
-    });
-    req.on('error', () => resolve(false));
-    req.on('timeout', () => { req.destroy(); resolve(false); });
-    req.write('{}');
-    req.end();
-  });
+export function decideCredentialOutcome(result) {
+  if (result.reason === 'rejected' || result.reason === 'bad-base-url') return 'refuse';
+  return result.ok ? 'verified' : 'save-unverified';
 }
 
 /**
- * Verify an OpenAI API key by making a lightweight GET request to /v1/models.
- * @param {string} apiKey - The OpenAI API key (sk-...)
- * @returns {Promise<true|false|null>} true=valid (200), false=invalid (401), null=network error
+ * Print why a credential was refused, naming the host actually contacted.
+ *
+ * "Invalid key" and "could not reach the server" are different problems with
+ * different fixes; collapsing them into one message sends customers to check a
+ * key that was never the issue.
+ *
+ * @param {string} label - Human name of the credential, e.g. 'Anthropic API key'
+ * @param {{reason: string, target: string}} result - Result from a verify* call
+ * @param {boolean} customEndpoint - Whether the endpoint is a customer gateway
+ * @param {string} vendorConsole - Where to check the key when it was genuinely rejected
  */
-function verifyCodexApiKey(apiKey) {
-  return new Promise((resolve) => {
-    const req = https.request({
-      hostname: 'api.openai.com',
-      path: '/v1/models',
-      method: 'GET',
-      headers: { 'Authorization': `Bearer ${apiKey}` },
-      timeout: 10000,
-    }, (res) => {
-      res.resume(); // drain response
-      if (res.statusCode === 401) resolve(false);
-      else resolve(true);
-    });
-    req.on('error', () => resolve(null));
-    req.on('timeout', () => { req.destroy(); resolve(null); });
-    req.end();
-  });
+function reportCredentialFailure(label, result, customEndpoint, vendorConsole) {
+  if (result.reason === 'bad-base-url') {
+    console.error(`  ${error(`${label} not saved — the configured base URL could not be parsed.`)}`);
+    console.error(`    ${dim(`Value: ${result.target}`)}`);
+    console.error(`    ${dim('Expected something like: https://gateway.example.com')}`);
+    return;
+  }
+  console.error(`  ${error(`${label} was rejected by ${result.target}.`)}`);
+  console.error(`    ${dim(customEndpoint
+    ? `The endpoint answered, and it refused this key. Check it with whoever issued ${result.target}.`
+    : `The endpoint answered, and it refused this key. Check it at ${vendorConsole}.`)}`);
+}
+
+/**
+ * Print why a credential was saved without being verified.
+ *
+ * The key is kept: discarding a credential we never managed to check is what
+ * left installs with no credential at all on networks that cannot reach the
+ * endpoint. But it is NOT reported as authenticated — see the install summary.
+ *
+ * @param {string} label - Human name of the credential
+ * @param {{reason: string, target: string, status?: number}} result
+ * @param {boolean} customEndpoint - Whether the endpoint is a customer gateway
+ */
+function reportCredentialUnverified(label, result, customEndpoint) {
+  if (result.reason === 'inconclusive') {
+    console.log(`  ${warn(`${label} saved, but ${result.target} answered ${result.status} — could not confirm the key.`)}`);
+    console.log(`    ${dim('That status means the endpoint is up but the request did not land where expected; check the base URL path.')}`);
+    return;
+  }
+  console.log(`  ${warn(`${label} saved, but ${result.target} could not be reached — the key was never checked.`)}`);
+  console.log(`    ${dim(customEndpoint
+    ? `Confirm ${result.target} is reachable from this machine.`
+    : 'If you use your own gateway, pass --base-url <url> so the check goes there.')}`);
+}
+
+/**
+ * Classify a credential probe's HTTP status.
+ *
+ * Only an explicit rejection from the endpoint may condemn a key. A 404 or 502
+ * says something about the endpoint (wrong path, gateway down), not about the
+ * credential — reporting those as "invalid key" is how a reachable-but-
+ * misconfigured gateway gets a good key thrown away.
+ *
+ * @param {number} status
+ * @param {number[]} acceptedStatuses - Statuses that prove the key was accepted.
+ * @returns {'valid'|'rejected'|'inconclusive'}
+ */
+function classifyProbeStatus(status, acceptedStatuses) {
+  if (status === 401 || status === 403) return 'rejected';
+  if (acceptedStatuses.includes(status)) return 'valid';
+  return 'inconclusive';
+}
+
+/**
+ * Probe a credential against one endpoint.
+ *
+ * @param {string} baseUrl - Base URL to probe (already resolved)
+ * @param {string} apiPath - API path beginning with `/v1/`
+ * @param {object} requestInit - fetch() options (method, headers, body)
+ * @param {number[]} acceptedStatuses - Statuses that prove the key was accepted
+ * @returns {Promise<{ok: boolean, reason: 'valid'|'rejected'|'inconclusive'|'unreachable'|'bad-base-url', target: string, status?: number}>}
+ */
+async function probeCredential(baseUrl, apiPath, requestInit, acceptedStatuses) {
+  const probe = buildProbeUrl(baseUrl, apiPath);
+  if (!probe) return { ok: false, reason: 'bad-base-url', target: String(baseUrl) };
+
+  try {
+    const res = await fetch(probe.url, { ...requestInit, signal: AbortSignal.timeout(10000) });
+    const reason = classifyProbeStatus(res.status, acceptedStatuses);
+    return { ok: reason === 'valid', reason, target: probe.host, status: res.status };
+  } catch {
+    // Unreachable, TLS failure, or timeout — says nothing about the key.
+    return { ok: false, reason: 'unreachable', target: probe.host };
+  }
+}
+
+/**
+ * Verify an Anthropic API key by making a lightweight API call.
+ * Sends an intentionally empty request — an accepted key returns 400 (bad
+ * request), a rejected key returns 401/403.
+ *
+ * The check goes to the endpoint this install is configured for, so a key that
+ * is valid on the customer's own gateway is not rejected because the vendor's
+ * host is unreachable from their network.
+ *
+ * @param {string} apiKey - The API key to verify
+ * @param {string|null} [baseUrl] - Explicit base URL override, if any
+ * @returns {Promise<{ok: boolean, reason: string, target: string, status?: number}>}
+ */
+export function verifyApiKey(apiKey, baseUrl = null) {
+  return probeCredential(
+    resolveClaudeBaseUrl(baseUrl),
+    '/v1/messages',
+    {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        // Gateways commonly expect Bearer; the vendor host ignores it.
+        'authorization': `Bearer ${apiKey}`,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: '{}',
+    },
+    [200, 400],
+  );
+}
+
+/**
+ * Verify an OpenAI API key with a lightweight GET to the models endpoint.
+ * Goes to the configured endpoint — see verifyApiKey().
+ *
+ * @param {string} apiKey - The OpenAI API key (sk-...)
+ * @param {string|null} [baseUrl] - Explicit base URL override, if any
+ * @returns {Promise<{ok: boolean, reason: string, target: string, status?: number}>}
+ */
+export function verifyCodexApiKey(apiKey, baseUrl = null) {
+  return probeCredential(
+    resolveCodexBaseUrl(baseUrl),
+    '/v1/models',
+    { method: 'GET', headers: { Authorization: `Bearer ${apiKey}` } },
+    [200],
+  );
 }
 
 /**
@@ -1088,6 +1197,28 @@ function getNetworkIP() {
  * Displayed prominently so the user doesn't miss the password.
  * Always shown even in quiet mode (essential output).
  */
+/**
+ * Print a yellow warning box, padding each line to the box width.
+ * Long lines are truncated rather than allowed to break the border.
+ *
+ * @param {string[]} lines - Content lines (no borders, no padding)
+ */
+function printWarningBox(lines) {
+  const WIDTH = 56;
+  const bar = '─'.repeat(WIDTH);
+  const row = (text) => {
+    const clipped = text.slice(0, WIDTH - 4);
+    return yellow(`  │  ${clipped}${' '.repeat(WIDTH - 2 - clipped.length)}│`);
+  };
+  console.log('');
+  console.log(yellow(`  ┌${bar}┐`));
+  console.log(yellow(`  │${' '.repeat(WIDTH)}│`));
+  for (const line of lines) console.log(row(line));
+  console.log(yellow(`  │${' '.repeat(WIDTH)}│`));
+  console.log(yellow(`  └${bar}┘`));
+  console.log('');
+}
+
 function printWebConsoleInfo() {
   const config = getYosConfig();
 
@@ -1980,6 +2111,26 @@ export function parseInitFlags(args) {
  *
  * @param {object} opts - Parsed CLI options (mutated in place)
  */
+/**
+ * Read credentials yos previously stored in ~/yos/.env.
+ *
+ * Missing or unreadable file is not an error — it just means nothing is stored.
+ *
+ * @returns {{setupToken: string, apiKey: string, codexApiKey: string}}
+ */
+export function readStoredCredentials(readEnv = readEnvFile) {
+  try {
+    const env = readEnv();
+    return {
+      setupToken: env.get('CLAUDE_CODE_OAUTH_TOKEN') || '',
+      apiKey: env.get('ANTHROPIC_API_KEY') || '',
+      codexApiKey: env.get('OPENAI_API_KEY') || env.get('CODEX_API_KEY') || '',
+    };
+  } catch {
+    return { setupToken: '', apiKey: '', codexApiKey: '' };
+  }
+}
+
 export function resolveFromEnv(opts) {
   // Only promote auth tokens from env when:
   // 1. Not already authenticated (avoids redundant re-verification)
@@ -1988,11 +2139,19 @@ export function resolveFromEnv(opts) {
   const alreadyAuthed = commandExists('claude') && isClaudeAuthenticated();
   const hasCliAuth = opts.setupToken !== null || opts.apiKey !== null;
   if (!alreadyAuthed && !hasCliAuth) {
-    // Setup token takes priority over API key when both are in environment
-    if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
-      opts.setupToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
-    } else if (process.env.ANTHROPIC_API_KEY) {
-      opts.apiKey = process.env.ANTHROPIC_API_KEY;
+    // Also read the credential yos itself stores in ~/yos/.env. Every other
+    // part of the product reads that file — the runtime adapter injects it at
+    // launch, doctor checks against it — and init was the one component that
+    // did not, so a key written there was ignored and the user was told to
+    // supply a key they had already supplied.
+    const stored = readStoredCredentials();
+    // Setup token takes priority over API key when both are available.
+    const setupToken = process.env.CLAUDE_CODE_OAUTH_TOKEN || stored.setupToken;
+    const apiKey = process.env.ANTHROPIC_API_KEY || stored.apiKey;
+    if (setupToken) {
+      opts.setupToken = setupToken;
+    } else if (apiKey) {
+      opts.apiKey = apiKey;
     }
   }
   if (opts.runtime === null && process.env.YOS_RUNTIME) {
@@ -2007,8 +2166,9 @@ export function resolveFromEnv(opts) {
   if (opts.webPassword === null) {
     opts.webPassword = process.env.YOS_WEB_PASSWORD || process.env.WEB_CONSOLE_PASSWORD || null;
   }
-  if (opts.codexApiKey === null && (process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY)) {
-    opts.codexApiKey = process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY;
+  if (opts.codexApiKey === null) {
+    opts.codexApiKey = process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY
+      || readStoredCredentials().codexApiKey || null;
   }
   if (opts.baseUrl === null && process.env.ANTHROPIC_BASE_URL) {
     opts.baseUrl = process.env.ANTHROPIC_BASE_URL;
@@ -2033,9 +2193,24 @@ export function validateInitOptions(opts) {
     return 'Invalid setup token. It should start with "sk-ant-oat".\n  Generate one with: claude setup-token\n  Then run: yos init --setup-token <token>';
   }
 
-  // API key format (reject setup tokens — they start with sk-ant-oat)
+  // API key format (reject setup tokens — they start with sk-ant-oat).
+  // Name the mismatch when the key is recognisably another vendor's: "should
+  // start with sk-ant-" sends someone hunting for a typo when what they
+  // actually did was hand the Claude runtime an OpenAI key.
   if (opts.apiKey && !opts.apiKey.startsWith('sk-ant-')) {
+    if (opts.apiKey.startsWith('sk-')) {
+      return 'That looks like an OpenAI key, but this is the Claude runtime.\n'
+        + '  Anthropic keys start with "sk-ant-"; OpenAI keys start with "sk-".\n'
+        + '  For an OpenAI key, install the Codex runtime instead:\n'
+        + '    yos init --runtime codex --codex-api-key <key>';
+    }
     return 'Invalid API key. It should start with "sk-ant-".\n  Get your key at: https://console.anthropic.com/settings/keys\n  Then run: yos init --api-key <key>';
+  }
+  // The same mistake in the other direction.
+  if (opts.codexApiKey && opts.codexApiKey.startsWith('sk-ant-')) {
+    return 'That looks like an Anthropic key, but --codex-api-key is for OpenAI keys.\n'
+      + '  For an Anthropic key, use the Claude runtime:\n'
+      + '    yos init --runtime claude --api-key <key>';
   }
   if (opts.apiKey && opts.apiKey.startsWith('sk-ant-oat')) {
     return 'That looks like a setup token, not an API key.\n  Use --setup-token instead: yos init --setup-token <token>';
@@ -2280,6 +2455,9 @@ export async function initCommand(args) {
   // Steps 5–6: Install and authenticate the selected runtime
   let claudeJustInstalled = false;
   let claudeAuthenticated = false;
+  // Set when a credential was saved but the endpoint never confirmed it. Keeps
+  // the install summary honest: neither "authenticated" nor "no credential".
+  let credentialUnverified = null;
   let codexAuthenticated = false;
   let pendingApiKey = null; // set if user enters API key, written to .env after templates
   let pendingSetupToken = null; // set if user enters setup-token, written to .env after templates
@@ -2327,28 +2505,27 @@ export async function initCommand(args) {
         // Verify first, then save — mirrors Claude's verifyApiKey → saveApiKey pattern.
         // Do NOT save before verifying: a bad key in process.env causes isCodexAuthenticated()
         // to report "authenticated" even when the key is invalid (path 1 check is existence-only).
-        if (!quiet) console.log(`  ${dim('Verifying Codex API key...')}`);
-        const verifyResult = await verifyCodexApiKey(opts.codexApiKey);
-        if (verifyResult === true) {
-          if (saveCodexApiKey(opts.codexApiKey)) {
+        const codexEndpoint = describeEndpoint(
+          resolveCodexBaseUrl(opts.codexBaseUrl), OFFICIAL_CODEX_BASE_URL);
+        if (!quiet) console.log(`  ${dim(`Verifying Codex API key against ${codexEndpoint.host}...`)}`);
+        const verifyResult = await verifyCodexApiKey(opts.codexApiKey, opts.codexBaseUrl);
+        const codexOutcome = decideCredentialOutcome(verifyResult);
+        if (codexOutcome === 'refuse') {
+          reportCredentialFailure('Codex API key', verifyResult, codexEndpoint.custom, 'platform.openai.com');
+          if (skipConfirm) exitCode = 1;
+        } else if (saveCodexApiKey(opts.codexApiKey)) {
+          if (codexOutcome === 'verified') {
             codexAuthenticated = true;
             if (!quiet) console.log(`  ${success('Codex API key verified and saved')}`);
           } else {
-            console.error(`  ${error('Failed to save Codex API key to auth.json.')}`);
-            if (skipConfirm) exitCode = 1;
+            // Saved so the key is not lost, but never reported as authenticated:
+            // the install summary must not claim a check that never happened.
+            credentialUnverified = { label: 'Codex API key', result: verifyResult };
+            if (!quiet) reportCredentialUnverified('Codex API key', verifyResult, codexEndpoint.custom);
           }
-        } else if (verifyResult === false) {
-          console.error(`  ${error('Codex API key is invalid or could not be verified.')}`);
-          console.error(`    ${dim('Check your key at platform.openai.com')}`);
-          if (skipConfirm) exitCode = 1;
         } else {
-          // null = network unreachable — save and proceed, let Codex fail at runtime if key is bad
-          if (saveCodexApiKey(opts.codexApiKey)) {
-            if (!quiet) console.log(`  ${warn('Could not verify Codex API key (network unreachable). Proceeding...')}`);
-            codexAuthenticated = true;
-          } else {
-            console.error(`  ${error('Failed to save Codex API key to auth.json.')}`);
-          }
+          console.error(`  ${error('Failed to save Codex API key to auth.json.')}`);
+          if (skipConfirm) exitCode = 1;
         }
       } else {
         codexAuthenticated = isCodexAuthenticated();
@@ -2472,16 +2649,29 @@ export async function initCommand(args) {
       }
     } else if (opts.apiKey) {
       // API key provided via flag/env — verify and use directly (already validated format)
-      if (!quiet) console.log(`  ${dim('Verifying API key...')}`);
-      const keyValid = await verifyApiKey(opts.apiKey);
-      if (!keyValid) {
-        console.error(`  ${error('API key is invalid or could not be verified.')}`);
-        console.error(`    ${dim('Check your key at console.anthropic.com')}`);
+      // Verify against the configured endpoint, not the vendor host: a key that
+      // is valid on the customer's gateway must not be rejected just because
+      // the vendor's host is unreachable from their network.
+      const claudeEndpoint = describeEndpoint(resolveClaudeBaseUrl(opts.baseUrl));
+      if (!quiet) console.log(`  ${dim(`Verifying API key against ${claudeEndpoint.host}...`)}`);
+      const keyResult = await verifyApiKey(opts.apiKey, opts.baseUrl);
+      const keyOutcome = decideCredentialOutcome(keyResult);
+      if (keyOutcome === 'refuse') {
+        reportCredentialFailure('Anthropic API key', keyResult, claudeEndpoint.custom, 'console.anthropic.com');
         if (skipConfirm) exitCode = 1;
       } else if (saveApiKey(opts.apiKey)) {
         pendingApiKey = opts.apiKey;
-        claudeAuthenticated = true;
-        if (!quiet) console.log(`  ${success('API key verified and saved')}`);
+        if (keyOutcome === 'verified') {
+          claudeAuthenticated = true;
+          if (!quiet) console.log(`  ${success('API key verified and saved')}`);
+        } else {
+          // Saved so the key is not lost, but never reported as authenticated.
+          credentialUnverified = { label: 'Anthropic API key', result: keyResult };
+          if (!quiet) reportCredentialUnverified('Anthropic API key', keyResult, claudeEndpoint.custom);
+        }
+      } else {
+        console.error(`  ${error('Failed to save the API key.')}`);
+        if (skipConfirm) exitCode = 1;
       }
     } else {
       if (!quiet) console.log(`  ${warn('Claude Code not authenticated')}`);
@@ -2528,15 +2718,21 @@ export async function initCommand(args) {
             console.log(`  ${error('Invalid format. API key should start with sk-ant-')}`);
             console.log(`    ${dim('You can set it later: export ANTHROPIC_API_KEY=sk-ant-xxx')}`);
           } else {
-            console.log(`  ${dim('Verifying API key...')}`);
-            const keyValid = await verifyApiKey(apiKey);
-            if (!keyValid) {
-              console.log(`  ${error('API key is invalid or could not be verified.')}`);
-              console.log(`    ${dim('Check your key at console.anthropic.com')}`);
+            const promptEndpoint = describeEndpoint(resolveClaudeBaseUrl(opts.baseUrl));
+            console.log(`  ${dim(`Verifying API key against ${promptEndpoint.host}...`)}`);
+            const keyResult = await verifyApiKey(apiKey, opts.baseUrl);
+            const promptOutcome = decideCredentialOutcome(keyResult);
+            if (promptOutcome === 'refuse') {
+              reportCredentialFailure('Anthropic API key', keyResult, promptEndpoint.custom, 'console.anthropic.com');
             } else if (saveApiKey(apiKey)) {
               pendingApiKey = apiKey;
-              claudeAuthenticated = true;
-              console.log(`  ${success('API key verified and saved')}`);
+              if (promptOutcome === 'verified') {
+                claudeAuthenticated = true;
+                console.log(`  ${success('API key verified and saved')}`);
+              } else {
+                credentialUnverified = { label: 'Anthropic API key', result: keyResult };
+                reportCredentialUnverified('Anthropic API key', keyResult, promptEndpoint.custom);
+              }
             }
           }
         } else if (authChoice === 3) {
@@ -2682,8 +2878,15 @@ export async function initCommand(args) {
     if (selectedRuntime === 'codex' ? !codexAuthenticated : !claudeAuthenticated) {
       if (!quiet) {
         const runtimeName = selectedRuntime === 'codex' ? 'Codex' : 'Claude Code';
-        console.log(`\n${warn(`${runtimeName} is not authenticated.`)}`);
-        console.log(`  ${dim('Run "yos init" again to authenticate.')}`);
+        if (credentialUnverified) {
+          // A credential IS on disk — saying "not authenticated" would send the
+          // user hunting for a key they already provided.
+          console.log(`\n${warn(`${runtimeName} credential saved but unverified.`)}`);
+          console.log(`  ${dim(`${credentialUnverified.result.target} never confirmed it. ${runtimeName} will report the real error on first use.`)}`);
+        } else {
+          console.log(`\n${warn(`${runtimeName} is not authenticated.`)}`);
+          console.log(`  ${dim('Run "yos init" again to authenticate.')}`);
+        }
       }
     }
     printWebConsoleInfo();
@@ -2833,7 +3036,21 @@ export async function initCommand(args) {
 
   if (!quiet) {
     const runtimeAuthOk = selectedRuntime === 'codex' ? codexAuthenticated : claudeAuthenticated;
-    if (!runtimeAuthOk) {
+    if (!runtimeAuthOk && credentialUnverified) {
+      // Distinct from "not authenticated": the credential is on disk, we just
+      // never got an answer about it. Telling the user to supply a key they
+      // already supplied is the panel lying in the other direction.
+      const runtimeName = selectedRuntime === 'codex' ? 'Codex' : 'Claude';
+      printWarningBox([
+        `⚠  ${runtimeName} credential saved but unverified`,
+        '',
+        `YOS is installed and the key is stored, but`,
+        `${credentialUnverified.result.target} never confirmed it.`,
+        '',
+        'To confirm:',
+        '  yos doctor',
+      ]);
+    } else if (!runtimeAuthOk) {
       // Yellow warning box — same treatment regardless of whether a credential
       // was attempted or not. Auth is required; Next steps without it is misleading.
       console.log('');

@@ -25,6 +25,7 @@ import { assertInstructionReady, buildInstructionFile } from './instruction-buil
 import { CodexContextMonitor } from './codex-context-monitor.js';
 import { createCodexProbe } from '../heartbeat/codex-probe.js';
 import { YOS_DIR, SKILLS_DIR, getYosConfig } from '../config.js';
+import { resolveCodexBaseUrl } from '../api-endpoint.js';
 import {
   tmuxHasSession,
   tmuxGetPanePid,
@@ -49,23 +50,6 @@ const CODEX_BIN = process.env.CODEX_BIN || 'codex';
 // When CODEX_BYPASS_PERMISSIONS=false, skip --dangerously-bypass-approvals-and-sandbox.
 // Defaults to enabled for unattended server operation.
 const DEFAULT_BYPASS = process.env.CODEX_BYPASS_PERMISSIONS !== 'false';
-
-function getCodexApiBaseUrl() {
-  try {
-    const configPath = path.join(os.homedir(), '.codex', 'config.toml');
-    const config = fs.readFileSync(configPath, 'utf8');
-    const match = config.match(/^\s*openai_base_url\s*=\s*"([^"]+)"\s*$/m);
-    if (match?.[1]) {
-      return match[1].replace(/\/+$/, '');
-    }
-  } catch { /* ignore missing config */ }
-
-  if (process.env.OPENAI_BASE_URL) {
-    return process.env.OPENAI_BASE_URL.replace(/\/+$/, '');
-  }
-
-  return 'https://api.openai.com/v1';
-}
 
 // ── CodexAdapter ──────────────────────────────────────────────────────────────
 
@@ -142,7 +126,7 @@ export class CodexAdapter extends RuntimeAdapter {
     // Guard against corrupted auth.json (mode set to "apikey" but key missing).
     if (!apiKey) return { status: 'failure', reason: 'apikey_mode_but_no_key' };
     try {
-      const baseUrl = getCodexApiBaseUrl();
+      const baseUrl = resolveCodexBaseUrl();
       const res = await fetch(`${baseUrl}/models`, {
         headers: { Authorization: `Bearer ${apiKey}` },
         signal: AbortSignal.timeout(10_000),
