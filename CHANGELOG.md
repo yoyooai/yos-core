@@ -4,6 +4,26 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
+## [0.1.9] - 2026-08-07
+
+### Fixed
+
+- A machine with a system-installed Node no longer stops the install halfway.
+  Its npm global directory belongs to root, and `install.sh` handles that by
+  elevating — which is how `yos` got installed at all. `yos init` then
+  installed PM2 into the same directory without doing the same thing, hit a
+  permission error, and exited: one step after the installer had succeeded, on
+  the same directory, for a reason the installer had already solved. The same
+  rule now applies in both places. Elevation happens only for a permission
+  failure, only when sudo needs no password, and never when already root —
+  each pinned by a test.
+- The advice printed when a global install fails now names the cause it
+  actually had. Every failure was reported as if the registry were at fault,
+  and the repair offered was to point npm at a different mirror — while both
+  registries were answering normally and the directory was the problem.
+  Following that advice could not have worked. A permission failure now says
+  so, names the directory, and gives the two repairs that apply.
+
 ## [0.1.8] - 2026-08-07
 
 Five faults on one path. A customer behind a self-hosted gateway could install

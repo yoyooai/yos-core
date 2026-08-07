@@ -2411,13 +2411,18 @@ export async function initCommand(args) {
     const pm2Result = installGlobalPackageWithFallback('pm2', {
       binary: 'pm2',
       onAttempt: source => {
-        if (!quiet) console.log(`    ${cyan(`Installing pm2 from ${source.label}...`)}`);
+        if (!quiet) {
+          console.log(`    ${cyan(`Installing pm2 from ${source.label}${source.elevate ? ' with sudo' : ''}...`)}`);
+        }
       },
     });
     if (pm2Result.ok) {
       if (!quiet) console.log(`  ${success(`PM2 installed from ${pm2Result.label}`)}`);
       if (pm2Result.fellBack && !quiet) {
         console.warn(`    ${dim('The configured registry did not answer — used the mirror instead.')}`);
+      }
+      if (pm2Result.elevated && !quiet) {
+        console.warn(`    ${dim('The npm global directory needed elevated permissions — installed with sudo, the same way yos itself was installed.')}`);
       }
     } else {
       console.error(`  ${error('Failed to install PM2')}`);
@@ -2482,7 +2487,9 @@ export async function initCommand(args) {
       if (!quiet) console.log(`  ${error('Codex not found')}`);
       const codexResult = installCodex({
         onAttempt: source => {
-          if (!quiet) console.log(`    ${cyan(`Installing @openai/codex from ${source.label}...`)}`);
+          if (!quiet) {
+            console.log(`    ${cyan(`Installing @openai/codex from ${source.label}${source.elevate ? ' with sudo' : ''}...`)}`);
+          }
         },
       });
       if (codexResult.ok) {
