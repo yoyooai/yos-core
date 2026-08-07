@@ -4,6 +4,46 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
+## [0.1.8] - 2026-08-07
+
+Five faults on one path. A customer behind a self-hosted gateway could install
+YOS, watch every service come up green, and have an agent that could not speak
+— and nothing in the product would say so. Four of the five made that failure
+invisible; the fifth made it unrecoverable by restart.
+
+### Fixed
+
+- Key verification now probes the endpoint this install is configured to use,
+  not the vendor's official host. Behind a gateway the official host is
+  unreachable, so a perfectly good key was judged dead and thrown away. The
+  question "where does this machine actually send API traffic" is now answered
+  in one place and reused by init, doctor, and the Codex adapter.
+- `yos init` now reads `~/yos/.env`. It was the only place in the product that
+  did not: adapters read it, doctor reads it, startup reads it, but init looked
+  at flags and process environment only. A credential recorded by yos itself
+  was therefore invisible to yos at install time.
+- The install summary no longer reports a stored-but-unchecked credential as
+  "not authenticated". That is a lie in the direction that costs the user the
+  most — they re-enter a key that was never the problem. There is now a third
+  state that says all three true things: stored, unverified, and why.
+- `doctor` checks the endpoint in use rather than the official host, and no
+  longer requires DNS to resolve — a gateway is often given as a bare address,
+  which resolution can never satisfy. It was previously possible for doctor to
+  report the network healthy while the endpoint in use was down, and vice
+  versa.
+- A key from the wrong vendor is now named as such. "Invalid API key format"
+  reads like a typo; it is usually an OpenAI key handed to the Claude runtime,
+  and the message now says so and points at the Codex install command.
+- `yos restart` restarts the agent's main loop. It restarted four PM2 services
+  and printed "Services restarted." — none of those four is the agent, which
+  lives in a tmux session. It now restarts that session and waits for it to
+  come back, and reports failure rather than success if it does not.
+
+### Changed
+
+- Patched the `js-yaml` advisory that was riding along in every shipped
+  package.
+
 ## [0.1.7] - 2026-08-07
 
 ### Fixed
