@@ -37,21 +37,64 @@ export function isValidBaseUrl(value) {
 // ── Install ────────────────────────────────────────────────────────────────
 
 /**
- * Install an npm global package.
- * @param {string} pkg - Package name (e.g. "@openai/codex")
- * @param {{ registry?: string|null, timeout?: number }} opts
- * @returns {boolean}
+ * npm's way of saying "this account may not write to the global prefix".
+ * The wording varies by npm version; the error code does not.
  */
-export function installGlobalPackage(pkg, opts = {}) {
-  const { registry = null, timeout = 120000 } = opts;
+const PERMISSION_DENIED = /\bEACCES\b|\bEPERM\b|permission denied/i;
+
+/**
+ * Run one global npm install and report *why* it failed, not just that it did.
+ *
+ * A permission failure and an unreachable registry need opposite repairs, and
+ * telling them apart is only possible here, where npm's own output still
+ * exists. Swallowing it is what let a permission failure be reported as a
+ * network problem for the whole life of this function.
+ *
+ * @param {string} pkg
+ * @param {{ registry?: string|null, timeout?: number, elevate?: boolean }} opts
+ * @returns {{ ok: boolean, permissionDenied: boolean }}
+ */
+function runGlobalInstall(pkg, opts = {}) {
+  const { registry = null, timeout = 120000, elevate = false } = opts;
   const args = ['install', '-g', pkg];
   if (registry) args.push(`--registry=${registry}`);
+  const file = elevate ? 'sudo' : 'npm';
+  // `-n` so a machine whose sudo wants a password fails here instead of
+  // blocking a non-interactive install on a prompt nobody can answer.
+  const argv = elevate ? ['-n', 'npm', ...args] : args;
   try {
-    execFileSync('npm', args, { stdio: 'pipe', timeout });
-    return true;
+    execFileSync(file, argv, { stdio: 'pipe', timeout });
+    return { ok: true, permissionDenied: false };
+  } catch (err) {
+    const text = [err?.message, err?.stderr, err?.stdout]
+      .map(v => (v == null ? '' : String(v))).join('\n');
+    return { ok: false, permissionDenied: PERMISSION_DENIED.test(text) };
+  }
+}
+
+/**
+ * Can this account get to root without being asked for a password?
+ * @returns {boolean}
+ */
+function canElevate() {
+  if (typeof process.getuid === 'function' && process.getuid() === 0) return false;
+  if (!commandExists('sudo')) return false;
+  try {
+    const r = spawnSync('sudo', ['-n', 'true'], { stdio: 'pipe', timeout: 10000 });
+    return r.status === 0;
   } catch {
     return false;
   }
+}
+
+/**
+ * Install an npm global package.
+ * @param {string} pkg - Package name (e.g. "@openai/codex")
+ * @param {{ registry?: string|null, timeout?: number, elevate?: boolean }} opts
+ * @returns {boolean}
+ */
+export function installGlobalPackage(pkg, opts = {}) {
+  return runGlobalInstall(pkg, opts).ok;
 }
 
 /**
@@ -91,18 +134,36 @@ export function npmInstallSources(env = process.env) {
 export function installGlobalPackageWithFallback(pkg, opts = {}) {
   const { binary = null, env = process.env, timeout = 120000, onAttempt = null } = opts;
   const attempts = [];
+  let permissionDenied = false;
 
-  for (const source of npmInstallSources(env)) {
-    if (onAttempt) onAttempt(source);
-    const installed = installGlobalPackage(pkg, { registry: source.registry, timeout });
-    const found = installed && binary ? commandExists(binary) : installed;
-    attempts.push({ label: source.label, installed, found });
-    if (found) {
-      return { ok: true, label: source.label, fellBack: attempts.length > 1, attempts };
+  const tryChain = (elevate) => {
+    for (const source of npmInstallSources(env)) {
+      if (onAttempt) onAttempt({ ...source, elevate });
+      const run = runGlobalInstall(pkg, { registry: source.registry, timeout, elevate });
+      if (run.permissionDenied) permissionDenied = true;
+      const found = run.ok && binary ? commandExists(binary) : run.ok;
+      attempts.push({ label: source.label, installed: run.ok, found, elevated: elevate });
+      if (found) {
+        return { ok: true, label: source.label, fellBack: attempts.length > 1, attempts, permissionDenied, elevated: elevate };
+      }
     }
+    return null;
+  };
+
+  const plain = tryChain(false);
+  if (plain) return plain;
+
+  // A prefix this account may not write to is the installer's problem too, and
+  // the installer solves it by elevating. It installed `yos` that way moments
+  // ago — so on the very same machine, the next global install must not give up
+  // where the one before it succeeded. Only for a permission failure, and only
+  // when sudo needs no password: anything else is still a real failure.
+  if (permissionDenied && canElevate()) {
+    const elevated = tryChain(true);
+    if (elevated) return elevated;
   }
 
-  return { ok: false, label: null, fellBack: false, attempts };
+  return { ok: false, label: null, fellBack: false, attempts, permissionDenied, elevated: false };
 }
 
 /**
@@ -115,12 +176,39 @@ export function describeNpmInstallFailure(pkg, result) {
   const attempts = result?.attempts ?? [];
   const lines = attempts.map(a => (
     a.installed && !a.found
-      ? `Tried ${a.label}: reported success but the command is still missing — check your npm global bin directory is on PATH.`
-      : `Tried ${a.label}: failed.`
+      ? `Tried ${a.label}${a.elevated ? ' with sudo' : ''}: reported success but the command is still missing — check your npm global bin directory is on PATH.`
+      : `Tried ${a.label}${a.elevated ? ' with sudo' : ''}: failed.`
   ));
+
+  // Advice has to name the cause it actually had. Sending someone at a mirror
+  // when the prefix is unwritable costs them the whole afternoon: every mirror
+  // answers fine, and none of them is the problem.
+  if (result?.permissionDenied) {
+    const prefix = npmGlobalPrefix();
+    lines.push(`npm could not write to the global directory${prefix ? ` (${prefix})` : ''} — this is a permissions problem, not a network one, so changing registry will not help.`);
+    lines.push('Two ways forward:');
+    lines.push('  1. Re-run from a terminal you can type into, or as a user with passwordless sudo.');
+    lines.push(`  2. Install into your own directory instead:\n       npm config set prefix "$HOME/.local"\n       export PATH="$HOME/.local/bin:$PATH"\n     then run the command again. Add that PATH line to your shell profile to keep it.`);
+    return lines;
+  }
+
   lines.push(`Install manually: npm install -g ${pkg}`);
   lines.push(`Behind a slow link, point npm at a reachable mirror: npm install -g ${pkg} --registry=${DEFAULT_NPM_MIRROR}`);
   return lines;
+}
+
+/**
+ * The npm global prefix, for naming the directory a permission error is about.
+ * @returns {string|null}
+ */
+function npmGlobalPrefix() {
+  try {
+    return String(execFileSync('npm', ['config', 'get', 'prefix'], {
+      stdio: 'pipe', timeout: 10000, encoding: 'utf8',
+    })).trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 /**

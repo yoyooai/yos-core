@@ -266,7 +266,7 @@ async function switchRuntime(target, flags) {
     console.log(`${bold(target)} CLI not found — installing...`);
     if (target === 'codex') {
       const result = installCodex({
-        onAttempt: source => console.log(`  trying ${source.label}...`),
+        onAttempt: source => console.log(`  trying ${source.label}${source.elevate ? ' with sudo' : ''}...`),
       });
       if (!result.ok) {
         console.error(red(`\nFailed to install ${bold(target)} CLI.`));
