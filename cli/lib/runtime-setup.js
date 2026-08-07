@@ -87,15 +87,16 @@ function canElevate() {
   }
 }
 
-/**
- * Install an npm global package.
- * @param {string} pkg - Package name (e.g. "@openai/codex")
- * @param {{ registry?: string|null, timeout?: number, elevate?: boolean }} opts
- * @returns {boolean}
- */
-export function installGlobalPackage(pkg, opts = {}) {
-  return runGlobalInstall(pkg, opts).ok;
-}
+// There used to be a bare single-shot install helper here: one registry, no
+// mirror, no privilege fallback. Three global installs were meant to go through
+// installGlobalPackageWithFallback instead, and two of them did — the runtime
+// kept calling the bare one, so a root-owned prefix ended the install for
+// Claude Code while PM2 and the Codex CLI walked past the same directory
+// (TD-118, the third face of TD-116 in one day).
+//
+// It is gone rather than fixed. Two functions doing the same job, one of them
+// missing the repairs, is the defect: whoever writes the next install site can
+// only reach for the one that behaves. Use installGlobalPackageWithFallback.
 
 /**
  * The registries an npm install may be served from, in order.
@@ -359,29 +360,59 @@ export function installClaude(opts = {}) {
   const { env = process.env, onAttempt = null } = opts;
   const steps = planClaudeInstall(env);
   const attempts = [];
+  let permissionDenied = false;
 
-  for (const step of steps) {
-    if (onAttempt) onAttempt(step);
-    const installed = step.kind === 'script'
-      ? runInstallScript(step.url)
-      : installGlobalPackage(step.pkg, {
-        registry: step.registry,
-        timeout: CLAUDE_INSTALL_TIMEOUT_MS,
-      });
-    const found = installed ? commandExists('claude') : false;
-    attempts.push({ id: step.id, label: step.label, installed, found });
-    if (found) {
-      return {
-        ok: true,
-        via: step.id,
-        label: step.label,
-        fellBack: attempts.length > 1,
-        attempts,
-      };
+  const tryChain = (elevate) => {
+    for (const step of steps) {
+      // The native installer writes into the user's own home, so a root-owned
+      // npm prefix is not its problem — and handing a just-downloaded script to
+      // root is a much larger thing than the failure being repaired. Only the
+      // npm step is ever retried elevated.
+      if (elevate && step.kind !== 'npm') continue;
+      if (onAttempt) onAttempt({ ...step, elevate });
+      let installed;
+      if (step.kind === 'script') {
+        installed = runInstallScript(step.url);
+      } else {
+        const run = runGlobalInstall(step.pkg, {
+          registry: step.registry,
+          timeout: CLAUDE_INSTALL_TIMEOUT_MS,
+          elevate,
+        });
+        if (run.permissionDenied) permissionDenied = true;
+        installed = run.ok;
+      }
+      const found = installed ? commandExists('claude') : false;
+      attempts.push({ id: step.id, label: step.label, installed, found, elevated: elevate });
+      if (found) {
+        return {
+          ok: true,
+          via: step.id,
+          label: step.label,
+          fellBack: attempts.length > 1,
+          attempts,
+          permissionDenied,
+          elevated: elevate,
+        };
+      }
     }
+    return null;
+  };
+
+  const plain = tryChain(false);
+  if (plain) return plain;
+
+  // TD-118: the same rule PM2 and the Codex CLI already follow (TD-116). The
+  // installer elevated moments ago to put `yos` on this very prefix; the
+  // runtime it then installs must not give up where the step before it
+  // succeeded. Only for a permission failure, and only when sudo needs no
+  // password — anything else is still a real failure.
+  if (permissionDenied && canElevate()) {
+    const elevated = tryChain(true);
+    if (elevated) return elevated;
   }
 
-  return { ok: false, via: null, label: null, fellBack: false, attempts };
+  return { ok: false, via: null, label: null, fellBack: false, attempts, permissionDenied, elevated: false };
 }
 
 /**
@@ -394,9 +425,23 @@ export function describeClaudeInstallFailure(result) {
   const attempts = result?.attempts ?? [];
   const lines = attempts.map(a => (
     a.installed && !a.found
-      ? `Tried ${a.label}: reported success but no "claude" on PATH — add ~/.local/bin to your PATH.`
-      : `Tried ${a.label}: failed.`
+      ? `Tried ${a.label}${a.elevated ? ' with sudo' : ''}: reported success but no "claude" on PATH — add ~/.local/bin to your PATH.`
+      : `Tried ${a.label}${a.elevated ? ' with sudo' : ''}: failed.`
   ));
+
+  // TD-118, the same second wound as TD-116: advice has to name the cause it
+  // actually had. Every mirror answers fine when the prefix is unwritable, so
+  // sending someone at a mirror costs them the afternoon and fixes nothing.
+  if (result?.permissionDenied) {
+    const prefix = npmGlobalPrefix();
+    lines.push(`npm could not write to the global directory${prefix ? ` (${prefix})` : ''} — this is a permissions problem, not a network one, so changing registry will not help.`);
+    lines.push('Two ways forward:');
+    lines.push('  1. Re-run from a terminal you can type into, or as a user with passwordless sudo.');
+    lines.push(`  2. Install into your own directory instead:\n       npm config set prefix "$HOME/.local"\n       export PATH="$HOME/.local/bin:$PATH"\n     then run the command again. Add that PATH line to your shell profile to keep it.`);
+    lines.push(`Or install the runtime by hand: curl -fsSL ${CLAUDE_NATIVE_INSTALL_URL} | bash`);
+    return lines;
+  }
+
   lines.push(`Install manually: curl -fsSL ${CLAUDE_NATIVE_INSTALL_URL} | bash`);
   lines.push(`Or via npm: npm install -g ${CLAUDE_NPM_PACKAGE}`);
   lines.push(`Behind a slow link, point npm at a reachable mirror: npm install -g ${CLAUDE_NPM_PACKAGE} --registry=${DEFAULT_NPM_MIRROR}`);

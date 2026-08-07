@@ -2610,13 +2610,16 @@ export async function initCommand(args) {
       // being used rather than announcing one and silently using another.
       const result = installClaude({
         onAttempt: step => {
-          if (!quiet) console.log(`    ${cyan(`Installing Claude Code from ${step.label}...`)}`);
+          if (!quiet) console.log(`    ${cyan(`Installing Claude Code from ${step.label}${step.elevate ? ' with sudo' : ''}...`)}`);
         },
       });
       if (result.ok) {
         if (!quiet) console.log(`  ${success(`Claude Code installed from ${result.label}`)}`);
         if (result.fellBack) {
           console.warn(`    ${dim('The first source did not answer — fell back. Nothing to do, just so you know where it came from.')}`);
+        }
+        if (result.elevated && !quiet) {
+          console.warn(`    ${dim('The npm global directory needed elevated permissions — installed with sudo, the same way yos itself was installed.')}`);
         }
         claudeJustInstalled = true;
       } else {

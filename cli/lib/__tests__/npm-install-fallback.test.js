@@ -171,12 +171,46 @@ describe('global installs stay on the shared chain', () => {
     return out;
   }
 
-  it('no command file installs a global package on a single registry', () => {
+  // TD-118: this used to scan `commands/` only, which is exactly how the
+  // runtime install slipped through — it lives in `lib/`. The bare helper is
+  // gone now, and the scan covers everywhere a call site could be written.
+  it('nothing anywhere installs a global package on a single registry', () => {
     const bare = /\binstallGlobalPackage\s*\(/;
-    const offenders = commandFiles(path.join(cliRoot, 'commands'))
+    const offenders = commandFiles(cliRoot)
       .filter(file => bare.test(fs.readFileSync(file, 'utf8')))
       .map(file => path.relative(cliRoot, file));
-    assert.deepEqual(offenders, [], 'use installGlobalPackageWithFallback so the mirror applies');
+    assert.deepEqual(offenders, [], 'use installGlobalPackageWithFallback so the mirror and the privilege fallback both apply');
+  });
+
+  it('the bare helper is not exported again', () => {
+    const source = fs.readFileSync(path.join(cliRoot, 'lib', 'runtime-setup.js'), 'utf8');
+    assert.doesNotMatch(
+      source,
+      /export\s+function\s+installGlobalPackage\s*\(/,
+      'two functions for one job is the defect — the one missing the repairs must not come back',
+    );
+  });
+
+  // TD-118: the elevated retry succeeded but printed the same line as the
+  // plain one, so the log read as "tried the same registry twice for no
+  // reason". PM2 and Codex already said "with sudo"; the runtime did not —
+  // the third place in one day where two neighbours disagreed. Elevating
+  // quietly is the thing this project has repeatedly refused to do.
+  it('every install progress line says when it went through sudo', () => {
+    const offenders = [];
+    for (const file of commandFiles(path.join(cliRoot, 'commands'))) {
+      const lines = fs.readFileSync(file, 'utf8').split('\n');
+      lines.forEach((line, i) => {
+        if (!/onAttempt\s*:/.test(line)) return;
+        // The callback is one line for some call sites and a short block for
+        // others; read the whole handler rather than guessing which shape.
+        const block = lines.slice(i, i + 5).join('\n');
+        if (!/\.elevate\s*\?/.test(block)) {
+          offenders.push(`${path.relative(cliRoot, file)}:${i + 1}`);
+        }
+      });
+    }
+    assert.deepEqual(offenders, [], 'an install that quietly used root is exactly what we refuse to ship');
   });
 
   it('yos init installs PM2 through the fallback helper', () => {

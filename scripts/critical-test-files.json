@@ -150,6 +150,14 @@
     {
       "path": "test/dist-catalog.test.js",
       "minimumTests": 19
+    },
+    {
+      "path": "cli/lib/__tests__/claude-install-permissions.test.js",
+      "minimumTests": 10
+    },
+    {
+      "path": "cli/lib/__tests__/npm-install-permissions.test.js",
+      "minimumTests": 7
     }
   ]
 }
