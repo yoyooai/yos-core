@@ -4,6 +4,41 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
+## [0.1.10] - 2026-08-08
+
+### Fixed
+
+- Installing the Claude runtime no longer gives up on a machine where
+  `install.sh` had just succeeded. The installer elevates past a root-owned npm
+  global directory to put `yos` there; 0.1.9 taught the PM2 install to do the
+  same, and the Codex install already did — the Claude install did not. On any
+  machine with a system-installed Node, the plain documented command
+  (`curl -fsSL https://yoyooai.com/dist/install.sh | bash`) therefore exited 1
+  one step after the installer had elevated past that very directory. The same
+  rule now applies at every install site: a plain attempt first, then an
+  elevated retry only for a permission failure, only when sudo needs no
+  password, and never when already root. The retry covers the npm step alone —
+  a just-downloaded installer script is never handed to root.
+- The advice printed on failure names the cause it actually had. Every failure
+  was reported as if the registry were at fault and the repair offered was to
+  point npm at a different mirror, while both registries answered normally and
+  the directory was the problem — advice that could not have worked. A
+  permission failure now says so, names the directory, and offers a route that
+  needs no root.
+- An elevated attempt now says that it elevated. It previously printed the same
+  line as the plain attempt, so the log read as though one registry had been
+  tried twice for no reason. PM2 and Codex already said "with sudo"; the runtime
+  install now does too.
+
+### Removed
+
+- The bare single-registry install helper, which had no privilege fallback and
+  no callers left. Two functions for one job — one of them missing the repairs —
+  was the defect itself; the next install site can now only reach for the one
+  that behaves. The shared-chain scan that was meant to catch this covered
+  `commands/` only, which is how a call site under `lib/` slipped through; it
+  now covers the whole tree, and re-exporting a bare helper fails on its own.
+
 ## [0.1.9] - 2026-08-07
 
 ### Fixed
