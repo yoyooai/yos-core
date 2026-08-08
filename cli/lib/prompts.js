@@ -39,6 +39,24 @@ export function promptYesNo(question, defaultYes = false) {
 }
 
 /**
+ * Ask a yes/no question for an action that must not silently do nothing.
+ *
+ * promptYesNo() answers for the user when there is no terminal, which is right
+ * for a question with a safe default but wrong for a confirmation: nobody was
+ * asked, so "no" is not a decision anyone made. Callers that treat a declined
+ * confirmation as a successful no-op would then report success for a machine
+ * they never touched. This returns the three states that actually exist, so the
+ * caller can tell "the user declined" from "there was nobody to ask".
+ *
+ * @param {string} question - The question to display (include the [y/N] hint)
+ * @returns {Promise<'yes'|'no'|'no-tty'>}
+ */
+export async function confirmInteractive(question) {
+  if (!process.stdin.isTTY) return 'no-tty';
+  return (await promptYesNo(question)) ? 'yes' : 'no';
+}
+
+/**
  * Ask a numbered choice question.
  * Returns the 1-based index of the selected option, or defaultChoice on empty input.
  * Returns defaultChoice if stdin is not a TTY.
