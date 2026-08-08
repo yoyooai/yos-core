@@ -366,10 +366,10 @@ export async function upgradeComponent(args) {
     console.log('  --branch <b>   Upgrade from a specific branch (e.g. feat/xxx)');
     console.log('  --mode <m>     Merge mode: "merge" (default, smart three-way) or "overwrite"');
     console.log('\nExamples:');
-    console.log('  yos upgrade telegram --check --json');
+    console.log('  yos upgrade weixin --check --json');
     console.log('  yos upgrade --self --check --beta');
-    console.log('  yos upgrade telegram --yes');
-    console.log('  yos upgrade telegram --mode overwrite');
+    console.log('  yos upgrade weixin --yes');
+    console.log('  yos upgrade weixin --mode overwrite');
     process.exit(1);
   }
 
