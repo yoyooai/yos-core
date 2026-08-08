@@ -112,3 +112,39 @@ export function readRecordedConsolePort({ envFile = ENV_FILE, env = process.env 
   } catch { /* no .env yet — the default is still the truth */ }
   return DEFAULT_WEB_CONSOLE_PORT;
 }
+
+/** What the console server falls back to when nothing overrides the bind. */
+export const DEFAULT_WEB_CONSOLE_BIND = '127.0.0.1';
+
+/**
+ * Which address does the console actually listen on?
+ *
+ * Mirrors `skills/web-console/scripts/server.js`, which reads
+ * `WEB_CONSOLE_BIND` and otherwise binds loopback. Anything that prints a URL
+ * has to ask this and not assume: init used to advertise
+ * `http://<lan-ip>:3456/` on a console bound to 127.0.0.1, so every user who
+ * tried the address it handed them got connection refused.
+ *
+ * @returns {string} the bind host, e.g. '127.0.0.1' or '0.0.0.0'
+ */
+export function readRecordedConsoleBind({ envFile = ENV_FILE, env = process.env } = {}) {
+  const fromEnv = typeof env.WEB_CONSOLE_BIND === 'string' ? env.WEB_CONSOLE_BIND.trim() : '';
+  if (fromEnv) return fromEnv;
+  try {
+    const match = fs.readFileSync(envFile, 'utf8').match(/^\s*WEB_CONSOLE_BIND\s*=\s*(\S+)\s*$/m);
+    if (match) return match[1].trim();
+  } catch { /* no .env yet — the default is still the truth */ }
+  return DEFAULT_WEB_CONSOLE_BIND;
+}
+
+/**
+ * Can something outside this machine reach a console bound to `host`?
+ *
+ * Loopback and the "unspecified but loopback-only" forms cannot. Everything
+ * else (0.0.0.0, ::, a concrete LAN address) can, so the network URL is real.
+ */
+export function bindReachableOffBox(host = DEFAULT_WEB_CONSOLE_BIND) {
+  const h = String(host).trim().toLowerCase().replace(/^\[|\]$/g, '');
+  if (!h) return false;
+  return !(h === 'localhost' || h === '::1' || h.startsWith('127.'));
+}

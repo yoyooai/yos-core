@@ -4,6 +4,36 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
+## [0.1.11] - 2026-08-08
+
+### Fixed
+
+- `upgrade --self` and `upgrade --all` no longer report success after doing
+  nothing. With no controlling terminal and no `--yes`, the confirmation read
+  end-of-input as the user answering "no": it printed `Upgrade cancelled` and
+  exited 0. A cron job, a deploy script, or a fleet loop therefore recorded a
+  successful upgrade on a machine that had not moved a byte — the same family as
+  the install failures 0.1.10 fixed, where what the product said and what it did
+  had come apart. The confirmation now distinguishes three states rather than
+  two: answered yes, answered no, and unanswerable. An unanswerable prompt is
+  refused loudly and exits non-zero, naming `--yes` as the way to run
+  unattended. A genuine "no" is still a clean exit 0.
+- The screen printed after `yos init` no longer sends a new user to a component
+  that does not exist. Its Next steps offered `yos add telegram` and
+  `yos add lark`; the shelf holds `weixin` and `feishu`, so the first documented
+  action after a successful install answered `Unknown component` and exited 1.
+  The hint, and the `add`/`upgrade`/`remove`/`uninstall`/`info` examples in the
+  help text, now name components this repository actually ships.
+- That same screen no longer advertises a URL that refuses connections. It
+  printed `Network: http://<lan-ip>:3456/` while the Web Console binds
+  loopback, handing every user an address that could not answer and inviting the
+  conclusion that the product was broken. The console's real bind is now read
+  before anything is advertised: a network URL appears only when that bind is
+  reachable off-box, and otherwise the screen prints the SSH port-forward that
+  does work. The bind was deliberately left on loopback — widening it to
+  `0.0.0.0` would trade the console's safety for the convenience of a correct
+  line, and on a public IP with no firewall it would expose it.
+
 ## [0.1.10] - 2026-08-08
 
 ### Fixed

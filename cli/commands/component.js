@@ -22,7 +22,7 @@ import { removeCaddyRoutes } from '../lib/caddy.js';
 import { acquireLock, releaseLock } from '../lib/lock.js';
 import { fetchRawFile } from '../lib/github.js';
 import { resolveReleaseRepo } from '../lib/release-source.js';
-import { promptYesNo } from '../lib/prompts.js';
+import { promptYesNo, confirmInteractive } from '../lib/prompts.js';
 import { evaluateUpgrade } from '../lib/claude-eval.js';
 
 /**
@@ -366,10 +366,10 @@ export async function upgradeComponent(args) {
     console.log('  --branch <b>   Upgrade from a specific branch (e.g. feat/xxx)');
     console.log('  --mode <m>     Merge mode: "merge" (default, smart three-way) or "overwrite"');
     console.log('\nExamples:');
-    console.log('  yos upgrade telegram --check --json');
+    console.log('  yos upgrade weixin --check --json');
     console.log('  yos upgrade --self --check --beta');
-    console.log('  yos upgrade telegram --yes');
-    console.log('  yos upgrade telegram --mode overwrite');
+    console.log('  yos upgrade weixin --yes');
+    console.log('  yos upgrade weixin --mode overwrite');
     process.exit(1);
   }
 
@@ -735,8 +735,14 @@ async function handleUpgradeFlow(component, { jsonOutput, skipConfirm, skipEval,
 
     // 5. Confirmation
     if (!skipConfirm) {
-      const confirmed = await promptYesNo('Proceed with upgrade? [y/N]: ');
-      if (!confirmed) {
+      const answer = await confirmInteractive('Proceed with upgrade? [y/N]: ');
+      if (answer === 'no-tty') {
+        console.error(error('Error: cannot ask for confirmation — this is not a terminal.'));
+        console.error('       Nothing was upgraded. Re-run with --yes to upgrade non-interactively:');
+        console.error(`       yos upgrade ${component} --yes`);
+        return false; // Nobody was asked — reporting success would be a lie
+      }
+      if (answer === 'no') {
         console.log('Upgrade cancelled.');
         return true; // Not an error — user chose to cancel
       }
@@ -913,8 +919,14 @@ async function upgradeAllComponents({ checkOnly, jsonOutput, skipConfirm, skipEv
   }
 
   if (!skipConfirm) {
-    const confirmed = await promptYesNo('Upgrade all components? [y/N]: ');
-    if (!confirmed) {
+    const answer = await confirmInteractive('Upgrade all components? [y/N]: ');
+    if (answer === 'no-tty') {
+      console.error(error('Error: cannot ask for confirmation — this is not a terminal.'));
+      console.error('       Nothing was upgraded. Re-run with --yes to upgrade non-interactively:');
+      console.error('       yos upgrade --all --yes');
+      process.exit(1); // Nobody was asked — reporting success would be a lie
+    }
+    if (answer === 'no') {
       console.log('Upgrade cancelled.');
       return;
     }
@@ -1185,8 +1197,14 @@ async function upgradeSelfCore({ branch, beta = false, mode = 'merge' } = {}) {
 
     // 5. Confirmation
     if (!skipConfirm) {
-      const confirmed = await promptYesNo('Proceed with yos-core upgrade? [y/N]: ');
-      if (!confirmed) {
+      const answer = await confirmInteractive('Proceed with yos-core upgrade? [y/N]: ');
+      if (answer === 'no-tty') {
+        console.error(error('Error: cannot ask for confirmation — this is not a terminal.'));
+        console.error('       Nothing was upgraded. Re-run with --yes to upgrade non-interactively:');
+        console.error('       yos upgrade --self --yes');
+        return false; // Nobody was asked — reporting success would be a lie
+      }
+      if (answer === 'no') {
         console.log('Upgrade cancelled.');
         return true; // Not an error — user chose to cancel
       }

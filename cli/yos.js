@@ -132,18 +132,18 @@ Examples:
   yos status
   yos logs activity
 
-  yos add telegram
-  yos add telegram@0.2.0
-  yos add lark --branch feature/new-thing
+  yos add weixin
+  yos add weixin@0.1.2
+  yos add feishu --branch feature/new-thing
   yos add user/my-component
-  yos upgrade telegram
+  yos upgrade weixin
   yos upgrade --all
   yos upgrade --self
   yos upgrade --self --recover /tmp/yos-core-backup-...
-  yos info telegram
-  yos uninstall telegram --purge
+  yos info weixin
+  yos uninstall weixin --purge
   yos uninstall --self
-  yos remove telegram --purge --yes
+  yos remove weixin --purge --yes
   yos list
   yos search bot
 `);
