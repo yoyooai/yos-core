@@ -63,7 +63,7 @@ export async function addComponent(args) {
       console.log(JSON.stringify({
         action: 'add', success: false,
         error: 'missing_branch', message: '--branch requires a branch name',
-        reply: 'Error: --branch requires a branch name. Example: yos add lark --branch feature/xxx',
+        reply: 'Error: --branch requires a branch name. Example: yos add feishu --branch feature/xxx',
       }, null, 2));
     } else {
       console.error(error('--branch requires a branch name.'));
@@ -757,10 +757,10 @@ Options:
   --json           Output in JSON format (for programmatic use)
 
 Examples:
-  yos add telegram                            Latest release tag
-  yos add telegram@0.2.0                      Specific version
-  yos add lark --branch main                  Install from branch
-  yos add lark --branch feature/new-thing     Install from PR branch
+  yos add weixin                              Latest release tag
+  yos add weixin@0.1.2                        Specific version
+  yos add feishu --branch main                Install from branch
+  yos add feishu --branch feature/new-thing   Install from PR branch
   yos add user/my-component                   Third-party
   yos add https://github.com/user/yos-my-component
   yos add ./my-component

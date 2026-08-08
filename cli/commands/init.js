@@ -31,7 +31,7 @@ import {
 import { deployManifestTemplate } from '../lib/runtime/tmux-env.js';
 import { npmInstallEnv } from '../lib/npm-env.js';
 import { readEnvFile, writeEnvEntries } from '../lib/env.js';
-import { resolveWebConsolePort, readRecordedConsolePort, DEFAULT_WEB_CONSOLE_PORT } from '../lib/web-console-port.js';
+import { resolveWebConsolePort, readRecordedConsolePort, readRecordedConsoleBind, bindReachableOffBox, DEFAULT_WEB_CONSOLE_PORT } from '../lib/web-console-port.js';
 import { looksIsolated, classifyUnitWrite, backupUnitPath } from '../lib/pm2-unit-guard.js';
 import { parseJlist, classifyLeftovers, describeLeftovers } from '../lib/pm2-leftovers.js';
 import { readServiceState, judgeSettle } from '../lib/service.js';
@@ -1250,9 +1250,15 @@ function printWebConsoleInfo() {
   } else {
     const port = readRecordedConsolePort();
     console.log(`    Local:    ${bold(`http://localhost:${port}/`)}`);
+    // Only advertise a network URL when the console is actually listening on
+    // something off-box. It binds loopback by default, so printing the LAN
+    // address handed every user an address that answers connection refused.
+    const bindHost = readRecordedConsoleBind();
     const ip = getNetworkIP();
-    if (ip) {
+    if (bindReachableOffBox(bindHost) && ip) {
       console.log(`    Network:  ${bold(`http://${ip}:${port}/`)}`);
+    } else {
+      console.log(`    ${dim(`Remote:   ssh -L ${port}:localhost:${port} <user>@<host>  (console is local-only)`)}`);
     }
   }
 
@@ -3090,10 +3096,13 @@ export async function initCommand(args) {
       console.log(yellow('  └────────────────────────────────────────────────────────┘'));
       console.log('');
     } else {
+      // Name only components that are actually on the shelf. A first-run hint
+      // pointing at something `yos add` cannot resolve sends every new user
+      // straight into "Unknown component" on step one.
       console.log(`\n${heading('Next steps:')}`);
-      console.log(`  ${bold('yos add telegram')}    ${dim('# Add Telegram bot')}`);
-      console.log(`  ${bold('yos add lark')}        ${dim('# Add Lark bot')}`);
-      console.log(`  ${bold('yos status')}          ${dim('# Check service status')}`);
+      console.log(`  ${bold('yos add weixin')}    ${dim('# Add Weixin (微信) channel')}`);
+      console.log(`  ${bold('yos add feishu')}    ${dim('# Add Feishu (飞书) channel')}`);
+      console.log(`  ${bold('yos status')}        ${dim('# Check service status')}`);
       console.log('');
     }
   }
