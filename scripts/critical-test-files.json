@@ -158,6 +158,16 @@
     {
       "path": "cli/lib/__tests__/npm-install-permissions.test.js",
       "minimumTests": 7
+    },
+    {
+      "path": "test/progress-log.test.js",
+      "minimumTests": 14
+    },
+    {
+      "path": "scripts/progress-log.js"
+    },
+    {
+      "path": "docs/progress.md"
     }
   ]
 }

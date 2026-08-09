@@ -41,6 +41,7 @@ function runPackageVerification(root) {
     root,
     runPrerequisites: false,
     verifyTestPolicyImpl: () => {},
+    verifyProgressLogImpl: () => {},
   });
 }
 
