@@ -19,6 +19,7 @@ function fixtureCatalog() {
       ],
     }],
     providers: [{ id: 'legacy', declarationStatus: 'undeclared', status: 'installed' }],
+    healthChecks: [{ providerId: 'private', path: '/Users/private/health.js' }],
     remote: { status: 'available', source: 'shelf', errorCode: null },
   };
 }
@@ -102,5 +103,11 @@ describe('yos capability read-only CLI', () => {
     const listBody = source.slice(source.indexOf('export async function listComponents'), source.indexOf('export async function searchComponents'));
     assert.match(listBody, /Installation mode:/);
     assert.doesNotMatch(listBody, /\bType:/);
+  });
+
+  it('never exposes doctor-only health entrypoints in JSON output', async () => {
+    const list = JSON.parse((await run(['list', '--json'])).stdout);
+    assert.equal(Object.hasOwn(list, 'healthChecks'), false);
+    assert.doesNotMatch(JSON.stringify(list), /Users|health\.js/);
   });
 });

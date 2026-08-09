@@ -121,6 +121,48 @@ describe('registry source visibility', () => {
     assert.equal(result.errorCode, 'capability_registry_integrity_mismatch');
   });
 
+  it('rejects a provider whose release tag is absent from index.json', async () => {
+    const documents = {
+      'https://mirror.example/dist/index.json': JSON.stringify({
+        schemaVersion: 1,
+        buildId: 'a'.repeat(64),
+        repos: [{ repo: 'yoyooai/yos-components', tags: ['feishu-v0.1.4'] }],
+      }),
+      'https://mirror.example/dist/capabilities.json': JSON.stringify({
+        schemaVersion: 1,
+        buildId: 'a'.repeat(64),
+        capabilities: [{
+          id: 'communication.message',
+          title: 'Messages',
+          keywords: ['chat'],
+          operations: ['send'],
+          providers: [{
+            id: 'channel.feishu',
+            registryName: 'feishu',
+            repo: 'yoyooai/yos-components',
+            tag: 'feishu-v0.1.5',
+            path: 'channels/001_feishu',
+            version: '0.1.5',
+            source: 'component',
+            provenance: 'official',
+            stability: 'stable',
+            operations: ['send'],
+            coreRange: '>=0.1.0-alpha.1 <0.2.0',
+            nodeRange: '>=20.20.0',
+          }],
+        }],
+      }),
+    };
+    coverCapabilityArtifact(documents);
+
+    const result = await registryModule.loadShelfCapabilityCatalog({
+      env: { YOS_DIST_BASE: 'https://mirror.example/dist' },
+      fetchText: (url) => documents[url],
+    });
+    assert.equal(result.status, 'degraded');
+    assert.equal(result.errorCode, 'capability_registry_invalid');
+  });
+
   it('keeps remote errors stable and free of private URLs or stderr', async () => {
     const result = await registryModule.loadShelfCapabilityCatalog({
       env: { YOS_DIST_BASE: 'https://mirror.example/dist' },
