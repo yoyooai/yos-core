@@ -24,6 +24,7 @@ import { assertInstructionReady, buildInstructionFile } from './instruction-buil
 import { ClaudeContextMonitor } from './claude-context-monitor.js';
 import { createClaudeProbe } from '../heartbeat/claude-probe.js';
 import { approveCustomApiKey } from '../claude-credentials.js';
+import { writePrivateFileSync } from '../private-files.js';
 import { YOS_DIR } from '../config.js';
 import {
   tmuxHasSession,
@@ -455,7 +456,7 @@ function _ensureOnboardingComplete(projectDir) {
       config.projects[abs].hasCompletedProjectOnboarding = true;
       changed = true;
     }
-    if (changed) fs.writeFileSync(claudeJsonPath, JSON.stringify(config, null, 2) + '\n');
+    if (changed) writePrivateFileSync(claudeJsonPath, JSON.stringify(config, null, 2) + '\n');
   } catch { }
 
   // ~/.claude/settings.json — skip dangerous-mode permission prompt
@@ -464,9 +465,8 @@ function _ensureOnboardingComplete(projectDir) {
     let settings = {};
     try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { }
     if (!settings.skipDangerousModePermissionPrompt) {
-      fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
       settings.skipDangerousModePermissionPrompt = true;
-      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+      writePrivateFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', { privateParent: true });
     }
   } catch { }
 }

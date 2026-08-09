@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { after, before, describe, it } from 'node:test';
+import { after, before, beforeEach, describe, it } from 'node:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -17,11 +17,26 @@ process.env.YOS_DIR = fakeYOSDir;
 fs.mkdirSync(fakeHome, { recursive: true });
 fs.mkdirSync(fakeYOSDir, { recursive: true });
 
-const { writeCodexConfig, renderCodexProjectConfig, renderCodexGlobalConfig } = await import('../runtime-setup.js');
+const {
+  writeCodexConfig,
+  renderCodexProjectConfig,
+  renderCodexGlobalConfig,
+  saveApiKey,
+  saveApiKeyToEnv,
+  saveSetupToken,
+  saveSetupTokenToEnv,
+  saveClaudeBaseUrlToSettingsAndEnv,
+} = await import('../runtime-setup.js');
 const { parseClaudeAuthStatus, parseCodexLoginStatus, classifyCodexLoginStatus } = await import('../auth-parsers.js');
 
 before(() => {
   fs.mkdirSync(path.join(fakeHome, '.codex'), { recursive: true });
+});
+
+beforeEach(() => {
+  fs.rmSync(path.join(fakeHome, '.claude'), { recursive: true, force: true });
+  fs.rmSync(path.join(fakeHome, '.claude.json'), { force: true });
+  fs.rmSync(path.join(fakeYOSDir, '.env'), { force: true });
 });
 
 after(() => {
@@ -32,6 +47,43 @@ after(() => {
   else process.env.YOS_DIR = originalYOSDir;
 
   fs.rmSync(tmpRoot, { recursive: true, force: true });
+});
+
+function permissions(filePath) {
+  return fs.statSync(filePath).mode & 0o777;
+}
+
+describe('Claude credential file permissions', () => {
+  it('creates credential directories and files private by default', () => {
+    assert.equal(saveApiKey('sk-ant-api03-test-only-not-a-real-key'), true);
+    saveApiKeyToEnv('sk-ant-api03-test-only-not-a-real-key');
+
+    assert.equal(permissions(path.join(fakeHome, '.claude')), 0o700);
+    assert.equal(permissions(path.join(fakeHome, '.claude', 'settings.json')), 0o600);
+    assert.equal(permissions(path.join(fakeHome, '.claude.json')), 0o600);
+    assert.equal(permissions(path.join(fakeYOSDir, '.env')), 0o600);
+  });
+
+  it('tightens permissive existing credential files when they are rewritten', () => {
+    const settingsDir = path.join(fakeHome, '.claude');
+    const settingsPath = path.join(settingsDir, 'settings.json');
+    const claudeJsonPath = path.join(fakeHome, '.claude.json');
+    const envPath = path.join(fakeYOSDir, '.env');
+    fs.mkdirSync(settingsDir, { recursive: true, mode: 0o755 });
+    fs.writeFileSync(settingsPath, '{}\n', { mode: 0o644 });
+    fs.writeFileSync(claudeJsonPath, '{}\n', { mode: 0o644 });
+    fs.writeFileSync(envPath, 'KEEP=1\n', { mode: 0o644 });
+
+    assert.equal(saveSetupToken('sk-ant-oat-test-only-not-a-real-token'), true);
+    saveSetupTokenToEnv('sk-ant-oat-test-only-not-a-real-token');
+    assert.equal(saveClaudeBaseUrlToSettingsAndEnv('https://gateway.example.com'), true);
+
+    assert.equal(permissions(settingsDir), 0o700);
+    assert.equal(permissions(settingsPath), 0o600);
+    assert.equal(permissions(claudeJsonPath), 0o600);
+    assert.equal(permissions(envPath), 0o600);
+    assert.match(fs.readFileSync(envPath, 'utf8'), /KEEP=1/);
+  });
 });
 
 describe('renderCodexProjectConfig', () => {

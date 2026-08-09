@@ -161,7 +161,7 @@
     },
     {
       "path": "test/progress-log.test.js",
-      "minimumTests": 14
+      "minimumTests": 15
     },
     {
       "path": "scripts/progress-log.js"

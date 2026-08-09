@@ -411,7 +411,7 @@ export function describeExtractFailure(err, tarballPath) {
     try { return fs.statSync(tarballPath).size; } catch { return null; }
   })();
 
-  const truncated = /unexpected end of file|Unexpected EOF|unexpected end of input|not in gzip format|invalid compressed data/i.test(combined);
+  const truncated = /unexpected end of file|Unexpected EOF|unexpected end of input|truncated gzip input|not in gzip format|invalid compressed data/i.test(combined);
   if (truncated) {
     const sizeNote = size === null ? '' : ` (got ${size} bytes)`;
     return [

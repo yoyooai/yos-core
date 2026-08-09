@@ -16,6 +16,7 @@ import { commandExists } from './shell-utils.js';
 import { parseClaudeAuthStatus, parseCodexLoginStatus } from './auth-parsers.js';
 import { approveCustomApiKey } from './claude-credentials.js';
 import { installCoreCodexHook } from './codex-hooks.js';
+import { writePrivateFileSync } from './private-files.js';
 
 function upsertEnvValue(content, key, value, comment = null) {
   const line = `${key}=${value}`;
@@ -541,7 +542,7 @@ export function approveApiKey(keyOrToken) {
       config.projects[projectPath].hasTrustDialogAccepted = true;
       config.projects[projectPath].hasCompletedProjectOnboarding = true;
     }
-    fs.writeFileSync(claudeJsonPath, JSON.stringify(config, null, 2) + '\n');
+    writePrivateFileSync(claudeJsonPath, JSON.stringify(config, null, 2) + '\n');
   } catch {}
 }
 
@@ -554,12 +555,11 @@ export function saveApiKey(apiKey) {
   const settingsDir = path.join(os.homedir(), '.claude');
   const settingsPath = path.join(settingsDir, 'settings.json');
   try {
-    fs.mkdirSync(settingsDir, { recursive: true });
     let settings = {};
     try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch {}
     if (!settings.env) settings.env = {};
     settings.env.ANTHROPIC_API_KEY = apiKey;
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+    writePrivateFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', { privateParent: true });
   } catch {
     return false;
   }
@@ -578,7 +578,7 @@ export function saveApiKeyToEnv(apiKey) {
     let content = '';
     try { content = fs.readFileSync(envPath, 'utf8'); } catch {}
     content = upsertEnvValue(content, 'ANTHROPIC_API_KEY', apiKey, 'Anthropic API key (set by yos init)');
-    fs.writeFileSync(envPath, content);
+    writePrivateFileSync(envPath, content);
   } catch {}
 }
 
@@ -592,13 +592,12 @@ export function saveSetupToken(token) {
   const settingsDir = path.join(os.homedir(), '.claude');
   const settingsPath = path.join(settingsDir, 'settings.json');
   try {
-    fs.mkdirSync(settingsDir, { recursive: true });
     let settings = {};
     try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch {}
     if (!settings.env) settings.env = {};
     settings.env.CLAUDE_CODE_OAUTH_TOKEN = token;
     delete settings.env.ANTHROPIC_API_KEY;
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+    writePrivateFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', { privateParent: true });
   } catch {
     return false;
   }
@@ -620,7 +619,7 @@ export function saveSetupTokenToEnv(token) {
     content = upsertEnvValue(content, 'CLAUDE_CODE_OAUTH_TOKEN', token, 'Claude Code setup token (set by yos init)');
     content = content.replace(/^# Anthropic API key \(set by yos init\)\n/m, '');
     content = content.replace(/^\s*ANTHROPIC_API_KEY\s*=.*\n?/m, '');
-    fs.writeFileSync(envPath, content);
+    writePrivateFileSync(envPath, content);
   } catch {}
 }
 
@@ -647,12 +646,11 @@ function saveClaudeBaseUrlToSettings(baseUrl) {
   const settingsDir = path.join(os.homedir(), '.claude');
   const settingsPath = path.join(settingsDir, 'settings.json');
   try {
-    fs.mkdirSync(settingsDir, { recursive: true });
     let settings = {};
     try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch {}
     if (!settings.env) settings.env = {};
     settings.env.ANTHROPIC_BASE_URL = baseUrl;
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+    writePrivateFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', { privateParent: true });
     return true;
   } catch {
     return false;
@@ -671,7 +669,7 @@ export function saveClaudeBaseUrlToSettingsAndEnv(baseUrl) {
     let content = '';
     try { content = fs.readFileSync(envPath, 'utf8'); } catch {}
     content = upsertEnvValue(content, 'ANTHROPIC_BASE_URL', baseUrl, 'Anthropic base URL for Claude Code (set by yos init)');
-    fs.writeFileSync(envPath, content);
+    writePrivateFileSync(envPath, content);
     process.env.ANTHROPIC_BASE_URL = baseUrl;
     return true;
   } catch {
@@ -879,7 +877,7 @@ export function saveCodexApiKeyToEnv(apiKey) {
     let content = '';
     try { content = fs.readFileSync(envPath, 'utf8'); } catch {}
     content = upsertEnvValue(content, 'OPENAI_API_KEY', apiKey, 'OpenAI API key for Codex (set by yos init)');
-    fs.writeFileSync(envPath, content);
+    writePrivateFileSync(envPath, content);
     process.env.OPENAI_API_KEY = apiKey;
     return true;
   } catch {
@@ -912,7 +910,7 @@ export function saveCodexBaseUrlToEnv(baseUrl) {
     let content = '';
     try { content = fs.readFileSync(envPath, 'utf8'); } catch {}
     content = upsertEnvValue(content, 'OPENAI_BASE_URL', baseUrl, 'OpenAI base URL for Codex (set by yos init)');
-    fs.writeFileSync(envPath, content);
+    writePrivateFileSync(envPath, content);
     process.env.OPENAI_BASE_URL = baseUrl;
     return true;
   } catch {

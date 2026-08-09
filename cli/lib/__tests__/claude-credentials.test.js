@@ -83,9 +83,11 @@ describe('approveCustomApiKey', () => {
 
   it('is idempotent — a second call does not duplicate the entry', () => {
     approveCustomApiKey('sk-ant-api03-abcdefghijklmnopqrstuvwxyz', { home });
+    fs.chmodSync(path.join(home, '.claude.json'), 0o644);
     approveCustomApiKey('sk-ant-api03-abcdefghijklmnopqrstuvwxyz', { home });
     const config = JSON.parse(fs.readFileSync(path.join(home, '.claude.json'), 'utf8'));
     assert.equal(config.customApiKeyResponses.approved.length, 1);
+    assert.equal(fs.statSync(path.join(home, '.claude.json')).mode & 0o777, 0o600);
   });
 
   it('keeps unrelated content in ~/.claude.json', () => {

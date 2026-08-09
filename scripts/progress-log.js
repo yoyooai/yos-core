@@ -34,7 +34,7 @@ const PLACEHOLDER = /^(tbd|todo|n\/a|-{1,}|待填|待补|同上)$/i;
 const MINIMUM_SUMMARY_LENGTH = 8;
 
 function splitVersion(version) {
-  const [core, prerelease = ''] = version.split('-', 2);
+  const [core, prerelease = ''] = version.split(/-(.+)/);
   return {
     numbers: core.split('.').map(Number),
     prerelease: prerelease ? prerelease.split('.') : [],
