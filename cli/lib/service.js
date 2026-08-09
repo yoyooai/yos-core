@@ -57,6 +57,7 @@ export function registerService({
     // path that can apply a restart floor, since `pm2 start <script>` has no
     // --min-uptime flag to pass (only --max-restarts, which alone does nothing).
     let startedFromCoreEcosystem = false;
+    let observedAfterCoreStart;
     if (coreEcosystemPath && exists(coreEcosystemPath)) {
       try {
         exec(`pm2 start "${coreEcosystemPath}" --only "${serviceName}" --update-env`, {
@@ -65,7 +66,8 @@ export function registerService({
         });
         // `--only` matching nothing is not an error to pm2: it exits 0 having
         // started no process. Only treat this as the start if pm2 now knows it.
-        startedFromCoreEcosystem = Boolean(readServiceState(serviceName, exec));
+        observedAfterCoreStart = readServiceState(serviceName, exec);
+        startedFromCoreEcosystem = Boolean(observedAfterCoreStart);
       } catch {
         startedFromCoreEcosystem = false;
       }
@@ -93,7 +95,7 @@ export function registerService({
     // component that exits immediately — missing credentials being the common
     // case — is restarted over and over while the caller has already been told
     // it started. Report what the process is actually doing.
-    const settled = settleService(serviceName, exec);
+    const settled = settleService(serviceName, exec, observedAfterCoreStart);
     if (settled.crashLooping) {
       return { ...settled, ...endCrashLoop(serviceName, exec) };
     }
@@ -177,8 +179,11 @@ export function judgeSettle(before, after) {
   return { success: true };
 }
 
-function settleService(serviceName, exec = execSync) {
-  const before = readServiceState(serviceName, exec);
+function settleService(serviceName, exec = execSync, initialState) {
+  // The ecosystem start path already sampled the process to prove that PM2
+  // matched the requested app. Reuse that sample so a restart between the
+  // start command and this settle window is not silently discarded.
+  const before = initialState ?? readServiceState(serviceName, exec);
   // Deliberately synchronous: `yos add` is a sequential script, and the caller
   // must not print "started" before this answer exists.
   exec(`sleep ${Math.max(1, Math.round(SETTLE_MS / 1000))}`, { stdio: 'pipe' });

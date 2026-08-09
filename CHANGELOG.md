@@ -11,6 +11,8 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ### Fixed
 
+- Normalize the `truncated gzip input` archive error emitted by some tar implementations, and retain the first PM2 state sample when settling a service started from the core ecosystem.
+
 - Progress-log version ordering now preserves hyphens inside prerelease identifiers,
   so `alpha-2` no longer compares equal to `alpha-1`.
 
