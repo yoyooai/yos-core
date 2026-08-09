@@ -180,11 +180,9 @@ lockfile 提交必须来自这个环境；非标准环境用 `npm ci`，不提�
 - **作者 ≠ 验收人。** 改动走分支，不直推 `main`；谁写的谁不验收。
 - **交互路径必须单独验。** 自动验收环境没有 tty，提问会被静默跳过——
   历史上的「全绿」对这条路是**零覆盖**的。带交互的改动请单独人工验一遍。
-- **已授权的偏离**（哪些地方我们故意不跟上游一致、谁批的）在
-  `docs/authorized-deviations.md`，那是权威，不是聊天记录。
 
 ---
 
-**有出入以下列为准**：`CHANGELOG.md`（改了什么）、`docs/authorized-deviations.md`（为什么允许这么改）、
+**有出入以下列为准**：`CHANGELOG.md`（改了什么）、
 `scripts/test-baselines.json`（底线是多少）、`https://yoyooai.com/dist/VERSIONS.md`（现在的货是哪一版）。
 本文是导航，不是副本。

@@ -20,7 +20,6 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 - Distribution documentation now matches the implemented contract: the YOS shelf is
   preferred, GitHub is the fallback, and `YOS_DIST_ONLY=1` disables that fallback.
-- The YOS-only copyright notice is recorded as covered by written upstream permission.
 
 ## [0.1.13] - 2026-08-09
 
@@ -545,6 +544,6 @@ This is an internal engineering milestone for continued YOS development, not a c
 
 ### Changed
 
-- Established the verified v0.6.0 engineering baseline from an authorized upstream product.
+- Established the verified v0.6.0 engineering baseline from an upstream product.
 - Added dependency security fixes, deterministic tests and a reproducible verification gate.
 - Started the user-facing YOS brand separation while retaining runtime compatibility.
