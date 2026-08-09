@@ -4,6 +4,22 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
+### Security
+
+- Claude credentials and the YOS environment file are now written with owner-only
+  permissions. Existing permissive files are tightened when YOS rewrites them.
+
+### Fixed
+
+- Progress-log version ordering now preserves hyphens inside prerelease identifiers,
+  so `alpha-2` no longer compares equal to `alpha-1`.
+
+### Documentation
+
+- Distribution documentation now matches the implemented contract: the YOS shelf is
+  preferred, GitHub is the fallback, and `YOS_DIST_ONLY=1` disables that fallback.
+- The YOS-only copyright notice is recorded as covered by written upstream permission.
+
 ## [0.1.13] - 2026-08-09
 
 ### Fixed

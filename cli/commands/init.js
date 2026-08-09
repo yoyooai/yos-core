@@ -37,6 +37,7 @@ import { parseJlist, classifyLeftovers, describeLeftovers } from '../lib/pm2-lef
 import { readServiceState, judgeSettle } from '../lib/service.js';
 import { distVendorUrl, noteMirrorFallback } from '../lib/dist-origin.js';
 import { installRebootCrontab } from '../lib/boot-autostart.js';
+import { securePrivateFileSync, writePrivateFileSync } from '../lib/private-files.js';
 import {
   installGlobalPackageWithFallback,
   describeNpmInstallFailure,
@@ -647,7 +648,7 @@ function rollbackSetupToken() {
     if (settings.env) {
       delete settings.env.CLAUDE_CODE_OAUTH_TOKEN;
     }
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+    writePrivateFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', { privateParent: true });
   } catch (err) {
     console.error(`  ${warn(`Could not rollback setup token from settings.json: ${err.message}`)}`);
   }
@@ -704,7 +705,7 @@ function preAcceptClaudeTerms() {
   } catch {}
   if (!claudeJson.hasCompletedOnboarding) {
     claudeJson.hasCompletedOnboarding = true;
-    fs.writeFileSync(claudeJsonPath, JSON.stringify(claudeJson, null, 2) + '\n');
+    writePrivateFileSync(claudeJsonPath, JSON.stringify(claudeJson, null, 2) + '\n');
     changed = true;
   }
 
@@ -718,7 +719,7 @@ function preAcceptClaudeTerms() {
   } catch {}
   if (!settings.skipDangerousModePermissionPrompt) {
     settings.skipDangerousModePermissionPrompt = true;
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+    writePrivateFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', { privateParent: true });
     changed = true;
   }
 
@@ -904,6 +905,7 @@ export function deployTemplates({ freshInstall = false } = {}) {
     fs.copyFileSync(envSrc, envDest);
     console.log(`  ${success('Created .env from template')}`);
   }
+  securePrivateFileSync(envDest);
 
   // Always save current shell PATH to .env (for PM2 services)
   saveSystemPath(envDest);

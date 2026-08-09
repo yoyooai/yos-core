@@ -106,6 +106,7 @@ describe('desiredClaudeHooks', () => {
     const yosDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-init-hooks-'));
     fs.mkdirSync(path.join(yosDir, '.yos'), { recursive: true });
     fs.writeFileSync(path.join(yosDir, '.yos', 'config.json'), JSON.stringify({ runtime: 'claude' }));
+    fs.writeFileSync(path.join(yosDir, '.env'), 'KEEP=1\n', { mode: 0o644 });
     execFileSync(process.execPath, [
       '--input-type=module',
       '--eval',
@@ -115,6 +116,8 @@ describe('desiredClaudeHooks', () => {
       env: { ...process.env, HOME: path.dirname(yosDir), YOS_DIR: yosDir },
     });
     const settings = JSON.parse(fs.readFileSync(path.join(yosDir, '.claude', 'settings.json'), 'utf8'));
+    assert.equal(fs.statSync(path.join(yosDir, '.env')).mode & 0o777, 0o600);
+    assert.match(fs.readFileSync(path.join(yosDir, '.env'), 'utf8'), /KEEP=1/);
     for (const matcher of ['startup', 'clear', 'compact']) {
       const groups = settings.hooks.SessionStart.filter(group => group.matcher === matcher);
       assert.equal(groups.length, 1);

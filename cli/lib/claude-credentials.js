@@ -25,6 +25,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { writePrivateFileSync } from './private-files.js';
 
 /**
  * The `env` keys YOS writes into ~/.claude/settings.json.
@@ -70,8 +71,8 @@ export function approveCustomApiKey(keyOrToken, { home = os.homedir() } = {}) {
     const suffix = credentialSuffix(keyOrToken);
     if (!config.customApiKeyResponses.approved.includes(suffix)) {
       config.customApiKeyResponses.approved.push(suffix);
-      fs.writeFileSync(target, JSON.stringify(config, null, 2) + '\n');
     }
+    writePrivateFileSync(target, JSON.stringify(config, null, 2) + '\n');
     return true;
   } catch {
     return false;
@@ -149,7 +150,7 @@ export function reclaimClaudeCredentials({ home = os.homedir(), yosDir } = {}) {
 
   if (Object.keys(settings.env).length === 0) delete settings.env;
   try {
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+    writePrivateFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', { privateParent: true });
   } catch {
     // Could not write it back — report nothing removed rather than claim it.
     return { settingsPath, removed: [], kept: result.kept, approvedRemoved: 0 };
@@ -185,7 +186,7 @@ export function forgetApprovedCredentials(credentials, { home = os.homedir() } =
 
   config.customApiKeyResponses.approved = kept;
   try {
-    fs.writeFileSync(target, JSON.stringify(config, null, 2) + '\n');
+    writePrivateFileSync(target, JSON.stringify(config, null, 2) + '\n');
   } catch {
     return 0;
   }

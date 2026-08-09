@@ -117,6 +117,11 @@ describe('development progress log', () => {
     expect(compareVersions('0.1.2', '0.1.2')).toBe(0);
   });
 
+  test('preserves hyphens inside prerelease identifiers when ordering versions', () => {
+    expect(compareVersions('0.1.0-alpha-2', '0.1.0-alpha-1')).toBeGreaterThan(0);
+    expect(compareVersions('0.1.0-beta-1', '0.1.0-beta-2')).toBeLessThan(0);
+  });
+
   test('parses every row of a well-formed table, newest first', () => {
     const rows = parseProgressLog(log([ROW_13, ROW_12]));
     expect(rows.map((row) => row.version)).toEqual(['0.1.13', '0.1.12']);
