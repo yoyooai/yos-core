@@ -14,6 +14,7 @@ import { parse, stringify } from 'smol-toml';
 import { YOS_DIR } from './config.js';
 import { commandExists } from './shell-utils.js';
 import { parseClaudeAuthStatus, parseCodexLoginStatus } from './auth-parsers.js';
+import { approveCustomApiKey } from './claude-credentials.js';
 import { installCoreCodexHook } from './codex-hooks.js';
 
 function upsertEnvValue(content, key, value, comment = null) {
@@ -519,15 +520,13 @@ export function isCodexAuthenticated() {
  */
 export function approveApiKey(keyOrToken) {
   const claudeJsonPath = path.join(os.homedir(), '.claude.json');
+  // The approval itself has exactly one implementation (claude-credentials.js).
+  // What follows is the extra onboarding/trust state `yos init` needs; it reads
+  // the file back so it builds on whatever the approval just wrote.
+  approveCustomApiKey(keyOrToken);
   try {
     let config = {};
     try { config = JSON.parse(fs.readFileSync(claudeJsonPath, 'utf8')); } catch {}
-    if (!config.customApiKeyResponses) config.customApiKeyResponses = { approved: [], rejected: [] };
-    if (!config.customApiKeyResponses.approved) config.customApiKeyResponses.approved = [];
-    const keySuffix = keyOrToken.slice(-20);
-    if (!config.customApiKeyResponses.approved.includes(keySuffix)) {
-      config.customApiKeyResponses.approved.push(keySuffix);
-    }
     if (!config.hasCompletedOnboarding) {
       config.hasCompletedOnboarding = true;
       try {

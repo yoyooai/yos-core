@@ -17,6 +17,7 @@ import { bold, dim, green, red, cyan, success, warn, heading } from '../lib/colo
 import { promptYesNo } from '../lib/prompts.js';
 import { commandExists } from '../lib/shell-utils.js';
 import { claudeNativeArtifacts } from '../lib/runtime-setup.js';
+import { reclaimClaudeCredentials } from '../lib/claude-credentials.js';
 
 // Kill both known runtime sessions on uninstall regardless of which is active
 const TMUX_SESSIONS = ['claude-main', 'codex-main'];
@@ -32,7 +33,8 @@ export async function selfUninstall(args) {
   console.log(bold('This will:'));
   console.log(`  1. Stop all YOS services (tmux + PM2)`);
   console.log(`  2. Uninstall the ${cyan('YOS')} npm package`);
-  console.log(`  3. Clean shell PATH entries`);
+  console.log(`  3. Clean shell PATH entries, and take back the key and gateway`);
+  console.log(`     address YOS wrote into ${cyan('~/.claude/settings.json')}`);
   if (!force) {
     console.log(`  4. Optionally remove PM2, Claude CLI, and/or Codex CLI`);
     console.log(`  5. Optionally remove ${cyan('~/yos/')} data directory`);
@@ -115,6 +117,11 @@ export async function selfUninstall(args) {
   } else {
     console.log(dim('  No shell profile changes needed'));
   }
+  // Take our own credentials back out of Claude Code's config. This runs while
+  // ~/yos/ is still on disk (Phase 5 may delete it) because ~/yos/.env is the
+  // only evidence of what we wrote — and before the optional "remove Claude
+  // CLI" step, which would take the whole file with it.
+  reportCredentialReclaim(reclaimClaudeCredentials({ yosDir: YOS_DIR }));
   console.log();
 
   // ── Execute phase 4 choices ──────────────────────────
@@ -165,6 +172,31 @@ export async function selfUninstall(args) {
   const rcFile = shell === 'zsh' ? '~/.zshrc' : '~/.bashrc';
   if (profilesCleaned.length > 0) {
     console.log(dim(`Restart your shell or run: source ${rcFile}`));
+  }
+}
+
+/**
+ * Say what was taken back and what was deliberately left behind.
+ *
+ * "Uninstalled" used to be silent about this file entirely, which is how a
+ * customer ended up with our key and gateway address still in his own Claude
+ * config after we told him YOS was gone (TD-114). Anything we leave must be
+ * named, with the reason — a customer who wants it gone can then do it.
+ *
+ * @param {{removed: string[], kept: Array<{key: string, reason: string}>, approvedRemoved: number}} result
+ */
+function reportCredentialReclaim(result) {
+  if (result.removed.length > 0) {
+    console.log(success(`Removed from ~/.claude/settings.json: ${result.removed.join(', ')}`));
+    if (result.approvedRemoved > 0) {
+      console.log(dim(`  Also cleared ${result.approvedRemoved} approved key entry in ~/.claude.json`));
+    }
+  }
+  for (const { key, reason } of result.kept) {
+    console.log(warn(`Left ${key} in ~/.claude/settings.json — ${reason}`));
+  }
+  if (result.removed.length === 0 && result.kept.length === 0) {
+    console.log(dim('  Nothing of ours in ~/.claude/settings.json'));
   }
 }
 

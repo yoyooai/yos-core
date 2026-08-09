@@ -4,6 +4,28 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
+## [0.1.13] - 2026-08-09
+
+### Fixed
+
+- `yos uninstall --self` now takes back the key and gateway address YOS wrote
+  into `~/.claude/settings.json`. An uninstall reported success while the
+  customer's own Claude config still carried our credential and our endpoint —
+  "uninstalled" meant "we ran some commands", not "our things are gone".
+  A value is only removed when `~/yos/.env` still holds the same value, i.e.
+  when we can prove YOS installed it; anything the customer changed is left in
+  place and named in the output, with the reason. Deleting a credential we
+  cannot prove we wrote would destroy a Claude Code setup that predates YOS.
+  The approved-key entry YOS added to `~/.claude.json` is dropped along with it.
+
+### Changed
+
+- Registering an approved key in `~/.claude.json` had two independent
+  implementations (`cli/lib/runtime-setup.js` and `cli/lib/runtime/claude.js`).
+  Editing one left the other behind and no test went red. Both now call one
+  implementation in `cli/lib/claude-credentials.js`, and a test fails if any
+  other file under `cli/` writes `customApiKeyResponses` again.
+
 ## [0.1.12] - 2026-08-09
 
 ### Fixed

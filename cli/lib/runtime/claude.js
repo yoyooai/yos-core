@@ -23,6 +23,7 @@ import { RuntimeAdapter } from './base.js';
 import { assertInstructionReady, buildInstructionFile } from './instruction-builder.js';
 import { ClaudeContextMonitor } from './claude-context-monitor.js';
 import { createClaudeProbe } from '../heartbeat/claude-probe.js';
+import { approveCustomApiKey } from '../claude-credentials.js';
 import { YOS_DIR } from '../config.js';
 import {
   tmuxHasSession,
@@ -273,8 +274,8 @@ export class ClaudeAdapter extends RuntimeAdapter {
         baseUrlValue = _parseEnvValue(envContent, 'ANTHROPIC_BASE_URL');
       } catch { }
 
-      if (apiKeyValue) _approveApiKey(apiKeyValue);
-      if (oauthTokenValue) _approveApiKey(oauthTokenValue);
+      if (apiKeyValue) approveCustomApiKey(apiKeyValue);
+      if (oauthTokenValue) approveCustomApiKey(oauthTokenValue);
     }
 
     // 4. Build the claude command string (for existing-session path)
@@ -470,23 +471,6 @@ function _ensureOnboardingComplete(projectDir) {
   } catch { }
 }
 
-/**
- * Pre-approve an API key in ~/.claude.json so Claude skips the
- * interactive "Detected a custom API key" confirmation prompt.
- *
- * @param {string} apiKey
- */
-function _approveApiKey(apiKey) {
-  const claudeJsonPath = path.join(os.homedir(), '.claude.json');
-  try {
-    let config = {};
-    try { config = JSON.parse(fs.readFileSync(claudeJsonPath, 'utf8')); } catch { }
-    if (!config.customApiKeyResponses) config.customApiKeyResponses = { approved: [], rejected: [] };
-    if (!config.customApiKeyResponses.approved) config.customApiKeyResponses.approved = [];
-    const suffix = apiKey.slice(-20);
-    if (!config.customApiKeyResponses.approved.includes(suffix)) {
-      config.customApiKeyResponses.approved.push(suffix);
-      fs.writeFileSync(claudeJsonPath, JSON.stringify(config, null, 2) + '\n');
-    }
-  } catch { }
-}
+// Pre-approving a key in ~/.claude.json lives in claude-credentials.js.
+// This file used to carry its own copy; the two drifted apart in silence
+// because nothing tested that they agreed. (TD-115)
