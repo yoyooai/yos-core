@@ -54,7 +54,7 @@ describe('capability declaration schema', () => {
     );
   });
 
-  it('fails closed on duplicate IDs and an escaping health entrypoint', () => {
+  it('fails closed on duplicate capability IDs', () => {
     const frontmatter = {
       capabilities: [
         {
@@ -63,7 +63,6 @@ describe('capability declaration schema', () => {
           operations: ['send'],
           keywords: [],
           stability: 'stable',
-          health: '../private.js',
         },
         {
           id: 'communication.message',
@@ -78,7 +77,24 @@ describe('capability declaration schema', () => {
     assert.throws(
       () => validator()(frontmatter, { skillDir: FIXTURES }),
       (error) => error?.code === 'capability_schema_invalid'
-        && /health|duplicate/i.test(error.message),
+        && /duplicate/i.test(error.message),
+    );
+  });
+
+  it('fails closed on an escaping health entrypoint', () => {
+    assert.throws(
+      () => validator()({
+        capabilities: [{
+          id: 'communication.message',
+          title: 'Messages',
+          operations: ['send'],
+          keywords: [],
+          stability: 'stable',
+          health: '../private.js',
+        }],
+      }, { skillDir: FIXTURES }),
+      (error) => error?.code === 'capability_schema_invalid'
+        && /health/i.test(error.message),
     );
   });
 
