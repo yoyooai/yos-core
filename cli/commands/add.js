@@ -28,6 +28,7 @@ import { linkBins } from '../lib/bin.js';
 import { applyCaddyRoutes } from '../lib/caddy.js';
 import { promptYesNo, prompt, promptSecret } from '../lib/prompts.js';
 import { writeEnvEntries, findUnsetRequiredConfig, describeRequiredConfig } from '../lib/env.js';
+import { decideCredentialPrompt, explainSkippedPrompt, hookInteractionEnv } from '../lib/interaction-mode.js';
 import { hasConfigureHook, runConfigureHook } from '../lib/configure-hook.js';
 import { registerService } from '../lib/service.js';
 import { npmInstallEnv } from '../lib/npm-env.js';
@@ -533,8 +534,30 @@ async function installDeclarative(resolved, skillDir, skipConfirm, jsonOutput, b
 
   // Step 6: Collect required configuration
   const requiredConfig = config.required;
-  if (Array.isArray(requiredConfig) && requiredConfig.length > 0) {
+  const credentialPlan = decideCredentialPrompt({
+    required: requiredConfig,
+    isTTY: Boolean(process.stdin.isTTY),
+    skipConfirm,
+  });
+
+  // Not asking is a decision the customer has to know about: it is the
+  // difference between "installed and ready" and "installed and cannot start".
+  // Skipping in silence is what made an --yes install look like it hung (it was
+  // waiting on a prompt) and a piped install look complete (nobody was asked).
+  if (!credentialPlan.ask && credentialPlan.reason !== 'none-required') {
     console.log(`\n${heading('Configuration:')}`);
+    console.log(`  ${dim(explainSkippedPrompt(credentialPlan.reason))}`);
+    console.log(`  ${dim('Set these in ~/yos/.env, then run: yos start')}`);
+    for (const { name, description } of describeRequiredConfig(requiredConfig, credentialPlan.names)) {
+      console.log(`  ${dim(`  ${name}${description ? ` — ${description}` : ''}`)}`);
+    }
+  }
+
+  if (credentialPlan.ask) {
+    console.log(`\n${heading('Configuration:')}`);
+    // The loop already treats an empty answer as "leave it unset", but only the
+    // code knew that — on screen it was a bare cursor with no way out but Ctrl-C.
+    console.log(`  ${dim('Press Enter to skip any of these and set it in ~/yos/.env later.')}`);
     const collectedEntries = {};
 
     for (const item of requiredConfig) {
@@ -591,6 +614,9 @@ async function installDeclarative(resolved, skillDir, skipConfirm, jsonOutput, b
         execSync(`node "${hookPath}"`, {
           cwd: skillDir,
           stdio: 'inherit',
+          // The hook shares this terminal. Without being told, it asks its own
+          // questions here and an unattended `yos add -y` waits forever.
+          env: { ...process.env, ...hookInteractionEnv({ isTTY: Boolean(process.stdin.isTTY), skipConfirm }) },
         });
         console.log(`  ${success('Post-install hook complete.')}`);
       } catch {
@@ -753,7 +779,8 @@ Arguments:
 Options:
   --branch <name>  Install from a specific git branch (for testing)
   --check          Show component info without installing
-  --yes, -y        Skip confirmation prompts
+  --yes, -y        Install without asking anything — including credentials,
+                   which are then listed for you to put in ~/yos/.env
   --json           Output in JSON format (for programmatic use)
 
 Examples:
