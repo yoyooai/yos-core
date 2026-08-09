@@ -77,7 +77,7 @@
     },
     {
       "path": "cli/lib/__tests__/capability-schema.test.js",
-      "minimumTests": 5
+      "minimumTests": 6
     },
     {
       "path": "cli/lib/__tests__/capability-catalog.test.js",
@@ -85,7 +85,7 @@
     },
     {
       "path": "cli/lib/__tests__/capability-cli.test.js",
-      "minimumTests": 5
+      "minimumTests": 6
     },
     {
       "path": "cli/lib/__tests__/capability-shelf-e2e.test.js",
@@ -97,7 +97,7 @@
     },
     {
       "path": "cli/lib/__tests__/registry.test.js",
-      "minimumTests": 6
+      "minimumTests": 7
     },
     {
       "path": "cli/lib/__tests__/remote-capability-catalog.test.js",
