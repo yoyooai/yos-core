@@ -4,6 +4,29 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
+## [0.1.12] - 2026-08-09
+
+### Fixed
+
+- `yos add <component> -y` no longer stops and waits on a terminal. `--yes`
+  skipped only the install confirmation; the credential prompts that follow ran
+  regardless, so an install meant to be unattended sat on `FEISHU_APP_ID:`
+  until someone noticed. The flag now covers every question `yos add` asks.
+- The intent is passed to the component's post-install hook as
+  `YOS_ASSUME_YES`. The hook inherits the same terminal, and previously decided
+  for itself from `process.stdin.isTTY` alone — so a promise the CLI had made
+  did not exist on the other side of the process boundary.
+
+### Changed
+
+- Not asking for credentials is now stated, with the variables to set and where
+  to set them. Without a terminal every prompt was skipped in silence, which
+  ended an install with a component that could not start and no indication why.
+  This is also the path every automated run takes, which is how it stayed
+  invisible.
+- A customer who is asked is told that Enter skips a value. The loop always
+  accepted an empty answer; only the code knew that.
+
 ## [0.1.11] - 2026-08-08
 
 ### Fixed
