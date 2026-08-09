@@ -31,6 +31,7 @@
   "dependencies": {
     "dotenv": "^16.4.7",
     "js-yaml": "^4.3.0",
+    "semver": "^7.8.5",
     "smol-toml": "^1.6.1"
   },
   "devDependencies": {

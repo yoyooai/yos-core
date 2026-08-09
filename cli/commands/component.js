@@ -1753,7 +1753,7 @@ export async function listComponents() {
     const installed = fs.existsSync(skillDir) ? green('✓') : red('✗');
 
     console.log(`${installed} ${bold(name)} (v${bold(comp.version)})`);
-    console.log(`  Type: ${comp.type || 'unknown'}`);
+    console.log(`  Installation mode: ${comp.type || 'unknown'}`);
     console.log(`  Repo: ${dim(comp.repo)}`);
     console.log(`  Installed: ${dim(comp.installedAt || 'unknown')}`);
     console.log('');

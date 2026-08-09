@@ -17,6 +17,7 @@ YOS 是面向长期数字分身和数字员工的 AI Agent 运行引擎。
 - Web Console
 - Claude Code 与 Codex 运行时适配器
 - 安装、组件和升级工具
+- 跨核心 Skill、已装组件与正式货架的只读能力查询
 
 ## 开发环境安装
 
@@ -40,7 +41,15 @@ yos runtime status
 yos runtime codex
 yos add <component>
 yos list
+yos capability list
+yos capability search <关键词>
+yos capability show <能力ID>
+yos capability providers <能力ID>
 ```
+
+能力查询不会安装、升级或执行组件。本机事实只读核心 Skill 与已安装组件；
+可选提供者来自正式货架同批生成的 `index.json` 和 `capabilities.json`。
+只有 `yos doctor` 会执行能力声明中的健康检查。
 
 ## 验证
 

@@ -192,6 +192,7 @@ describe('version catalog (rendering)', () => {
 describe('version catalog (published by the build)', () => {
   const TAGS = ['v0.1.0', 'v0.1.1'];
   let output;
+  let secondOutput;
   let buildLog;
 
   function git(cwd, args) {
@@ -225,11 +226,64 @@ describe('version catalog (published by the build)', () => {
       git(fixture, ['tag', tag]);
     }
 
+    // Registry changes are shelf metadata, not a reason to release Core. The
+    // matching component must still have a reviewed tag before it is emitted.
+    fs.writeFileSync(
+      path.join(fixture, 'registry.json'),
+      `${JSON.stringify({
+        components: {
+          feishu: {
+            repo: 'yoyooai/yos-components',
+            path: 'channels/001_feishu',
+            tagPrefix: 'feishu',
+            official: true,
+          },
+        },
+      }, null, 2)}\n`,
+    );
+    git(fixture, ['add', 'registry.json']);
+    git(fixture, ['commit', '-q', '-m', 'register feishu after the core release']);
+
+    const componentsFixture = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-components-catalog-fixture-'));
+    git(componentsFixture, ['init', '-q', '-b', 'main']);
+    const feishuDir = path.join(componentsFixture, 'channels', '001_feishu');
+    fs.mkdirSync(feishuDir, { recursive: true });
+    fs.writeFileSync(path.join(feishuDir, 'SKILL.md'), `---
+name: feishu
+capabilities:
+  - id: communication.message
+    title: Messages
+    operations: [send, receive]
+    keywords: [feishu]
+    stability: stable
+---
+`);
+    fs.writeFileSync(path.join(feishuDir, 'package.json'), `${JSON.stringify({
+      name: 'yos-feishu',
+      version: '0.1.4',
+      yos: { id: 'channel.feishu', core: '>=0.1.0-alpha.1 <0.2.0' },
+      engines: { node: '>=20.20.0' },
+    }, null, 2)}\n`);
+    git(componentsFixture, ['add', '-A']);
+    git(componentsFixture, ['commit', '-q', '-m', 'release feishu']);
+    git(componentsFixture, ['tag', 'feishu-v0.1.4']);
+
     output = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-catalog-out-'));
     buildLog = execFileSync(process.execPath, [
       BUILD_DIST,
       '--output', output,
       '--repo', `yoyooai/yos-core=${fixture}`,
+      '--repo', `yoyooai/yos-components=${componentsFixture}`,
+      '--tags', '2',
+      '--skip-vendor',
+      '--base-url', BASE,
+    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    secondOutput = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-catalog-out-'));
+    execFileSync(process.execPath, [
+      BUILD_DIST,
+      '--output', secondOutput,
+      '--repo', `yoyooai/yos-core=${fixture}`,
+      '--repo', `yoyooai/yos-components=${componentsFixture}`,
       '--tags', '2',
       '--skip-vendor',
       '--base-url', BASE,
@@ -260,6 +314,28 @@ describe('version catalog (published by the build)', () => {
       const entry = index.files.find(f => f.path === name);
       expect(entry).toBeDefined();
       expect(entry.sha256).toMatch(/^[0-9a-f]{64}$/);
+    }
+  });
+
+  test('index.json and capabilities.json carry one build identity', () => {
+    const index = JSON.parse(fs.readFileSync(path.join(output, 'index.json'), 'utf8'));
+    const capabilities = JSON.parse(fs.readFileSync(path.join(output, 'capabilities.json'), 'utf8'));
+    expect(index.buildId).toMatch(/^[0-9a-f]{64}$/);
+    expect(capabilities.buildId).toBe(index.buildId);
+    const entry = index.files.find(file => file.path === 'capabilities.json');
+    expect(entry.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(capabilities.capabilities[0].providers[0]).toMatchObject({
+      id: 'channel.feishu',
+      registryName: 'feishu',
+      tag: 'feishu-v0.1.4',
+      version: '0.1.4',
+    });
+  });
+
+  test('two independent shelf builds produce byte-identical machine catalogs', () => {
+    for (const name of ['index.json', 'capabilities.json']) {
+      expect(fs.readFileSync(path.join(output, name)))
+        .toEqual(fs.readFileSync(path.join(secondOutput, name)));
     }
   });
 

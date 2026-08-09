@@ -2,6 +2,12 @@
 name: activity-monitor
 description: Guardian service that monitors the active runtime agent's state and automatically restarts it if stopped. Use when checking agent liveness state or understanding the auto-restart mechanism.
 user-invocable: false
+capabilities:
+  - id: runtime.monitor
+    title: Runtime monitoring and recovery
+    operations: [monitor, recover]
+    keywords: [runtime, status, recovery]
+    stability: stable
 ---
 
 # Activity Monitor Skill

@@ -1,6 +1,12 @@
 ---
 name: scheduler
 description: Use when user wants to schedule tasks for future, recurring, or interval execution. Manages one-time, cron, and interval tasks dispatched via C4 comm-bridge.
+capabilities:
+  - id: task.schedule
+    title: Scheduled task management
+    operations: [create, update, query, pause, resume, cancel]
+    keywords: [task, schedule, cron, reminder]
+    stability: stable
 ---
 
 # Task Scheduler (C5)

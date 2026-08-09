@@ -1,0 +1,13 @@
+{
+  "name": "legacy-capability-fixture",
+  "version": "1.0.0",
+  "type": "module",
+  "yos": {
+    "id": "fixture.legacy",
+    "core": ">=0.1.0-alpha.1 <0.2.0",
+    "upstreamVersion": "legacy"
+  },
+  "engines": {
+    "node": ">=20.20.0"
+  }
+}

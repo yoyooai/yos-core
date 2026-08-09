@@ -2,6 +2,12 @@
 name: shell
 description: CLI interactive mode channel. Delivers Claude responses to the yos shell REPL via Unix socket.
 user-invocable: false
+capabilities:
+  - id: communication.message
+    title: Shell messaging
+    operations: [send, receive]
+    keywords: [message, shell, repl]
+    stability: stable
 ---
 
 # Shell Channel

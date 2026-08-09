@@ -8,6 +8,12 @@ description: >-
   background subagent mechanism — do not invoke with the Skill tool.
 disable-model-invocation: true
 user-invocable: false
+capabilities:
+  - id: memory.persist
+    title: Persistent memory management
+    operations: [sync, rotate, consolidate]
+    keywords: [memory, context, session, archive]
+    stability: stable
 ---
 
 # Memory System

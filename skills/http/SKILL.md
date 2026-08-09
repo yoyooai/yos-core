@@ -1,6 +1,12 @@
 ---
 name: http
 description: Caddy-based web server providing web console hosting, file sharing, and health check endpoints. Use when configuring HTTP access, setting up file sharing, or troubleshooting web connectivity.
+capabilities:
+  - id: web.publish
+    title: Web hosting and file sharing
+    operations: [host, share, proxy]
+    keywords: [web, https, caddy, file]
+    stability: stable
 ---
 
 # HTTP Layer (C6)

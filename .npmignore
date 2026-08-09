@@ -22,3 +22,4 @@ test/integration/runtime/*.local.json
 
 # Test failure evidence (runtime artifact)
 .test-logs/
+cli/lib/__tests__/fixtures/

@@ -2,6 +2,12 @@
 name: create-skill
 description: Guide for creating effective skills. Use when asked to create a new skill (or update an existing skill) that extends Claude's capabilities with specialized knowledge, workflows, or tool integrations.
 allowed-tools: Read, Write, Bash, Glob, Grep
+capabilities:
+  - id: skill.author
+    title: Skill authoring
+    operations: [create, update]
+    keywords: [skill, extension, workflow]
+    stability: stable
 ---
 
 # Create Skill

@@ -1,6 +1,12 @@
 ---
 name: web-console
 description: Built-in web interface for communicating with Claude without external services. Use when setting up or configuring the web console channel, or troubleshooting browser-based access.
+capabilities:
+  - id: communication.message
+    title: Web console messaging
+    operations: [send, receive]
+    keywords: [message, web, console]
+    stability: stable
 
 lifecycle:
   npm: true

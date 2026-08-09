@@ -15,6 +15,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import semver from 'semver';
 
 const COMPARATOR = /^(>=|<=|>|<|=)?\s*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/;
 
@@ -24,14 +25,56 @@ const COMPARATOR = /^(>=|<=|>|<|=)?\s*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/;
  * @param {string} skillDir
  * @returns {string|null}
  */
-export function readDeclaredNodeRange(skillDir) {
+export function readDeclaredNodeRange(skillDir, { readFile = fs.readFileSync } = {}) {
   try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(skillDir, 'package.json'), 'utf8'));
+    const pkg = JSON.parse(readFile(path.join(skillDir, 'package.json'), 'utf8'));
     const range = pkg?.engines?.node;
     return typeof range === 'string' && range.trim() !== '' ? range.trim() : null;
   } catch {
     return null;
   }
+}
+
+export function readDeclaredYosContract(skillDir, { readFile = fs.readFileSync } = {}) {
+  try {
+    const pkg = JSON.parse(readFile(path.join(skillDir, 'package.json'), 'utf8'));
+    const contract = pkg?.yos;
+    if (!contract || typeof contract !== 'object' || Array.isArray(contract)) return null;
+    const id = typeof contract.id === 'string' ? contract.id.trim() : '';
+    const core = typeof contract.core === 'string' ? contract.core.trim() : '';
+    if (!id || !core) return null;
+    return {
+      id,
+      core,
+      upstreamVersion: typeof contract.upstreamVersion === 'string'
+        ? contract.upstreamVersion
+        : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function checkYosCoreCompatibility(range, coreVersion) {
+  const running = String(coreVersion ?? '').replace(/^v/, '');
+  if (!range) {
+    return { checked: false, satisfied: true, range: null, running, reason: 'no range declared' };
+  }
+  if (!semver.valid(running) || !semver.validRange(range)) {
+    return {
+      checked: true,
+      satisfied: false,
+      range,
+      running,
+      error: !semver.validRange(range) ? 'invalid_core_range' : 'invalid_core_version',
+    };
+  }
+  return {
+    checked: true,
+    satisfied: semver.satisfies(running, range, { includePrerelease: true }),
+    range,
+    running,
+  };
 }
 
 function parseVersion(text) {

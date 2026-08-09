@@ -17,6 +17,7 @@ This repository is the YOS engineering baseline. It is suitable for development 
 - Web Console
 - Claude Code and Codex runtime adapters
 - Install, component and upgrade tooling
+- Read-only capability discovery across built-in skills, installed components and the release shelf
 
 ## Development Setup
 
@@ -40,7 +41,16 @@ yos runtime status
 yos runtime codex
 yos add <component>
 yos list
+yos capability list
+yos capability search <keyword>
+yos capability show <capability-id>
+yos capability providers <capability-id>
 ```
+
+Capability queries never install, upgrade or execute a component. Built-in and
+installed facts are read locally; optional providers come from the release
+shelf's same-build `index.json` and `capabilities.json`. Use `yos doctor` when a
+declared capability provides a health check.
 
 ## Verification
 

@@ -41,6 +41,7 @@ import {
   renderCatalogHtml,
   renderCatalogMarkdown,
 } from './lib/dist-catalog.mjs';
+import { deriveCapabilityIndex } from './lib/capability-index.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -219,6 +220,10 @@ function buildRepo({ repo, dir }, options, record) {
     name: tag,
     commit: { sha: git(dir, ['rev-parse', `${tag}^{commit}`]).trim() },
   }));
+  summary.releases = tagEntries;
+  const releaseDates = tagEntries.map(({ commit }) => (
+    git(dir, ['show', '-s', '--format=%cI', commit.sha]).trim()
+  ));
   const tagsFile = path.join(outDir, 'tags.json');
   writeJson(tagsFile, tagEntries);
   record(tagsFile);
@@ -260,6 +265,11 @@ function buildRepo({ repo, dir }, options, record) {
   }
   summary.rawFiles += mirrorRawFiles(dir, defaultBranch, outDir, record);
   summary.defaultBranch = defaultBranch;
+  summary.defaultBranchCommit = git(dir, ['rev-parse', `${defaultBranch}^{commit}`]).trim();
+  summary.sourceTimestamp = [
+    ...releaseDates,
+    git(dir, ['show', '-s', '--format=%cI', summary.defaultBranchCommit]).trim(),
+  ].sort().at(-1);
 
   return { summary, outDir, tags, newest };
 }
@@ -438,7 +448,11 @@ function releasedRegistry(options) {
   if (!core) return { components: {} };
   const { kept } = listTags(core.dir, options.tags);
   const newest = [...kept].sort((a, b) => compareVersionsDesc(versionOf(a), versionOf(b)))[0];
-  for (const ref of [newest, options.defaultBranch]) {
+  // The shelf build locks the default-branch commit into buildId and only emits
+  // providers backed by mirrored release tags. Reading that locked registry
+  // first lets a newly tagged component become discoverable without waiting for
+  // another Core release, while untagged candidates still cannot appear.
+  for (const ref of [options.defaultBranch, newest]) {
     if (!ref) continue;
     try {
       return JSON.parse(git(core.dir, ['show', `${ref}:registry.json`]));
@@ -477,7 +491,8 @@ function publishCatalog(index, options, record) {
     );
   }
 
-  const renderOptions = { baseUrl: options.baseUrl, registry, builtAt: new Date().toISOString() };
+  const builtAt = index.repos.map((repo) => repo.sourceTimestamp).filter(Boolean).sort().at(-1);
+  const renderOptions = { baseUrl: options.baseUrl, registry, builtAt };
   const markdownPath = path.join(options.output, 'VERSIONS.md');
   writeFileWithDirs(markdownPath, renderCatalogMarkdown(index, renderOptions));
   record(markdownPath);
@@ -488,6 +503,20 @@ function publishCatalog(index, options, record) {
   const named = rows.rows.map(row => `${row.id} ${row.latestVersion || '?'}`).join(', ');
   console.log(`[dist] catalog: ${rows.rows.length} component(s) — ${named}`);
   console.log(`[dist] catalog: ${promised.length} artifact address(es) verified present on the mirror`);
+}
+
+function buildIdentity(repos) {
+  const source = repos
+    .map((repo) => ({
+      repo: repo.repo,
+      defaultBranch: repo.defaultBranch,
+      defaultBranchCommit: repo.defaultBranchCommit,
+      releases: [...(repo.releases ?? [])]
+        .map(({ name, commit }) => ({ name, commit: commit.sha }))
+        .sort((a, b) => a.name.localeCompare(b.name, 'en')),
+    }))
+    .sort((a, b) => a.repo.localeCompare(b.repo, 'en'));
+  return crypto.createHash('sha256').update(JSON.stringify(source)).digest('hex');
 }
 
 function main() {
@@ -557,10 +586,19 @@ function main() {
   const index = {
     schemaVersion: 1,
     generator: 'scripts/build-dist.mjs',
+    buildId: buildIdentity(repos),
     repos,
     vendor,
     files: files.sort((a, b) => a.path.localeCompare(b.path, 'en')),
   };
+
+  const capabilityPath = path.join(options.output, 'capabilities.json');
+  writeJson(capabilityPath, deriveCapabilityIndex({
+    index,
+    registry: releasedRegistry(options),
+    outputRoot: options.output,
+  }));
+  record(capabilityPath);
 
   publishCatalog(index, options, record);
 

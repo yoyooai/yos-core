@@ -6,6 +6,12 @@ description: |
   Use when receiving a control message containing "health-check".
 user-invocable: false
 allowed-tools: Bash, Read, Grep
+capabilities:
+  - id: system.health
+    title: System health inspection and recovery
+    operations: [inspect, report, recover]
+    keywords: [health, disk, memory, service]
+    stability: stable
 ---
 
 # System Health Check

@@ -23,6 +23,7 @@ import { attachCommand } from './commands/attach.js';
 import { doctorCommand } from './commands/doctor.js';
 import { shellCommand } from './commands/shell.js';
 import { runtimeCommand } from './commands/runtime.js';
+import { capabilityCommand } from './commands/capability.js';
 
 const commands = {
   // Environment setup
@@ -46,6 +47,7 @@ const commands = {
   remove: uninstallComponent,
   list: listComponents,
   search: searchComponents,
+  capability: capabilityCommand,
   // Help
   help: showHelp,
 };
@@ -121,6 +123,10 @@ Component Management:
   remove <name>       Alias for uninstall
   list                List installed components
   search [keyword]    Search available components
+  capability list     List installed and available capabilities (--json)
+  capability search <keyword>  Search capabilities
+  capability show <id>         Show one capability
+  capability providers <id>    List capability providers
 
 Other:
   help                Show this help

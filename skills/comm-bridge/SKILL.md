@@ -7,6 +7,12 @@ description: >-
   fetching conversation history for Memory Sync, or creating checkpoints after sync.
   Incoming messages are durably queued by channel bots and delivered to the active runtime via a PM2 dispatcher daemon.
   Session-start hooks automatically provide conversation context and can trigger Memory Sync when unsummarized conversations exceed the configured threshold.
+capabilities:
+  - id: communication.message
+    title: Message routing
+    operations: [send, receive]
+    keywords: [message, communication, c4]
+    stability: stable
 ---
 
 # Communication Bridge (C4)

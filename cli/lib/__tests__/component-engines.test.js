@@ -5,11 +5,13 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { afterEach, describe, it } from 'node:test';
 
-import {
+import * as componentEngines from '../component-engines.js';
+
+const {
   checkNodeEngine,
   describeEngineMismatch,
   readDeclaredNodeRange,
-} from '../component-engines.js';
+} = componentEngines;
 
 /**
  * The installer accepts Node 20 and up, and the WeChat channel cannot run below
@@ -94,6 +96,45 @@ describe('checking a component against the running node', () => {
     assert.match(text, /nothing was installed/i);
     assert.match(text, /yos add wechat/);
     assert.match(text, /widen its engines range/);
+  });
+});
+
+describe('checking a component against the running YOS core', () => {
+  it('reads the existing package.json.yos contract instead of leaving it dead metadata', () => {
+    assert.equal(typeof componentEngines.readDeclaredYosContract, 'function');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-component-contract-'));
+    tmpDirs.push(dir);
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
+      yos: {
+        id: 'channel.feishu',
+        core: '>=0.1.0-alpha.1 <0.2.0',
+        upstreamVersion: '0.3.5',
+      },
+    }));
+
+    assert.deepEqual(componentEngines.readDeclaredYosContract(dir), {
+      id: 'channel.feishu',
+      core: '>=0.1.0-alpha.1 <0.2.0',
+      upstreamVersion: '0.3.5',
+    });
+  });
+
+  it('uses real semver semantics for prerelease core ranges and fails closed on invalid ranges', () => {
+    assert.equal(typeof componentEngines.checkYosCoreCompatibility, 'function');
+    const check = componentEngines.checkYosCoreCompatibility;
+    const range = '>=0.1.0-alpha.1 <0.2.0';
+
+    assert.equal(check(range, '0.1.0-alpha.1').satisfied, true);
+    assert.equal(check(range, '0.1.0-alpha.0').satisfied, false);
+    assert.equal(check(range, '0.1.13').satisfied, true);
+    assert.equal(check(range, '0.2.0').satisfied, false);
+    assert.deepEqual(check('not-a-range', '0.1.13'), {
+      checked: true,
+      satisfied: false,
+      range: 'not-a-range',
+      running: '0.1.13',
+      error: 'invalid_core_range',
+    });
   });
 });
 

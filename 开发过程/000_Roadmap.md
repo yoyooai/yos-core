@@ -1,5 +1,14 @@
 # YOS Core Roadmap
 
+## 2026-08-10 Unified Capability Catalog
+
+Development implementation is complete on an isolated branch and is awaiting
+independent acceptance. Core now derives a read-only local catalog, exposes
+`yos capability`, reports declared health only through the existing doctor, and
+generates the shelf `capabilities.json` beside `index.json`. No capability data
+participates in permission or execution decisions; no release or production
+shelf was changed.
+
 ## 当前阶段
 
 - [x] 以上游 `v0.6.0` 为血统基线，完成 YOS 品牌切换。

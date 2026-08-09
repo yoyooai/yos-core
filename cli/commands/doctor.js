@@ -22,6 +22,7 @@ import { commandExists } from '../lib/shell-utils.js';
 import { parseSkillMd } from '../lib/skill.js';
 import { bold, dim, green, red, yellow, heading } from '../lib/colors.js';
 import { getActiveAdapter } from '../lib/runtime/index.js';
+import { loadCapabilityCatalog } from './capability.js';
 import {
   describeEndpoint,
   resolveRuntimeBaseUrl,
@@ -55,6 +56,32 @@ const API_HOST = API_ENDPOINT.hostname;
 const API_ORIGIN = API_ENDPOINT.origin;
 const VERSION_CHECK_CONCURRENCY = 3;
 const CLAUDE_FIX_TIMEOUT = 300000; // 5 minutes
+
+export function evaluateCapabilityHealth(catalog, {
+  runHealth = (check) => spawnSync(process.execPath, [check.path], {
+    encoding: 'utf8', timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'],
+  }),
+} = {}) {
+  const checks = [];
+  for (const check of catalog.healthChecks ?? []) {
+    let result;
+    try {
+      result = runHealth(check);
+    } catch {
+      result = { status: 1 };
+    }
+    checks.push(result?.status === 0
+      ? { providerId: check.providerId, capabilityId: check.capabilityId, status: 'pass', errorCode: null }
+      : { providerId: check.providerId, capabilityId: check.capabilityId, status: 'degraded', errorCode: 'capability_health_failed' });
+  }
+  return {
+    status: checks.some((check) => check.status === 'degraded') ? 'degraded' : 'pass',
+    checks,
+    undeclaredProviders: (catalog.providers ?? []).filter(
+      (provider) => provider.declarationStatus === 'undeclared',
+    ).length,
+  };
+}
 
 // ── Logging ──────────────────────────────────────────────────────
 
@@ -323,16 +350,29 @@ async function collectDiagnostics(env) {
     : { running: false, total: 0, online: 0, activityMonitor: false, procs: [] };
   const session = tmux.installed ? checkTmuxSession() : false;
 
+  let capabilities;
+  try {
+    capabilities = evaluateCapabilityHealth(await loadCapabilityCatalog());
+  } catch {
+    capabilities = {
+      status: 'degraded',
+      checks: [],
+      undeclaredProviders: 0,
+      errorCode: 'capability_catalog_invalid',
+    };
+  }
+
   return {
     system: { tmux, pm2, network: net },
     ai: { cli, auth, authStatus, autonomous, networkSkipped: !net.reachable },
     services: { ...services, session },
+    capabilities,
   };
 }
 
 // ── JSON builder ─────────────────────────────────────────────────
 
-function buildDiagnosticJson(diag, coreVersion) {
+export function buildDiagnosticJson(diag, coreVersion) {
   const issues = [];
 
   if (!diag.system.tmux.installed) {
@@ -380,6 +420,21 @@ function buildDiagnosticJson(diag, coreVersion) {
       }
     }
   }
+  if (diag.capabilities?.errorCode) {
+    issues.push({
+      id: 'capability_catalog_invalid',
+      label: 'Capability catalog could not be validated',
+      hint: 'Check component capability declarations.',
+    });
+  }
+  for (const check of diag.capabilities?.checks ?? []) {
+    if (check.status !== 'degraded') continue;
+    issues.push({
+      id: `capability_${check.providerId}`,
+      label: `${check.providerId} capability health degraded`,
+      hint: 'Run the provider health command or inspect its service status.',
+    });
+  }
 
   return {
     version: coreVersion.success ? coreVersion.version : null,
@@ -408,6 +463,12 @@ function buildDiagnosticJson(diag, coreVersion) {
           diag.services.procs.every(p => p.pm2_env?.status === 'online'),
         procs: diag.services.procs.map(p => ({ name: p.name, status: p.pm2_env?.status || 'unknown' })),
         session: { active: diag.services.session },
+      },
+      capabilities: {
+        status: diag.capabilities?.status ?? 'degraded',
+        checks: diag.capabilities?.checks ?? [],
+        undeclaredProviders: diag.capabilities?.undeclaredProviders ?? 0,
+        errorCode: diag.capabilities?.errorCode ?? null,
       },
     },
     issues,
@@ -524,6 +585,25 @@ function displayServiceGroup(diag, jsonGroup) {
 
   displayCheckGroup('Services', jsonGroup.passed ? 'pass' : 'fail', checks);
   logToFile(`check: services — ${jsonGroup.passed ? 'passed' : 'failed'}`);
+}
+
+function displayCapabilityGroup(capabilities) {
+  const checks = [];
+  for (const check of capabilities.checks ?? []) {
+    checks.push(check.status === 'pass'
+      ? `${check.providerId}: ${green('healthy')}`
+      : `${check.providerId}: ${yellow('degraded')} (${check.errorCode})`);
+  }
+  if ((capabilities.undeclaredProviders ?? 0) > 0) {
+    checks.push(dim(`${capabilities.undeclaredProviders} installed provider(s) have no capability declaration`));
+  }
+  if (checks.length === 0) checks.push('capability declarations valid');
+  displayCheckGroup(
+    'Capabilities',
+    capabilities.status === 'pass' ? 'pass' : 'fail',
+    checks,
+  );
+  logToFile(`check: capabilities — ${capabilities.status}`);
 }
 
 // ── Channel discovery ────────────────────────────────────────────
@@ -787,6 +867,7 @@ export async function doctorCommand(args) {
   displaySystemGroup(diag, diagnostic.groups.system);
   displayAiGroup(diag, diagnostic.groups.ai_service);
   displayServiceGroup(diag, diagnostic.groups.services);
+  displayCapabilityGroup(diagnostic.groups.capabilities);
 
   // ── Phase 4: Channels ─────────────────────────────────────────
 

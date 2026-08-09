@@ -76,6 +76,38 @@
       "path": "scripts/build-dist.mjs"
     },
     {
+      "path": "cli/lib/__tests__/capability-schema.test.js",
+      "minimumTests": 5
+    },
+    {
+      "path": "cli/lib/__tests__/capability-catalog.test.js",
+      "minimumTests": 6
+    },
+    {
+      "path": "cli/lib/__tests__/capability-cli.test.js",
+      "minimumTests": 5
+    },
+    {
+      "path": "cli/lib/__tests__/capability-shelf-e2e.test.js",
+      "minimumTests": 1
+    },
+    {
+      "path": "cli/lib/__tests__/doctor-capabilities.test.js",
+      "minimumTests": 3
+    },
+    {
+      "path": "cli/lib/__tests__/registry.test.js",
+      "minimumTests": 6
+    },
+    {
+      "path": "cli/lib/__tests__/remote-capability-catalog.test.js",
+      "minimumTests": 3
+    },
+    {
+      "path": "cli/lib/__tests__/legacy-component-capabilities.test.js",
+      "minimumTests": 1
+    },
+    {
       "path": "cli/lib/__tests__/native-prebuild-wiring.test.js",
       "minimumTests": 3
     },
@@ -149,7 +181,11 @@
     },
     {
       "path": "test/dist-catalog.test.js",
-      "minimumTests": 19
+      "minimumTests": 21
+    },
+    {
+      "path": "test/capability-index.test.js",
+      "minimumTests": 2
     },
     {
       "path": "cli/lib/__tests__/claude-install-permissions.test.js",
