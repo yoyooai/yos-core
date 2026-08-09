@@ -10,6 +10,7 @@ import {
   packageContentDigest,
 } from './package-policy.js';
 import { verifyTestPolicy } from './test-policy.js';
+import { verifyProgressLog } from './progress-log.js';
 import {
   loadApprovedTestBaselines,
   verifyJestResult,
@@ -193,6 +194,7 @@ export function runVerification({
   runPrerequisites = true,
   gitStatusImpl = gitStatus,
   verifyTestPolicyImpl = verifyTestPolicy,
+  verifyProgressLogImpl = verifyProgressLog,
   verifyVersionsImpl = verifyVersions,
   verifyExecutedTestsImpl = verifyExecutedTests,
   verifyExecutedTestCountsImpl = verifyExecutedTestCounts,
@@ -214,6 +216,10 @@ export function runVerification({
 
   try {
     verifyTestPolicyImpl({ root });
+    // The progress log has to be current before anything else is spent on this
+    // release: it is the cheapest check here, and shipping a version that is
+    // missing from the log is how the log stops being worth reading.
+    verifyProgressLogImpl(root);
     if (runPrerequisites) {
       verifyVersionsImpl(root);
       approvedBaselines = testBaselines ?? loadApprovedTestBaselines(path.join(root, 'scripts', 'test-baselines.json'));

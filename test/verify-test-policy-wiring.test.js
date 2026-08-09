@@ -9,6 +9,7 @@ describe('verification test-policy wiring', () => {
       root: '/unused',
       runPrerequisites: true,
       gitStatusImpl: () => '',
+      verifyProgressLogImpl: () => {},
       verifyVersionsImpl: () => calls.push('version'),
       verifyExecutedTestsImpl: () => {
         calls.push('tests');
@@ -46,6 +47,7 @@ describe('verification test-policy wiring', () => {
       root: '/unused',
       runPrerequisites: true,
       gitStatusImpl: () => '',
+      verifyProgressLogImpl: () => {},
       verifyTestPolicyImpl: () => calls.push('policy'),
       verifyVersionsImpl: () => calls.push('version'),
       verifyExecutedTestsImpl: () => {
@@ -70,6 +72,7 @@ describe('verification test-policy wiring', () => {
         root: '/unused',
         runPrerequisites: true,
         gitStatusImpl: () => '',
+      verifyProgressLogImpl: () => {},
         verifyTestPolicyImpl: () => calls.push('policy'),
         verifyVersionsImpl: () => calls.push('version'),
         executeTestGateImpl: () => {
@@ -94,6 +97,7 @@ describe('verification test-policy wiring', () => {
       root: '/unused',
       runPrerequisites: true,
       gitStatusImpl: () => '',
+      verifyProgressLogImpl: () => {},
       verifyTestPolicyImpl: () => calls.push('policy'),
       verifyVersionsImpl: () => calls.push('version'),
       executeTestGateImpl: () => {
