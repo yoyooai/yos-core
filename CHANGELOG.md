@@ -4,6 +4,20 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
+## [0.1.14] - 2026-08-10
+
+### Added
+
+- Add one read-only capability catalog across built-in skills, installed
+  components and providers published on the YOS release shelf. The
+  `yos capability` commands and the Capabilities doctor group share the same
+  strict declaration contract; querying never installs, upgrades or executes a
+  component.
+- Build `capabilities.json` beside `index.json` from released component tags.
+  The capability index carries no artifact URL, size or digest and must match
+  the shelf build identity, so `index.json` remains the only artifact source of
+  truth.
+
 ### Security
 
 - Claude credentials and the YOS environment file are now written with owner-only
