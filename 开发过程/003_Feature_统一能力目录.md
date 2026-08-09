@@ -43,17 +43,22 @@ derivation and a real TTY cancellation of the existing add flow.
 
 Final development-side evidence:
 
-- Jest: `274/274`; Node test: `1541/1541` with no failures.
+- Jest: `274/274`; Node test: `1544/1544` with no failures.
 - Six dependency roots: `0` vulnerabilities.
-- Core package: `465` entries; content SHA-256
-  `1a43feadc411c1dbdd88b1eda2d66ee267c5fb6cea4c06e81f755ac9d26cf98c`.
-- Two local package builds were byte-identical; archive SHA-256
-  `a4414111b39d647cb7f86941d91fdd21de3bc219b8128eaa866ee0abc79dc00d`.
+- Core package: `465` entries; cross-platform content SHA-256
+  `971620b74893b1a5b15e132afb8b2d79bb229fa2edf55c1b855d3409a1bad9fb`.
+- Two macOS package builds were byte-identical; macOS archive SHA-256
+  `3bdadfef6a2d0c379b66bd4c16ebecb6fb0b900aec0b0dfbda4dd01aaeca38dd`.
+  Independent cross-platform comparison must use the content digest above,
+  not this platform-specific tar/gzip digest.
 - Two independent shelf builds produced byte-identical `index.json` and
   `capabilities.json`. Their SHA-256 values were
   `32c86edabc0af535dfaa8d8d847904c5f43fbc2cd1b8f124779dd80d99c00692`
   and `0315c5aafbf8e7034ce716db272b22d0127db4add02d383360739df5f8edd4e9`.
 - Mutation checks proved that removing capability artifact integrity checking
   or omitting `capabilities.json` from `index.json` makes the relevant tests fail.
+- Review closure mutations also proved that duplicate capability IDs, providers
+  referencing unpublished tags, and JSON exposure of doctor-only health paths
+  each have an independent test that fails when its guard is removed.
 
 This record does not claim independent acceptance, merge, tag or publication.
