@@ -18,6 +18,13 @@ All notable changes to YOS are recorded here from the point at which the indepen
   the shelf build identity, so `index.json` remains the only artifact source of
   truth.
 
+### Fixed
+
+- Make shelf builds declare production or test-only intent. Production mode
+  refuses skipped or incomplete vendor artifacts, and any retention-driven tag
+  eviction now fails before the output directory is created unless explicitly
+  approved. The default retention window increases from 20 to 50 versions.
+
 ### Security
 
 - Claude credentials and the YOS environment file are now written with owner-only
