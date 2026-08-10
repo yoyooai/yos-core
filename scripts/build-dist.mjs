@@ -414,7 +414,25 @@ function expand(template, values) {
 function buildVendor(options, record) {
   const spec = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts', 'dist-vendor.json'), 'utf8'));
   const vendorDir = path.join(options.output, 'vendor');
-  const summary = { caddy: [], prebuilds: [], missing: [] };
+  const summary = { caddy: [], prebuilds: [], sources: [], missing: [] };
+  const recordSource = (target, url) => {
+    const parsed = new URL(url);
+    if (
+      parsed.protocol !== 'https:'
+      || parsed.username
+      || parsed.password
+      || parsed.search
+      || parsed.hash
+    ) {
+      throw new Error('vendor sources must be uncredentialed HTTPS URLs without query strings or fragments');
+    }
+    summary.sources.push({
+      path: path.relative(options.output, target).split(path.sep).join('/'),
+      url,
+      bytes: fs.statSync(target).size,
+      sha256: sha256(target),
+    });
+  };
 
   const caddy = spec.caddy;
   writeJson(path.join(vendorDir, 'caddy', 'latest.json'), { tag_name: `v${caddy.version}` });
@@ -426,6 +444,7 @@ function buildVendor(options, record) {
     if (download(url, target, options.vendorCache)) {
       record(target);
       summary.caddy.push(file);
+      recordSource(target, url);
     } else {
       summary.missing.push(url);
     }
@@ -442,6 +461,7 @@ function buildVendor(options, record) {
         if (download(url, outFile, options.vendorCache)) {
           record(outFile);
           summary.prebuilds.push(file);
+          recordSource(outFile, url);
         } else {
           summary.missing.push(url);
         }

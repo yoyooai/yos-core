@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,6 +8,36 @@ import { describe, expect, test } from '@jest/globals';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BUILD_DIST = path.join(ROOT, 'scripts', 'build-dist.mjs');
+const VENDOR_SPEC = JSON.parse(
+  fs.readFileSync(path.join(ROOT, 'scripts', 'dist-vendor.json'), 'utf8'),
+);
+
+function expand(template, values) {
+  return template.replace(/\{(\w+)\}/g, (_, key) => String(values[key] ?? `{${key}}`));
+}
+
+function vendorUrls() {
+  const caddy = VENDOR_SPEC.caddy.files.map((fileTemplate) => {
+    const file = expand(fileTemplate, { version: VENDOR_SPEC.caddy.version });
+    return expand(VENDOR_SPEC.caddy.source, { version: VENDOR_SPEC.caddy.version, file });
+  });
+  const prebuilds = VENDOR_SPEC.prebuilds.flatMap((prebuild) => (
+    prebuild.abis.flatMap((abi) => prebuild.targets.map((target) => {
+      const file = expand(prebuild.file, { version: prebuild.version, abi, ...target });
+      return expand(prebuild.source, { version: prebuild.version, file });
+    }))
+  ));
+  return [...caddy, ...prebuilds];
+}
+
+function buildVendorCache() {
+  const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-dist-vendor-cache-'));
+  for (const url of vendorUrls()) {
+    const key = `${crypto.createHash('sha256').update(url).digest('hex').slice(0, 16)}-${path.basename(url)}`;
+    fs.writeFileSync(path.join(cache, key), `fixture for ${url}\n`);
+  }
+  return cache;
+}
 
 function git(cwd, args) {
   const result = spawnSync('git', args, {
@@ -111,4 +142,33 @@ describe('distribution publication safety', () => {
     expect(index.publicationMode).toBe('test-only');
     expect(index.repos[0].tagRetention).toBe(50);
   });
+
+  test('production index records the verifiable source of every downloaded vendor artifact', () => {
+    const repo = buildFixture();
+    const output = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-dist-vendor-provenance-'));
+    const cache = buildVendorCache();
+    const result = runBuild([
+      '--production',
+      '--output', output,
+      '--repo', `yoyooai/yos-core=${repo}`,
+      '--vendor-cache', cache,
+    ]);
+
+    expect(result.status).toBe(0);
+    const index = JSON.parse(fs.readFileSync(path.join(output, 'index.json'), 'utf8'));
+    expect(index.vendor.sources).toHaveLength(vendorUrls().length);
+
+    for (const source of index.vendor.sources) {
+      expect(source).toEqual({
+        path: expect.stringMatching(/^vendor\//),
+        url: expect.stringMatching(/^https:\/\/[^?#]+$/),
+        bytes: expect.any(Number),
+        sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+      });
+      const artifact = path.join(output, source.path);
+      expect(fs.statSync(artifact).size).toBe(source.bytes);
+      expect(crypto.createHash('sha256').update(fs.readFileSync(artifact)).digest('hex')).toBe(source.sha256);
+    }
+    expect(new Set(index.vendor.sources.map(({ url }) => url))).toEqual(new Set(vendorUrls()));
+  }, 120000);
 });
