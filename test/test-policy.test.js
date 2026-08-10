@@ -105,15 +105,27 @@ describe('test policy', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  test('rejects missing critical files and test files with no cases', () => {
+  test('rejects unapproved critical manifest changes, missing files, and files with no cases', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-critical-tests-'));
     write(path.join(root, 'test', 'empty.test.js'), '// no tests here\n');
+    write(path.join(root, 'test', 'protected.test.js'), "test('one', () => {});\ntest('two', () => {});\n");
+    const approvedFiles = [{ path: 'test/protected.test.js', minimumTests: 2 }];
+    const loweredManifest = {
+      version: 1,
+      files: [{ path: 'test/protected.test.js', minimumTests: 1 }],
+      approvedDigest: digest(approvedFiles),
+    };
+
+    expect(() => verifyCriticalTestFiles(root, loweredManifest)).toThrow(/approval digest mismatch/);
+
+    const files = [
+      { path: 'test/empty.test.js', minimumTests: 1 },
+      { path: 'test/missing.test.js', minimumTests: 1 },
+    ];
     const manifest = {
       version: 1,
-      files: [
-        { path: 'test/empty.test.js', minimumTests: 1 },
-        { path: 'test/missing.test.js', minimumTests: 1 },
-      ],
+      files,
+      approvedDigest: digest(files),
     };
 
     expect(() => verifyCriticalTestFiles(root, manifest)).toThrow(/empty\.test\.js: expected at least 1 test case/);

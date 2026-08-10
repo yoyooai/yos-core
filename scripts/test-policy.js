@@ -165,6 +165,14 @@ export function verifyCriticalTestFiles(root, manifest) {
   if (manifest.version !== 1 || !Array.isArray(manifest.files) || manifest.files.length === 0) {
     throw new Error('critical test manifest has an unsupported or empty schema');
   }
+  const actualDigest = crypto.createHash('sha256')
+    .update(JSON.stringify(manifest.files))
+    .digest('hex');
+  if (manifest.approvedDigest !== actualDigest) {
+    throw new Error(
+      `critical test manifest approval digest mismatch: expected ${manifest.approvedDigest}, got ${actualDigest}`,
+    );
+  }
   for (const entry of manifest.files) {
     const absolutePath = path.join(root, entry.path);
     if (!fs.existsSync(absolutePath) || !fs.statSync(absolutePath).isFile()) {
