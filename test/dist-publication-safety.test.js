@@ -16,12 +16,12 @@ function expand(template, values) {
   return template.replace(/\{(\w+)\}/g, (_, key) => String(values[key] ?? `{${key}}`));
 }
 
-function vendorUrls() {
-  const caddy = VENDOR_SPEC.caddy.files.map((fileTemplate) => {
-    const file = expand(fileTemplate, { version: VENDOR_SPEC.caddy.version });
-    return expand(VENDOR_SPEC.caddy.source, { version: VENDOR_SPEC.caddy.version, file });
+function vendorUrls(spec = VENDOR_SPEC) {
+  const caddy = spec.caddy.files.map((fileTemplate) => {
+    const file = expand(fileTemplate, { version: spec.caddy.version });
+    return expand(spec.caddy.source, { version: spec.caddy.version, file });
   });
-  const prebuilds = VENDOR_SPEC.prebuilds.flatMap((prebuild) => (
+  const prebuilds = spec.prebuilds.flatMap((prebuild) => (
     prebuild.abis.flatMap((abi) => prebuild.targets.map((target) => {
       const file = expand(prebuild.file, { version: prebuild.version, abi, ...target });
       return expand(prebuild.source, { version: prebuild.version, file });
@@ -30,13 +30,25 @@ function vendorUrls() {
   return [...caddy, ...prebuilds];
 }
 
-function buildVendorCache() {
+function buildVendorCache(spec = VENDOR_SPEC) {
   const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-dist-vendor-cache-'));
-  for (const url of vendorUrls()) {
+  for (const url of vendorUrls(spec)) {
     const key = `${crypto.createHash('sha256').update(url).digest('hex').slice(0, 16)}-${path.basename(url)}`;
     fs.writeFileSync(path.join(cache, key), `fixture for ${url}\n`);
   }
   return cache;
+}
+
+function buildScriptWithVendorSource(transform) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-dist-script-fixture-'));
+  fs.cpSync(path.join(ROOT, 'scripts'), path.join(root, 'scripts'), { recursive: true });
+  fs.symlinkSync(path.join(ROOT, 'cli'), path.join(root, 'cli'), 'dir');
+  fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(root, 'node_modules'), 'dir');
+  const specPath = path.join(root, 'scripts', 'dist-vendor.json');
+  const spec = JSON.parse(fs.readFileSync(specPath, 'utf8'));
+  spec.caddy.source = transform(spec.caddy.source);
+  fs.writeFileSync(specPath, `${JSON.stringify(spec, null, 2)}\n`);
+  return { buildDist: path.join(root, 'scripts', 'build-dist.mjs'), spec };
 }
 
 function git(cwd, args) {
@@ -71,11 +83,28 @@ function buildFixture(tagCount = 1) {
   return dir;
 }
 
-function runBuild(args) {
-  return spawnSync(process.execPath, [BUILD_DIST, ...args], {
+function runBuild(args, { buildDist = BUILD_DIST } = {}) {
+  return spawnSync(process.execPath, [buildDist, ...args], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+}
+
+function expectUnsafeVendorSourceRejected(transform) {
+  const repo = buildFixture();
+  const output = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-dist-unsafe-vendor-source-'));
+  const { buildDist, spec } = buildScriptWithVendorSource(transform);
+  const result = runBuild([
+    '--production',
+    '--output', output,
+    '--repo', `yoyooai/yos-core=${repo}`,
+    '--vendor-cache', buildVendorCache(spec),
+  ], { buildDist });
+
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain(
+    'vendor sources must be uncredentialed HTTPS URLs without query strings or fragments',
+  );
 }
 
 describe('distribution publication safety', () => {
@@ -170,5 +199,21 @@ describe('distribution publication safety', () => {
       expect(crypto.createHash('sha256').update(fs.readFileSync(artifact)).digest('hex')).toBe(source.sha256);
     }
     expect(new Set(index.vendor.sources.map(({ url }) => url))).toEqual(new Set(vendorUrls()));
+  }, 120000);
+
+  test('production build rejects a plain HTTP vendor source', () => {
+    expectUnsafeVendorSourceRejected((source) => source.replace('https://', 'http://'));
+  }, 120000);
+
+  test('production build rejects credentials embedded in a vendor source', () => {
+    expectUnsafeVendorSourceRejected((source) => source.replace('https://', 'https://user:pass@'));
+  }, 120000);
+
+  test('production build rejects a vendor source with a query string', () => {
+    expectUnsafeVendorSourceRejected((source) => `${source}?token=secret`);
+  }, 120000);
+
+  test('production build rejects a vendor source with a fragment', () => {
+    expectUnsafeVendorSourceRejected((source) => `${source}#artifact`);
   }, 120000);
 });
