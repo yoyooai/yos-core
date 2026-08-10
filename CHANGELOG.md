@@ -27,6 +27,9 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ### Security
 
+- Record each re-hosted third-party vendor artifact's immutable HTTPS source,
+  byte length and SHA-256 in `index.json`, so a shelf can prove both what it
+  serves and where that binary came from without relying on the build machine.
 - Claude credentials and the YOS environment file are now written with owner-only
   permissions. Existing permissive files are tightened when YOS rewrites them.
 
