@@ -271,6 +271,7 @@ capabilities:
     output = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-catalog-out-'));
     buildLog = execFileSync(process.execPath, [
       BUILD_DIST,
+      '--test-only',
       '--output', output,
       '--repo', `yoyooai/yos-core=${fixture}`,
       '--repo', `yoyooai/yos-components=${componentsFixture}`,
@@ -281,6 +282,7 @@ capabilities:
     secondOutput = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-catalog-out-'));
     execFileSync(process.execPath, [
       BUILD_DIST,
+      '--test-only',
       '--output', secondOutput,
       '--repo', `yoyooai/yos-core=${fixture}`,
       '--repo', `yoyooai/yos-components=${componentsFixture}`,

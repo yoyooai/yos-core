@@ -76,9 +76,11 @@ beforeAll(() => {
   // Retention 3 of 4 tags, so exactly one tag must be reported as dropped.
   buildLog = execFileSync(process.execPath, [
     BUILD_DIST,
+    '--test-only',
     '--output', output,
     '--repo', `yoyooai/yos-core=${fixture}`,
     '--tags', '3',
+    '--allow-tag-drop',
     '--skip-vendor',
   ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 }, 120000);

@@ -180,6 +180,10 @@
       "minimumTests": 1
     },
     {
+      "path": "test/dist-publication-safety.test.js",
+      "minimumTests": 4
+    },
+    {
       "path": "test/dist-catalog.test.js",
       "minimumTests": 21
     },
