@@ -10,10 +10,11 @@
  *
  * Usage:
  *   node scripts/build-dist.mjs --output <dir> \
+ *     (--production | --test-only) \
  *     --repo yoyooai/yos-core=. \
  *     --repo yoyooai/yos-components=../yos-components \
- *     [--tags 20] [--default-branch main] [--skip-vendor] [--vendor-cache <dir>]
- *     [--allow-missing-vendor]
+ *     [--tags 50] [--default-branch main] [--vendor-cache <dir>]
+ *     [--skip-vendor] [--allow-missing-vendor] [--allow-tag-drop]
  *
  * Output layout (under <dir>):
  *   install.sh                                   installer from the newest core release
@@ -51,13 +52,13 @@ const RAW_MAX_DEPTH = 3;
 
 function parseArgs(argv) {
   const options = {
-    // Retention per version line. Was 5, which at the release rate of early
-    // August meant a version left the mirror within days of shipping — a machine
-    // could no longer be reinstalled at the version it was running. 20 is not a
-    // principle, it is breathing room: the honest fix for "forever" would be
-    // additive publishing, and until that exists main() prints what fell off.
-    output: null, repos: [], tags: 20, defaultBranch: 'main',
+    // Retention per version line. Was 5, then 20; both let a previously public
+    // pinned installer disappear under rsync --delete. Fifty is breathing room,
+    // not a promise of forever. The actual safety property is the preflight
+    // below: dropping any tag now requires an explicit --allow-tag-drop.
+    output: null, repos: [], tags: 50, defaultBranch: 'main', mode: null,
     skipVendor: false, allowMissingVendor: false, vendorCache: null,
+    allowTagDrop: false,
     // Public address the catalog prints in its copy-paste install commands.
     // A default is deliberate: a catalog whose commands point at nothing is
     // worse than no catalog, and the mirror has exactly one public home.
@@ -82,8 +83,11 @@ function parseArgs(argv) {
       options.repos.push({ repo, dir: path.resolve(raw.slice(split + 1)) });
     } else if (arg === '--tags') options.tags = Number(value());
     else if (arg === '--default-branch') options.defaultBranch = value();
+    else if (arg === '--production') options.mode = options.mode ? 'conflict' : 'production';
+    else if (arg === '--test-only') options.mode = options.mode ? 'conflict' : 'test-only';
     else if (arg === '--skip-vendor') options.skipVendor = true;
     else if (arg === '--allow-missing-vendor') options.allowMissingVendor = true;
+    else if (arg === '--allow-tag-drop') options.allowTagDrop = true;
     else if (arg === '--vendor-cache') options.vendorCache = path.resolve(value());
     else if (arg === '--base-url') options.baseUrl = value();
     else throw new Error(`Unknown argument: ${arg}`);
@@ -91,6 +95,15 @@ function parseArgs(argv) {
   if (!options.output) throw new Error('--output is required');
   if (options.repos.length === 0) throw new Error('at least one --repo is required');
   if (!Number.isInteger(options.tags) || options.tags < 1) throw new Error('--tags must be a positive integer');
+  if (!options.mode || options.mode === 'conflict') {
+    throw new Error('choose exactly one build mode: --production or --test-only');
+  }
+  if (options.mode === 'production' && options.skipVendor) {
+    throw new Error('production builds cannot skip vendor artifacts');
+  }
+  if (options.mode === 'production' && options.allowMissingVendor) {
+    throw new Error('production builds cannot allow missing vendor artifacts');
+  }
   return options;
 }
 
@@ -521,6 +534,19 @@ function buildIdentity(repos) {
 
 function main() {
   const options = parseArgs(process.argv.slice(2));
+
+  if (!options.allowTagDrop) {
+    const evictions = options.repos.flatMap(({ repo, dir }) => (
+      listTags(dir, options.tags).dropped.map((tag) => `${repo}@${tag}`)
+    ));
+    if (evictions.length > 0) {
+      throw new Error(
+        `retention ${options.tags} would drop published tag(s): ${evictions.join(', ')}; `
+        + 'increase --tags or explicitly pass --allow-tag-drop'
+      );
+    }
+  }
+
   fs.mkdirSync(options.output, { recursive: true });
 
   const files = [];
@@ -586,6 +612,7 @@ function main() {
   const index = {
     schemaVersion: 1,
     generator: 'scripts/build-dist.mjs',
+    publicationMode: options.mode,
     buildId: buildIdentity(repos),
     repos,
     vendor,
