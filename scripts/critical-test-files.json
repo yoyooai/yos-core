@@ -181,7 +181,7 @@
     },
     {
       "path": "test/dist-publication-safety.test.js",
-      "minimumTests": 5
+      "minimumTests": 9
     },
     {
       "path": "test/dist-catalog.test.js",
