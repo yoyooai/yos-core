@@ -159,9 +159,10 @@ let server = null;
  *   `stall` never answers (the hang that had to be killed by hand);
  *   `failTimes` answers 503 that many times before serving normally.
  */
-async function serve(shelf, { stall = [], failTimes = {} } = {}) {
+async function serve(shelf, { stall = [], failTimes = {}, dribble = {} } = {}) {
   const hits = new Map();
   const remaining = new Map(Object.entries(failTimes));
+  const timers = new Set();
   server = http.createServer((req, res) => {
     const key = decodeURIComponent(req.url.replace(/^\/+/, '').split('?')[0]);
     hits.set(key, (hits.get(key) ?? 0) + 1);
@@ -170,9 +171,27 @@ async function serve(shelf, { stall = [], failTimes = {} } = {}) {
     if (left > 0) { remaining.set(key, left - 1); res.writeHead(503); res.end('later'); return; }
     const body = shelf.bodies.get(key);
     if (!body) { res.writeHead(404); res.end('missing'); return; }
+    const gapMs = dribble[key];
+    if (gapMs !== undefined) {
+      // Slow but never stopped: one byte at a time, each gap shorter than the
+      // stall window. This is what a big vendor blob on a thin link looks like,
+      // and it must not be mistaken for a dead connection.
+      res.writeHead(200, { 'content-type': 'application/octet-stream' });
+      let sent = 0;
+      const push = () => {
+        if (sent >= body.length) { res.end(); return; }
+        res.write(body.subarray(sent, sent + 1));
+        sent += 1;
+        const timer = setTimeout(push, gapMs);
+        timers.add(timer);
+      };
+      push();
+      return;
+    }
     res.writeHead(200, { 'content-type': 'application/octet-stream' });
     res.end(body);
   });
+  server.on('close', () => { for (const timer of timers) clearTimeout(timer); });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   return { base: `http://127.0.0.1:${server.address().port}`, hits };
 }
@@ -389,14 +408,41 @@ describe('public shelf verifier: which version a customer gets', () => {
  * seconds with no exit.
  */
 describe('public shelf verifier: transport', () => {
-  test('a stalled file times out and fails instead of hanging', async () => {
+  test('a stalled file fails instead of hanging', async () => {
     const { base } = await serve(makeShelf(), { stall: ['install.sh'] });
     const started = process.hrtime.bigint();
-    const { code, stderr } = await run(base, ['--timeout-ms', '300', '--retries', '1']);
+    const { code, stderr } = await run(base, ['--stall-ms', '300', '--retries', '1']);
     const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
     expect(code).toBe(1);
-    expect(stderr).toMatch(/timed out after 300ms/);
+    expect(stderr).toMatch(/no bytes for 300ms/);
     expect(elapsedMs).toBeLessThan(20_000);
+  }, 30_000);
+
+  /**
+   * The reviewer hit this twice with total-time limits of 30s and then 60s: the
+   * 15MB vendor blobs are slow, not broken, and both caps turned a healthy shelf
+   * red. Progress — not elapsed time — is the signal.
+   */
+  test('a slow but progressing transfer is not mistaken for a stall', async () => {
+    const shelf = makeShelf();
+    const slowFile = `${CORE}/package/yos-0.1.14.tgz`;
+    const bytes = shelf.bodies.get(slowFile).length;
+    // Each byte arrives 40ms apart, so the whole file takes several times the
+    // stall window it is being judged against.
+    const { base } = await serve(shelf, { dribble: { [slowFile]: 40 } });
+    const { code, stdout } = await run(base, ['--stall-ms', '200']);
+    expect(bytes * 40).toBeGreaterThan(200 * 3);
+    expect(stdout).toContain('[shelf] PASS');
+    expect(code).toBe(0);
+  }, 30_000);
+
+  test('an endless trickle still ends, via the absolute backstop', async () => {
+    const shelf = makeShelf();
+    const slowFile = `${CORE}/package/yos-0.1.14.tgz`;
+    const { base } = await serve(shelf, { dribble: { [slowFile]: 400 } });
+    const { code, stderr } = await run(base, ['--stall-ms', '5000', '--max-file-seconds', '1', '--retries', '0']);
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/max-file-seconds 1/);
   }, 30_000);
 
   test('a transient 503 is retried and the run still passes', async () => {
@@ -412,5 +458,67 @@ describe('public shelf verifier: transport', () => {
     const { code } = await run(base, ['--retries', '5']);
     expect(code).toBe(1);
     expect(hits.get(`${CORE}/raw/v0.1.14/VERSION`)).toBe(1);
+  });
+});
+
+/**
+ * The runbook told operators not to omit the credentials, and then the rollback
+ * command in that same file omitted two of them (2026-08-11 review). A rule that
+ * only exists as prose gets forgotten exactly where it matters most, so the two
+ * moments whose answer gets quoted as a verdict — releasing, rolling back — now
+ * refuse to run under-credentialled.
+ */
+describe('public shelf verifier: sign-off mode', () => {
+  test('sign-off without the credentials refuses to run at all', async () => {
+    const { base, hits } = await serve(makeShelf());
+    const { code, stderr } = await run(base, ['--signoff']);
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/--expect-build-id/);
+    expect(stderr).toMatch(/--expect-index-sha256/);
+    expect(stderr).toMatch(/--expect-versions/);
+    // It must fail before touching the shelf: a missing credential is not
+    // something to discover after 923 downloads.
+    expect(hits.size).toBe(0);
+  });
+
+  test('sign-off names the one credential that is missing', async () => {
+    const shelf = makeShelf();
+    const { base } = await serve(shelf);
+    const { code, stderr } = await run(base, [
+      '--signoff',
+      '--expect-build-id', shelf.buildId,
+      '--expect-versions', 'yos=0.1.14',
+    ]);
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/--expect-index-sha256/);
+    expect(stderr).not.toMatch(/--expect-build-id/);
+  });
+
+  test('sample mode cannot be signed off', async () => {
+    const shelf = makeShelf();
+    const { base } = await serve(shelf);
+    const { code, stderr } = await new Promise((resolve) => {
+      execFile(process.execPath, [
+        SCRIPT, '--base-url', base, '--sample', '5', '--signoff',
+        '--expect-build-id', shelf.buildId,
+        '--expect-index-sha256', shelf.indexSha256,
+        '--expect-versions', 'yos=0.1.14',
+      ], { timeout: 30_000 }, (error, stdout, stderr) => resolve({ code: error ? error.code ?? 1 : 0, stdout, stderr }));
+    });
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/--full/);
+  });
+
+  test('a fully credentialled sign-off passes', async () => {
+    const shelf = makeShelf();
+    const { base } = await serve(shelf);
+    const { code, stdout } = await run(base, [
+      '--signoff',
+      '--expect-build-id', shelf.buildId,
+      '--expect-index-sha256', shelf.indexSha256,
+      '--expect-versions', 'yos=0.1.14,feishu=0.1.4',
+    ]);
+    expect(stdout).toContain('[shelf] PASS');
+    expect(code).toBe(0);
   });
 });

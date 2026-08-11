@@ -32,7 +32,12 @@
  *     [--full | --sample 40] [--concurrency 8] [--expect-build-id <id>]
  *     [--expect-index-sha256 <hex>]
  *     [--expect-versions yos=0.1.14,feishu=0.1.4,weixin=0.1.3]
- *     [--timeout-ms 60000] [--retries 2] [--json]
+ *     [--signoff] [--stall-ms 30000] [--max-file-seconds 600] [--retries 2] [--json]
+ *
+ *   --signoff is for the two moments the answer gets quoted as a verdict —
+ *   releasing and rolling back. It refuses to run at all unless --full and all
+ *   three credentials are present, so "the shelf is verified" cannot come from a
+ *   run that skipped one. Everyday checks and backup self-audits need none of it.
  *
  *   --local <dir> reads the same index.json from a directory instead of a URL,
  *   which is how a restored off-site backup gets checked: an archive that
@@ -56,11 +61,18 @@ import { newestReleaseTag, tagPrefixOf, tagVersion } from './lib/release-tags.mj
 
 const ALWAYS = ['index.json', 'capabilities.json', 'VERSIONS.md', 'index.html', 'install.sh'];
 
+/** The three credentials that make a run a sign-off rather than a look. */
+const SIGNOFF_REQUIRED = [
+  ['expectBuildId', '--expect-build-id'],
+  ['expectIndexSha256', '--expect-index-sha256'],
+  ['expectVersions', '--expect-versions'],
+];
+
 function parseArgs(argv) {
   const o = {
     baseUrl: 'https://yoyooai.com/dist', local: null, full: false, sample: 40, concurrency: 8,
     json: false, expectBuildId: null, expectIndexSha256: null, expectVersions: null,
-    timeoutMs: 60_000, retries: 2,
+    signoff: false, stallMs: 30_000, maxFileSeconds: 600, retries: 2,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -77,17 +89,33 @@ function parseArgs(argv) {
     else if (a === '--expect-build-id') o.expectBuildId = val();
     else if (a === '--expect-index-sha256') o.expectIndexSha256 = val().trim().toLowerCase();
     else if (a === '--expect-versions') o.expectVersions = val();
-    else if (a === '--timeout-ms') o.timeoutMs = Number(val());
+    else if (a === '--signoff') o.signoff = true;
+    else if (a === '--stall-ms') o.stallMs = Number(val());
+    else if (a === '--max-file-seconds') o.maxFileSeconds = Number(val());
     else if (a === '--retries') o.retries = Number(val());
     else if (a === '--json') o.json = true;
     else throw new Error(`unknown argument: ${a}`);
   }
   if (!Number.isInteger(o.sample) || o.sample < 1) throw new Error('--sample must be a positive integer');
   if (!Number.isInteger(o.concurrency) || o.concurrency < 1) throw new Error('--concurrency must be a positive integer');
-  if (!Number.isInteger(o.timeoutMs) || o.timeoutMs < 1) throw new Error('--timeout-ms must be a positive integer');
+  if (!Number.isInteger(o.stallMs) || o.stallMs < 1) throw new Error('--stall-ms must be a positive integer');
+  if (!Number.isInteger(o.maxFileSeconds) || o.maxFileSeconds < 1) throw new Error('--max-file-seconds must be a positive integer');
   if (!Number.isInteger(o.retries) || o.retries < 0) throw new Error('--retries must be a non-negative integer');
   if (o.expectIndexSha256 && !/^[0-9a-f]{64}$/.test(o.expectIndexSha256)) {
     throw new Error('--expect-index-sha256 must be a 64-character hex sha256');
+  }
+
+  // Sign-off is checked here, before a single byte is fetched: a run that is
+  // going to be quoted as "the shelf is verified" must not be able to reach a
+  // PASS with a credential missing. Prose asking people not to forget is what
+  // this replaces — the runbook said "别省这个参数" and the rollback command in
+  // that same file forgot two of them (2026-08-11 review).
+  if (o.signoff) {
+    const missing = SIGNOFF_REQUIRED.filter(([key]) => !o[key]).map(([, flag]) => flag);
+    if (!o.full) missing.push('--full');
+    if (missing.length > 0) {
+      throw new Error(`--signoff requires ${missing.join(', ')} — a sign-off with a missing credential is not a sign-off`);
+    }
   }
   return o;
 }
@@ -95,28 +123,67 @@ function parseArgs(argv) {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * One request, bounded. `fetch` without a signal has no timeout at all: a single
- * stalled connection during the 2026-08-11 review left a full-shelf run hanging
- * past 90 seconds with no output and no exit, and it had to be killed by hand.
- * A verifier that can hang is a verifier people start skipping.
+ * One request, bounded by progress rather than by total time.
+ *
+ * `fetch` without a signal has no timeout at all: one stalled connection left a
+ * full-shelf run silent past 90 seconds with no exit, killed by hand
+ * (2026-08-11). But a total-time limit is the wrong replacement — the shelf
+ * carries 15MB vendor blobs, and on a slow link those legitimately take
+ * minutes. A 30s then 60s total cap turned healthy large files red for the
+ * reviewer, twice. "Slow" and "dead" are different conditions and need
+ * different tests.
+ *
+ * So: the clock resets on every chunk that arrives. A transfer that is still
+ * moving is never interrupted; one that stops moving for `stallMs` is failed.
+ * `maxFileSeconds` is only a backstop against a trickle that never ends.
  *
  * Retries cover the transport (stall, reset, 5xx). A 4xx is not retried — a 404
  * stays a 404, and retrying it only makes the report slower to arrive.
  */
-async function fetchBuffer(url, { timeoutMs, retries, onRetry }) {
+async function fetchOnce(url, { stallMs, maxFileSeconds }) {
+  const controller = new AbortController();
+  let stallTimer = null;
+  const armStall = () => {
+    clearTimeout(stallTimer);
+    stallTimer = setTimeout(() => controller.abort(new Error(`no bytes for ${stallMs}ms`)), stallMs);
+  };
+  const capTimer = setTimeout(
+    () => controller.abort(new Error(`exceeded --max-file-seconds ${maxFileSeconds}`)),
+    maxFileSeconds * 1000,
+  );
+  armStall();
+  try {
+    const res = await fetch(url, { redirect: 'follow', signal: controller.signal });
+    if (!res.ok) {
+      const error = new Error(`HTTP ${res.status}`);
+      if (res.status >= 400 && res.status < 500) error.final = true;
+      throw error;
+    }
+    const reader = res.body.getReader();
+    const chunks = [];
+    while (true) {
+      armStall();
+      const { value, done } = await reader.read();
+      if (done) break;
+      chunks.push(Buffer.from(value));
+    }
+    return Buffer.concat(chunks);
+  } finally {
+    clearTimeout(stallTimer);
+    clearTimeout(capTimer);
+  }
+}
+
+async function fetchBuffer(url, { stallMs, maxFileSeconds, retries, onRetry }) {
   let lastError;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const res = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(timeoutMs) });
-      if (!res.ok) {
-        const error = new Error(`HTTP ${res.status}`);
-        if (res.status >= 400 && res.status < 500) error.final = true;
-        throw error;
-      }
-      return Buffer.from(await res.arrayBuffer());
+      return await fetchOnce(url, { stallMs, maxFileSeconds });
     } catch (error) {
       if (error.final) throw error;
-      lastError = error.name === 'TimeoutError' ? new Error(`timed out after ${timeoutMs}ms`) : error;
+      // An aborted fetch surfaces the reason we passed to abort(); older shapes
+      // surface a bare AbortError, so both are normalised to something readable.
+      lastError = error.name === 'AbortError' ? new Error(error.message || 'aborted') : error;
       if (attempt < retries) {
         onRetry?.(url, attempt + 1, lastError);
         await sleep(250 * (attempt + 1));
@@ -127,9 +194,12 @@ async function fetchBuffer(url, { timeoutMs, retries, onRetry }) {
 }
 
 /** One reader for both origins so a restored backup is judged by the same rules. */
-function makeReader({ local, baseUrl, timeoutMs, retries }, onRetry) {
+function makeReader({ local, baseUrl, stallMs, maxFileSeconds, retries }, onRetry) {
   if (!local) {
-    return { label: baseUrl, read: (p) => fetchBuffer(`${baseUrl}/${p}`, { timeoutMs, retries, onRetry }) };
+    return {
+      label: baseUrl,
+      read: (p) => fetchBuffer(`${baseUrl}/${p}`, { stallMs, maxFileSeconds, retries, onRetry }),
+    };
   }
   return {
     label: local,
@@ -405,6 +475,7 @@ async function main() {
     matchedFiles: matched,
     providers: providers.length,
     mode: options.full ? 'full' : 'sample',
+    signoff: options.signoff,
     retries: retried,
     problems,
     pass: problems.length === 0,

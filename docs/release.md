@@ -170,11 +170,28 @@ sha256sum /var/backups/yos-dist-$OLD-$STAMP.tar.gz \
 tar -tzf /var/backups/yos-dist-$OLD-$STAMP.tar.gz | wc -l    # 应是几百条以上
 tar -tzf /var/backups/yos-dist-$OLD-$STAMP.tar.gz | head -3   # 第一条必须是目录，不是 ->
 
-# ④ 推到另一台机器（--checksum 按内容比，不信时间戳）
+# ④ 记下旧货架的凭据，存成文件跟着备份一起走 —— 回退时要用，别指望人记笔记
+node scripts/verify-public-shelf.mjs --local "$BAK" --sample 1 --json \
+  > /var/backups/yos-dist-$OLD-$STAMP.shelf.json
+node -p 'const s=require("/var/backups/yos-dist-'$OLD'-'$STAMP'.shelf.json");
+  `old buildId=${s.buildId}\nold indexSha256=${s.indexSha256}`'
+
+# ⑤ 推到另一台机器（--checksum 按内容比，不信时间戳）
 rsync -av --checksum \
-  /var/backups/yos-dist-$OLD-$STAMP.tar.gz{,.sha256} \
+  /var/backups/yos-dist-$OLD-$STAMP.tar.gz{,.sha256,.shelf.json} \
   <备份机>:/srv/yos-dist-backups/
 ```
+
+**④ 那一步是为第 8 步准备的。** 回退之后要证明"线上现在确实是备份那一份"，
+就得有旧货架的 `buildId` 和 `index.json` 摘要。**这两个值必须在回退之前就存下来** ——
+等回退完再去量，量到的是回退结果本身，自己证明自己，什么也没证明。
+顺带这一步还会**自审一遍备份副本**（`--local` 逐个核哈希），
+所以它同时是"这份本地副本是完整的"的证据。
+
+⚠️ **④ 报红就停下**，别当成"文件已经写出来了就行"：它报红说明**旧货架本身
+或这份副本有问题**，这种时候不该继续发布。（`--json` 的字段名
+`buildId` / `indexSha256` 已实测存在；`--local` 这条路径由测试覆盖，
+但**在货架机上对真实生产备份跑 ④ 未实测** —— 货架机属于生产。）
 
 **恢复验证（必须在备份机上做，不能在货架机上做）** —— 备份没验过就等于没有：
 
@@ -250,11 +267,19 @@ readlink -f /srv/yos-dist               # 核验指向
 ```bash
 node scripts/verify-public-shelf.mjs \
   --base-url https://yoyooai.com/dist \
+  --signoff \
   --full \
   --expect-build-id <验收报告里的 buildId> \
   --expect-index-sha256 <第 4 步记下的 index.json 摘要> \
   --expect-versions yos=<x.y.z>,feishu=<x.y.z>,weixin=<x.y.z>
 ```
+
+**`--signoff` 是这一步的重点，不是装饰。** 带上它，三样凭据
+（buildId / index 摘要 / 各组件版本）**缺任何一个就直接拒跑**，
+而且**强制 `--full`**（抽查不能当签字）。加它的原因是这份手册自己犯过的错：
+前面写着"这两个参数别省"，而第 8 步的回退命令**当场就漏了两个**
+（2026-08-11 复核发现）。**写在文档里的规矩会被忘掉，尤其在最要紧的时候** ——
+所以现在由脚本拒绝，而不是由这段话提醒。日常抽查、备份自检不需要它。
 
 它按公网 `index.json` **把每个登记文件都下下来逐个核 sha256 和字节数**，
 外加这些结构检查（任何一项不过就 exit 1，**没有部分通过**）：
@@ -280,10 +305,19 @@ node scripts/verify-public-shelf.mjs \
 buildId 一字不变。所以必须**两个参数一起给**：`--expect-build-id` 卡"是哪次构建"，
 `--expect-index-sha256` 卡"清单一个字节没动过"。**两个都别省。**
 
-**网络参数**（`--timeout-ms` 默认 60000、`--retries` 默认 2）：单文件超时 +
-有限重试。加它的原因是实测踩过 —— 没有超时的 `fetch` 遇到一次抖动就**整跑挂死
-90 秒以上不退出，只能手杀**。重试只覆盖传输层（超时/连接断/5xx）；
-**4xx 不重试**，404 重试十次还是 404，只会让报告更晚到。
+**网络参数**：`--stall-ms`（默认 30000）+ `--max-file-seconds`（默认 600）
++ `--retries`（默认 2）。
+
+**判死的依据是"有没有进度"，不是"总共花了多久"** —— 这一点绕过两次弯才对：
+· 没有任何超时的 `fetch` 遇到一次抖动就**整跑挂死 90 秒以上不退出，只能手杀**
+· 改成"单文件总时长上限"之后，**健康的大文件被判成坏的**：货架上那几个
+  vendor 包是 **15MB 级**，慢网上本来就要几分钟，30 秒和 60 秒两个上限
+  都误报过（2026-08-11 两次实测）
+· 现在的规则：**只要还在往回吐字节，计时就重置**，连续 `--stall-ms` 一个字节
+  都没有才判死。`--max-file-seconds` 只是兜底，防"一秒一个字节耗到天亮"
+
+重试只覆盖传输层（卡死/连接断/5xx）；**4xx 不重试** ——
+404 重试十次还是 404，只会让报告更晚到。
 
 实测（2026-08-11 对当时的生产货架跑过）：**923/923 全部命中，约 34 秒**。
 放行必须用 `--full`；`--sample` 只是平时抽查，输出里会自己说明
@@ -305,13 +339,23 @@ readlink -f /srv/yos-dist
 mv /srv/yos-dist /srv/yos-dist.failed-$(date +%Y%m%d-%H%M)
 mv /srv/yos-dist.bak-<旧版本>-<STAMP> /srv/yos-dist
 
-# 回退后必须重跑第 7 步，拿旧版本号去卡
-node scripts/verify-public-shelf.mjs --full \
+# 回退后必须重跑第 7 步 —— 同样是签字级，三样凭据用【旧货架】那一套。
+# 旧的 buildId 与 index 摘要在第 5 步 ④ 已经存好，从那个文件读，不要凭记忆
+OLDID=$(node -p 'require("/var/backups/yos-dist-<旧版本>-<STAMP>.shelf.json").buildId')
+OLDSHA=$(node -p 'require("/var/backups/yos-dist-<旧版本>-<STAMP>.shelf.json").indexSha256')
+
+node scripts/verify-public-shelf.mjs --signoff --full \
+  --expect-build-id "$OLDID" \
+  --expect-index-sha256 "$OLDSHA" \
   --expect-versions yos=<旧版本>,feishu=<旧版本>,weixin=<旧版本>
 ```
 
 - **回退不是把命令跑完就算完，是第 7 步对旧版本重新过一遍才算完。**
   没重验的回退，等于把"现在线上是什么"这个问题又变成了猜。
+- 🔴 **回退核验只卡版本号是不够的**（这份手册第一版就只卡了版本号，
+  2026-08-11 复核抓出来）：版本号对得上，**不代表线上这份就是备份那一份** ——
+  可能是另一次构建、也可能是回退只完成了一半。所以**必须连 buildId 和
+  index 摘要一起卡**，也就是必须带 `--signoff`：它会在缺任何一项时拒跑。
 - 失败的那份**留着别删**（改名到 `.failed-*`），它是查原因的现场。
 - 本地副本也用不了的情况下，用第 5 步的站外备份恢复 ——
   恢复完先跑 `--local` 核一遍再换入，别把一份坏包换上线。
@@ -348,14 +392,16 @@ yos capability list                            # 能力目录客户端本地能�
 - **第 7 步**：`scripts/verify-public-shelf.mjs` 是随这份文件一起加的，
   2026-08-11 对当时的生产货架**实跑过 `--full`，923/923 命中**；
   它自己的失败路径由 `test/verify-public-shelf.test.js` 用本地假货架
-  逐条钉住（**24 条**：篡改、截断、空能力目录、掉标签、非 production、
+  逐条钉住（**30 条**：篡改、截断、空能力目录、掉标签、非 production、
   buildId 不符、组件版本不符、取不到、恢复副本完好/损坏，
-  加复核后补的 包/归档/always 文件/vendor 来源**漏登记**四条、
+  加第一轮复核后补的 包/归档/always 文件/vendor 来源**漏登记**四条、
   清单摘要不符与相符各一条、**货架有更新版本**、组件标签未镜像、
-  组件被更新标签盖住、超时不挂死、5xx 重试后通过、4xx 不重试），
+  组件被更新标签盖住、卡死不挂死、5xx 重试后通过、4xx 不重试，
+  再加第二轮复核后补的 **慢但在传的大文件不许误判**、涓流被兜底终止、
+  签字缺凭据拒跑（全缺/缺一项/抽查模式）与全凭据通过），
   **该红的每条都必须 exit 1**。
   第一版的三条假绿（漏登记、版本认字面、无超时）是**先用这组测试打红旧版脚本
-  复现出来的**（旧版 12 条红、新版 24 条全绿），不是照着改法反推的测试。
+  复现出来的**（旧版 12 条红），不是照着改法反推的测试。
 - **第 5 步的符号链接坑**：2026-08-11 在本地同构布局上**实测过**
   （`/srv/yos-dist` 造成链接 → `cp -a` 得到的是链接 → tar 里只有一条
   绝对路径链接 → 目标路径挪走后解包内容为空，122 字节）。
