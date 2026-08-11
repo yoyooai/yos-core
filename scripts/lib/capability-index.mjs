@@ -1,24 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import semver from 'semver';
 
 import { parseCapabilitySkill } from '../../cli/lib/capability-schema.js';
 import {
   readDeclaredNodeRange,
   readDeclaredYosContract,
 } from '../../cli/lib/component-engines.js';
-
-function tagVersion(tag) {
-  const match = String(tag).match(/(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$/);
-  return match?.[1] ?? null;
-}
-
-function newestReleaseTag(tags, prefix) {
-  const expectedPrefix = prefix ? `${prefix}-v` : 'v';
-  return [...tags]
-    .filter((tag) => tag.startsWith(expectedPrefix) && semver.valid(tagVersion(tag)))
-    .sort((a, b) => semver.rcompare(tagVersion(a), tagVersion(b)) || a.localeCompare(b, 'en'))[0] ?? null;
-}
+// One definition of "newest released tag", shared with the shelf verifier.
+import { newestReleaseTag, tagVersion } from './release-tags.mjs';
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
