@@ -182,6 +182,34 @@ function post(secretId, secretKey, payload, region) {
   });
 }
 
+const CREDENTIAL_FIELDS = ['TmpSecretId', 'TmpSecretKey', 'Token'];
+
+/**
+ * What may be said out loud about a response that did not yield a usable
+ * credential.
+ *
+ * The response body may not. A *partial* credential is still a credential: STS
+ * answering with a key and a token but no id used to take the "no credentials"
+ * branch, which printed the body — putting the secret this whole script exists
+ * to keep off the shelf machine into a terminal, a log, and any screenshot of
+ * either (小C's 2026-08-11 review, second round).
+ *
+ * A failure branch is the worst place to be relaxed about secrets, because it is
+ * the branch whose output someone pastes to a colleague. So what comes out is
+ * only ever an error code, a RequestId, and *field names* — enough to ask
+ * Tencent what happened, and never a value.
+ */
+function safeFailure(response) {
+  const envelope = response?.Response ?? {};
+  const parts = [];
+  const code = envelope.Error?.Code;
+  if (code) parts.push(`code ${code}`);
+  const missing = CREDENTIAL_FIELDS.filter((field) => !envelope.Credentials?.[field]);
+  if (missing.length) parts.push(`missing ${missing.join(', ')}`);
+  parts.push(`RequestId ${envelope.RequestId || '(absent)'}`);
+  return parts.join('; ');
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const secretId = process.env.TENCENTCLOUD_SECRET_ID;
@@ -196,20 +224,33 @@ async function main() {
     version: '2.0',
     statement: [
       {
-        // Objects: only under this run's prefix.
+        // Everything this credential may do, and only under this run's prefix —
+        // listing included.
+        //
+        // Listing used to be granted bucket-wide. That came from a half-finished
+        // measurement on 2026-08-11: scoping GetBucket to `<bucket>/` returned
+        // 403, so it was widened to `<bucket>/*` and the failure was written up
+        // as "COS resolves GetBucket against the object namespace". The form
+        // that was never tried is the one that works. Measured against the real
+        // service on 2026-08-12 (小C's review asked for the comparison):
+        //
+        //   GetBucket on `<bucket>/`         → 403 on every list
+        //   GetBucket on `<bucket>/<prefix>*` → 200, and *only* for that prefix
+        //   GetBucket on `<bucket>/*`         → 200 for everything
+        //
+        // With the prefix form, a token minted for `rollback/x/` lists
+        // `rollback/x/` and anything deeper, and gets 403 on `shelf/`, on a bare
+        // bucket listing, and on `rollback` without the slash. So the narrowing
+        // is real: a leaked token can no longer enumerate every other backup in
+        // the bucket, which is most of what the bucket holds.
         effect: 'allow',
-        action: ['name/cos:PutObject', 'name/cos:GetObject', 'name/cos:HeadObject'],
+        action: [
+          'name/cos:PutObject',
+          'name/cos:GetObject',
+          'name/cos:HeadObject',
+          'name/cos:GetBucket',
+        ],
         resource: [`${qcsBase}/${options.prefix}*`],
-      },
-      {
-        // Listing is a read, and shelf-offsite.mjs always lists with a prefix.
-        // COS resolves GetBucket against the object namespace, so this has to be
-        // `/*`, not `/` — with `/` it returns 403 on the list and `restore` cannot
-        // even see what to fetch (measured against the real service 2026-08-11).
-        // The narrowing that matters is on the writes above.
-        effect: 'allow',
-        action: ['name/cos:GetBucket'],
-        resource: [`${qcsBase}/*`],
       },
     ],
   };
@@ -221,14 +262,16 @@ async function main() {
     options.region,
   );
 
-  const error = response?.Response?.Error;
-  if (error) {
-    console.error(`error: STS refused (${error.Code}): ${error.Message}`);
+  if (response?.Response?.Error) {
+    console.error(`error: STS refused — ${safeFailure(response)}`);
     process.exit(1);
   }
   const credentials = response?.Response?.Credentials;
-  if (!credentials?.TmpSecretId) {
-    console.error(`error: STS returned no credentials: ${JSON.stringify(response).slice(0, 300)}`);
+  // All three, not just the id: a response short one field used to sail past
+  // this check and print `export COS_SECRET_KEY='undefined'`, which is a working
+  // command that produces a broken environment.
+  if (CREDENTIAL_FIELDS.some((field) => !credentials?.[field])) {
+    console.error(`error: STS returned no usable credential — ${safeFailure(response)}`);
     process.exit(1);
   }
 

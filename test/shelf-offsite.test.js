@@ -194,6 +194,75 @@ describe('upload', () => {
     expect(store.get('p/install-latest.sh').toString()).toBe('#!/bin/sh\necho hi\n');
   });
 
+  /*
+   * 小C's 2026-08-11 review, second round: nothing checked file size before the
+   * PUT. This uploader only does single PUTs and reads each file wholly into
+   * memory, so an oversized file fails — but it fails *late*, after part of the
+   * backup is already written, and with whatever error COS or Node happens to
+   * raise. The operator is then left holding a half-written prefix and an opaque
+   * message, at the moment they were trying to secure a shelf.
+   *
+   * The size that matters is not a guess: 5 GiB is COS's single-PUT ceiling, and
+   * past it the returned ETag stops being a plain MD5 — which is the one thing
+   * this script uses to prove the bytes arrived.
+   */
+  test('a file past the single-PUT ceiling stops the run before anything is written', async () => {
+    const { port, store } = await fakeCos();
+    const dir = makeTree();
+    fs.writeFileSync(path.join(dir, 'huge.tgz'), crypto.randomBytes(4096));
+    const result = await run(
+      ['upload', '--root', dir, ...BUCKET, '--prefix', 'p/', '--max-file-bytes', '3000'],
+      { port },
+    );
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('huge.tgz');
+    expect(result.stderr).toMatch(/4096/);
+    // refused up front — not half a backup plus an error
+    expect(store.size).toBe(0);
+  });
+
+  test('files at the ceiling still upload', async () => {
+    const { port } = await fakeCos();
+    const dir = tmpDir();
+    fs.writeFileSync(path.join(dir, 'exact.bin'), crypto.randomBytes(2048));
+    const result = await run(
+      ['upload', '--root', dir, ...BUCKET, '--prefix', 'p/', '--max-file-bytes', '2048', '--json'],
+      { port },
+    );
+
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout).uploadedVerified).toBe(1);
+  });
+
+  /*
+   * The default is asserted rather than left to a comment: it is the number that
+   * decides whether the ETag this script trusts is still an MD5, so a quiet edit
+   * to it has to show up as a red test.
+   */
+  test('the default ceiling is COS\'s single-PUT limit', async () => {
+    const { port } = await fakeCos();
+    const dir = makeTree();
+    const result = await run(['upload', '--root', dir, ...BUCKET, '--prefix', 'p/', '--json'], { port });
+
+    expect(JSON.parse(result.stdout).maxFileBytes).toBe(5 * 1024 ** 3);
+  });
+
+  test('a nonsense ceiling is refused instead of being coerced', async () => {
+    const { port, store } = await fakeCos();
+    const dir = makeTree();
+    for (const bad of ['0', '-1', 'lots']) {
+      // eslint-disable-next-line no-await-in-loop
+      const result = await run(
+        ['upload', '--root', dir, ...BUCKET, '--prefix', 'p/', '--max-file-bytes', bad],
+        { port },
+      );
+      expect(result.code).toBe(1);
+      expect(result.stderr).toMatch(/--max-file-bytes/);
+    }
+    expect(store.size).toBe(0);
+  });
+
   test('an ETag that does not match the local MD5 fails the run', async () => {
     const { port } = await fakeCos({ etagOverride: 'f'.repeat(32) });
     const dir = makeTree();
@@ -389,6 +458,23 @@ describe('restore', () => {
 
     expect(result.code).toBe(1);
     expect(result.stderr).toMatch(/not a single-PUT MD5|cannot be verified/i);
+  });
+
+  test('an object larger than the ceiling is refused instead of pulled into memory', async () => {
+    const { port } = await fakeCos();
+    const dir = tmpDir();
+    fs.writeFileSync(path.join(dir, 'big.bin'), crypto.randomBytes(4096));
+    await run(['upload', '--root', dir, ...BUCKET, '--prefix', 'p/'], { port });
+
+    const dest = path.join(tmpDir(), 'restored');
+    const result = await run(
+      ['restore', '--dest', dest, ...BUCKET, '--prefix', 'p/', '--max-file-bytes', '1024'],
+      { port },
+    );
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toMatch(/--max-file-bytes/);
+    expect(fs.existsSync(path.join(dest, 'big.bin'))).toBe(false);
   });
 });
 

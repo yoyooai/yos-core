@@ -132,26 +132,50 @@ describe('the policy it asks for', () => {
   });
 
   /*
-   * Measured against the real service on 2026-08-11: scoping GetBucket to
-   * `<bucket>/` returns 403 on the list, so `restore` cannot even see what to
-   * fetch. It has to be `<bucket>/*`. That looks like the broad form and invites
-   * being "tightened" back by anyone reading the policy without running it —
-   * which is why the distinction is pinned here rather than only explained in a
-   * comment. The narrowing that protects other backups is on the writes.
+   * Listing is scoped to the prefix too, and this is the assertion that keeps it
+   * that way.
+   *
+   * The history matters, because the wrong answer here looks reasonable. On
+   * 2026-08-11 GetBucket was scoped to `<bucket>/`, which returned 403 on every
+   * list; the fix was to widen it to `<bucket>/*` and write the failure up as
+   * "COS resolves GetBucket against the object namespace". The form nobody tried
+   * was `<bucket>/<prefix>*`. Measured against the real service on 2026-08-12:
+   *
+   *   `<bucket>/`          → 403     `<bucket>/<prefix>*` → 200 (that prefix only)
+   *   `<bucket>/*`         → 200 (everything)
+   *
+   * and a token scoped to `rollback/*` gets 403 listing `shelf/`, 403 on a bare
+   * bucket listing, and 200 on prefixes *deeper* than its scope — which is what
+   * `shelf-offsite.mjs` needs, since one token covers `<RUN>shelf/` and
+   * `<RUN>meta/` both.
    */
-  test('listing is bucket-wide on purpose, while writing stays prefix-scoped', async () => {
+  test('listing is scoped to the prefix, not the bucket', async () => {
     const port = await fakeSts();
     await run([...BASE, '--prefix', 'rollback/run-1/'], { port });
 
     const policy = JSON.parse(lastRequest.body.Policy);
     const listStatement = policy.statement.find((s) => s.action.includes('name/cos:GetBucket'));
-    const writeStatement = policy.statement.find((s) => s.action.includes('name/cos:PutObject'));
 
     expect(listStatement.resource).toEqual([
-      'qcs::cos:ap-test:uid/1234567890:backups-1234567890/*',
+      'qcs::cos:ap-test:uid/1234567890:backups-1234567890/rollback/run-1/*',
     ]);
-    expect(listStatement.action).not.toContain('name/cos:PutObject');
-    expect(writeStatement.resource[0]).toContain('/rollback/run-1/');
+    // the bucket-wide form is what must not come back
+    for (const statement of policy.statement) {
+      expect(statement.resource).not.toContain(
+        'qcs::cos:ap-test:uid/1234567890:backups-1234567890/*',
+      );
+    }
+  });
+
+  test('nothing in the policy reaches outside the prefix', async () => {
+    const port = await fakeSts();
+    await run([...BASE, '--prefix', 'rollback/run-1/'], { port });
+
+    const policy = JSON.parse(lastRequest.body.Policy);
+    const scoped = 'qcs::cos:ap-test:uid/1234567890:backups-1234567890/rollback/run-1/*';
+    expect(policy.statement.flatMap((s) => s.resource)).toEqual(
+      policy.statement.flatMap((s) => s.resource).map(() => scoped),
+    );
   });
 
   test('the requested lifetime is passed through', async () => {
@@ -217,6 +241,75 @@ describe('refusals', () => {
 
     expect(result.code).toBe(1);
     expect(result.stdout).not.toMatch(/export COS_SECRET_ID/);
+  });
+
+  /*
+   * 小C's 2026-08-11 review, second round. The refusal path above used to print
+   * the response body to help whoever was debugging it — and a *partial*
+   * credential is still a credential. STS answering with a key and a token but no
+   * id took the "no credentials" branch and echoed both to stderr, where they
+   * land in a terminal, a CI log, and any screenshot of either.
+   *
+   * A failure branch is the worst place to relax about secrets: it is the branch
+   * whose output someone pastes to a colleague.
+   */
+  const LEAKABLE = {
+    TmpSecretKey: 'SHOULD-NEVER-BE-PRINTED-KEY',
+    Token: 'SHOULD-NEVER-BE-PRINTED-TOKEN',
+  };
+
+  test('a partial credential is refused without echoing the secret it did carry', async () => {
+    const port = await fakeSts({
+      respondWith: { Response: { Credentials: { ...LEAKABLE }, RequestId: 'req-9' } },
+    });
+    const result = await run([...BASE, '--prefix', 'p/'], { port });
+
+    expect(result.code).toBe(1);
+    const everythingWritten = result.stdout + result.stderr;
+    expect(everythingWritten).not.toContain(LEAKABLE.TmpSecretKey);
+    expect(everythingWritten).not.toContain(LEAKABLE.Token);
+    // it still has to be diagnosable: which fields were absent, and the id that
+    // lets Tencent be asked what happened
+    expect(result.stderr).toMatch(/req-9/);
+    expect(result.stderr).toMatch(/TmpSecretId/);
+  });
+
+  test('a credential missing only the token is refused, not exported as "undefined"', async () => {
+    const port = await fakeSts({
+      respondWith: {
+        Response: {
+          Credentials: { TmpSecretId: 'tmp-id', TmpSecretKey: LEAKABLE.TmpSecretKey },
+          RequestId: 'req-10',
+        },
+      },
+    });
+    const result = await run([...BASE, '--prefix', 'p/'], { port });
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).not.toMatch(/export COS_/);
+    expect(result.stdout + result.stderr).not.toContain(LEAKABLE.TmpSecretKey);
+    expect(result.stderr).toMatch(/Token/);
+  });
+
+  test('an STS error carries the code and RequestId, and nothing from the body', async () => {
+    const port = await fakeSts({
+      respondWith: {
+        Response: {
+          Error: { Code: 'AuthFailure.SignatureFailure', Message: 'signature expired' },
+          // a service that returns both an Error and a stray credential must not
+          // get the credential printed by the error branch either
+          Credentials: { ...LEAKABLE },
+          RequestId: 'req-11',
+        },
+      },
+    });
+    const result = await run([...BASE, '--prefix', 'p/'], { port });
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toMatch(/AuthFailure\.SignatureFailure/);
+    expect(result.stderr).toMatch(/req-11/);
+    expect(result.stdout + result.stderr).not.toContain(LEAKABLE.TmpSecretKey);
+    expect(result.stdout + result.stderr).not.toContain(LEAKABLE.Token);
   });
 
   test('the test-only endpoint hook refuses to point anywhere but loopback', async () => {

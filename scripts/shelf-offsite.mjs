@@ -37,9 +37,13 @@
  *   node scripts/shelf-offsite.mjs restore --dest <dir>  --bucket B --region R --prefix P/
  *   node scripts/shelf-offsite.mjs verify  --root <dir>  --bucket B --region R --prefix P/
  *
- *   --concurrency N   parallel transfers (default 8)
- *   --follow-symlinks upload the target's bytes instead of stopping
- *   --json            machine-readable report on stdout
+ *   --concurrency N     parallel transfers (default 8)
+ *   --follow-symlinks   upload the target's bytes instead of stopping
+ *   --max-file-bytes N  refuse anything larger (default 5 GiB, COS's single-PUT
+ *                       ceiling — see SINGLE_PUT_LIMIT); checked across the whole
+ *                       tree before the first PUT, so an oversized file cannot
+ *                       leave half a backup behind
+ *   --json              machine-readable report on stdout
  *
  * Credentials come from the environment, never from flags (a flag lands in the
  * shell history and in `ps`):
@@ -66,12 +70,22 @@ import https from 'node:https';
 
 const COMMANDS = new Set(['upload', 'restore', 'verify']);
 
+/**
+ * COS's ceiling for a single PUT. Past it an upload has to be multipart, and a
+ * multipart object's ETag is not a plain MD5 — which is the one thing this
+ * script uses to prove the bytes arrived. So this is not a tuning knob for
+ * memory or patience; it is the size at which this script's proof stops
+ * existing, and it refuses rather than uploading something it cannot check.
+ */
+const SINGLE_PUT_LIMIT = 5 * 1024 ** 3;
+
 function usage(msg) {
   if (msg) console.error(`error: ${msg}\n`);
   console.error(
     'usage: node scripts/shelf-offsite.mjs <upload|restore|verify> \\\n' +
       '         --bucket <name> --region <region> --prefix <prefix/> \\\n' +
-      '         (--root <dir> | --dest <dir>) [--concurrency N] [--follow-symlinks] [--json]\n\n' +
+      '         (--root <dir> | --dest <dir>) [--concurrency N] [--follow-symlinks]\n' +
+      '         [--max-file-bytes N] [--json]\n\n' +
       'credentials: COS_SECRET_ID, COS_SECRET_KEY, [COS_SESSION_TOKEN]',
   );
   process.exit(1);
@@ -80,7 +94,13 @@ function usage(msg) {
 function parseArgs(argv) {
   const command = argv[0];
   if (!COMMANDS.has(command)) usage(`unknown command ${JSON.stringify(command ?? '')}`);
-  const options = { command, concurrency: 8, followSymlinks: false, json: false };
+  const options = {
+    command,
+    concurrency: 8,
+    followSymlinks: false,
+    json: false,
+    maxFileBytes: SINGLE_PUT_LIMIT,
+  };
   for (let i = 1; i < argv.length; i += 1) {
     const arg = argv[i];
     const next = () => {
@@ -96,6 +116,7 @@ function parseArgs(argv) {
       case '--root': options.root = next(); break;
       case '--dest': options.dest = next(); break;
       case '--concurrency': options.concurrency = Number(next()); break;
+      case '--max-file-bytes': options.maxFileBytes = Number(next()); break;
       case '--follow-symlinks': options.followSymlinks = true; break;
       case '--json': options.json = true; break;
       default: usage(`unknown flag ${arg}`);
@@ -107,6 +128,9 @@ function parseArgs(argv) {
   if (!options.prefix.endsWith('/')) options.prefix += '/';
   if (!Number.isInteger(options.concurrency) || options.concurrency < 1) {
     usage('--concurrency must be a positive integer');
+  }
+  if (!Number.isInteger(options.maxFileBytes) || options.maxFileBytes < 1) {
+    usage('--max-file-bytes must be a positive integer');
   }
   if (command === 'restore') {
     if (!options.dest) usage('restore needs --dest');
@@ -368,6 +392,28 @@ async function upload(creds, options) {
     process.exit(1);
   }
 
+  // Size is checked for the whole tree before a single object is written. Left
+  // to happen per-file mid-run, an oversized file fails late — after part of the
+  // backup is up — and with whatever error COS or Node raises, leaving a
+  // half-written prefix at the moment someone was trying to secure a shelf.
+  const oversized = [];
+  for (const file of files) {
+    const { size } = await fsp.stat(file);
+    if (size > options.maxFileBytes) {
+      oversized.push({ file: path.relative(realRoot, file), size });
+    }
+  }
+  if (oversized.length) {
+    console.error(
+      `error: ${oversized.length} file(s) exceed --max-file-bytes ${options.maxFileBytes}. ` +
+        'This uploader only does single PUTs, and past that size the returned ETag is no ' +
+        'longer a plain MD5 — the backup could be written but not proven. Nothing was ' +
+        'uploaded.\n' +
+        oversized.slice(0, 10).map((o) => `  ${o.file} (${o.size} bytes)`).join('\n'),
+    );
+    process.exit(1);
+  }
+
   const endpoint = endpointFor(options);
   const verified = [];
   const problems = [];
@@ -399,6 +445,7 @@ async function upload(creds, options) {
     prefix: options.prefix,
     filesWalked: files.length,
     uploadedVerified: verified.length,
+    maxFileBytes: options.maxFileBytes,
     symlinks,
     emptyDirs,
     problems,
@@ -519,6 +566,18 @@ async function restore(creds, options) {
       // means every object with an unexpected ETag is written unverified and
       // counted as restored — the check silently excuses exactly the cases it
       // was there to catch.
+      // Same ceiling as upload, for the same reason plus one: every object is
+      // held whole in memory here, so an object larger than this script would
+      // ever have written is refused rather than being pulled down blind.
+      if (object.size > options.maxFileBytes) {
+        problems.push({
+          key: object.key,
+          error:
+            `${object.size} bytes exceeds --max-file-bytes ${options.maxFileBytes}; ` +
+            'this restorer holds each object in memory and only writes single-PUT objects',
+        });
+        return;
+      }
       if (!/^[0-9a-f]{32}$/.test(object.etag)) {
         problems.push({
           key: object.key,

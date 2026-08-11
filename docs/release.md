@@ -48,6 +48,7 @@
 **发布主干必须就是被验收的那一个提交对象，不是一个和它内容相同的新提交。**
 
 ```bash
+# @machine 发布机
 git checkout main
 git merge --ff-only <已验收提交>
 git push origin main:main
@@ -85,6 +86,7 @@ OS、飞书、微信是**三个独立组件，各自独立发布**。
 provider 就还在。（这也是第 3 步保留数必须够大的原因。）
 
 ```bash
+# @machine 发布机
 # 打（-a 带注解，留下是谁在什么时候发的）
 git tag -a v<x.y.z> -m "release <x.y.z>" <已验收提交>
 git push origin refs/tags/v<x.y.z>
@@ -102,6 +104,7 @@ git ls-remote origin 'refs/tags/v<x.y.z>*'
 ### 第 3 步 · 在货架机本地构建（**必须带 vendor**）
 
 ```bash
+# @machine 货架机
 node scripts/build-dist.mjs --output <构建目录> \
   --production \
   --tags 50 \
@@ -147,7 +150,18 @@ node scripts/build-dist.mjs --output <构建目录> \
 > 是一根**悬空链接**，货架内容一个字节都没有。**这种包看起来毫无异样**
 > ——坏包 283B 比好包 266B 还大，**包大小不能当健康信号**。
 
+**这一步跨两台机器。** 两边的 shell 变量互不相通，所以下面每一段都标了机器，
+跨机的值必须**显式抄过去** —— 这份手册第一版就是在这里破的：
+控制机那段用了 `$OLD` / `$BAK`，而那两个变量只在货架机上存在，
+照着敲会展开成空串，`--root` 后面什么都没有。
+
+| 机器 | 它有什么 | 它在这一步做什么 |
+|---|---|---|
+| **货架机** | 生产货架 | 本地副本、打包、自审出凭据 |
+| **控制机** | **长期密钥（只在这里）** | 换临时钥匙，驱动货架机推站外 |
+
 ```bash
+# @machine 货架机
 STAMP=$(date +%Y%m%d-%H%M)
 OLD=<旧版本>
 BAK=/srv/yos-dist.bak-$OLD-$STAMP
@@ -183,41 +197,86 @@ node -e 'const s=require(process.argv[1]);
   console.log(`self-audit: ${s.matchedFiles}/${s.registeredFiles} 命中`);' "$CRED" \
   || exit 1
 
-# ⑤ 推到站外对象存储 —— 存的是目录树，不是 tar 包
-#    ⚠️ 这一步跨两台机器。换钥匙在控制机，推货在货架机 —— 别在一台上跑完。
+# ⑤ 凭据单独放一个目录，跟着备份一起出站。
+#    不塞进副本目录 —— 塞进去 verify 会报"备份里多出一个货架上没有的文件"
+METADIR=/var/backups/yos-dist-$OLD-$STAMP.meta
+mkdir -p "$METADIR"
+cp "$CRED" "$METADIR/shelf.json"
+
+# ⑥ 把这几个值抄到控制机 —— 两台机器的变量不共享，下一段全靠它们
+echo "OLD=$OLD  STAMP=$STAMP  BAK=$BAK  METADIR=$METADIR"
 ```
 
-**【控制机】** 长期密钥只存在这里，**不要登到货架机上执行这一段**：
+**【控制机】** 长期密钥只存在这里，**这一段不要登到货架机上跑**
+（它要读长期密钥，在货架机上跑就等于把长期密钥送进生产）：
 
 ```bash
+# @machine 控制机
+# ① 把上一段最后那行 echo 的值逐字抄进来 —— 不要凭记忆重算 $STAMP，
+#    时间戳差一分钟，下面每一个路径都会指向不存在的东西
+OLD=<抄自货架机>
+STAMP=<抄自货架机>
+BAK=/srv/yos-dist.bak-$OLD-$STAMP           # 货架机上的路径
+METADIR=/var/backups/yos-dist-$OLD-$STAMP.meta   # 同上
+SHELF=<货架机 ssh 目标>                      # 例：ubuntu@<货架机地址>
+REPO=<货架机上本仓库的目录>                   # shelf-offsite.mjs 在这里面
+
 # 桶名/地域是我们的基础设施，不写在这份公开仓的文件里，见内部发布记录
 export COS_BUCKET=<桶名>  COS_REGION=<地域>
-PREFIX="rollback/yos-dist.bak-$OLD-$STAMP/"
 
-# 换一把弱钥匙：只能写这一个前缀、没有删除权、自己会过期
+# ② 一次备份 = 一个 RUN 前缀，底下两个子前缀：货架树 + 凭据。
+#    钥匙按前缀发，一把只开一个前缀 —— 所以 RUN 必须是两者的共同父级，
+#    否则这一步要发两把钥匙。
+RUN="rollback/$OLD-$STAMP/"
+
+# ③ 换一把弱钥匙：只能写这个 RUN 前缀、没有删除权、自己会过期
 node scripts/cos-sts-token.mjs --bucket "$COS_BUCKET" --region "$COS_REGION" \
-  --prefix "$PREFIX" > /tmp/cos-creds.sh
-```
+  --prefix "$RUN" > /tmp/cos-creds.sh || exit 1
 
-**【货架机】** 把那三个 `COS_*` 变量**经管道喂进去**，不要落盘到货架机：
+# ④ 钥匙经管道喂进货架机执行，不落盘到货架机。
+#    下面是不带引号的 heredoc：所有 $变量 都在控制机这边就展开成字面值，
+#    送到货架机的是一段已经填好路径的脚本。货架机上没有这些变量，
+#    正因为如此，上面那几行赋值一个都不能少。
+{
+  cat /tmp/cos-creds.sh
+  cat <<EOF
+set -euo pipefail
+cd $REPO
 
-```bash
-cat /tmp/cos-creds.sh | ssh <货架机> 'eval "$(cat)" && \
-  cd <仓库目录> && \
-  node scripts/shelf-offsite.mjs upload --root '"$BAK"' \
-    --bucket '"$COS_BUCKET"' --region '"$COS_REGION"' --prefix '"$PREFIX"' && \
-  node scripts/shelf-offsite.mjs verify --root '"$BAK"' \
-    --bucket '"$COS_BUCKET"' --region '"$COS_REGION"' --prefix '"$PREFIX"''
+# 货架树：先推，再从存储那边反过来数
+node scripts/shelf-offsite.mjs upload --root $BAK \
+  --bucket $COS_BUCKET --region $COS_REGION --prefix ${RUN}shelf/
+node scripts/shelf-offsite.mjs verify --root $BAK \
+  --bucket $COS_BUCKET --region $COS_REGION --prefix ${RUN}shelf/
 
-# ④ 那份凭据也要跟着走：第 8 步回退时要靠它证明线上就是这一份。
-# 放在同级的 -meta/ 前缀，不塞进副本目录 —— 塞进去会让 verify 报"多出一个文件"
-# （它需要自己的一把钥匙：钥匙按前缀发，一把只开一个前缀）
+# 凭据：第 8 步回退要靠它证明"线上就是备份这一份"，所以它也必须出站，
+# 而且同样要 verify —— 一份没回读过的凭据，等于没有凭据
+node scripts/shelf-offsite.mjs upload --root $METADIR \
+  --bucket $COS_BUCKET --region $COS_REGION --prefix ${RUN}meta/
+node scripts/shelf-offsite.mjs verify --root $METADIR \
+  --bucket $COS_BUCKET --region $COS_REGION --prefix ${RUN}meta/
+EOF
+} | ssh "$SHELF" bash -s || { echo "站外备份失败，停止发布"; rm -f /tmp/cos-creds.sh; exit 1; }
+
+# ⑤ 钥匙用完就删；它本来就会自己过期，但没有理由多留一分钟
+rm -f /tmp/cos-creds.sh
+
+# ⑥ 把 RUN 前缀写进本轮发布记录 —— 第 8 步回退时唯一找得回备份的线索
+echo "off-site RUN prefix: $RUN"
 ```
 
 🔴 **为什么换钥匙必须在控制机**：这份手册第一版把 `cos-sts-token.mjs` 写在货架机那段里，
 **而它要读长期密钥** —— 等于要求把长期密钥放到货架机上，正好推翻旁边那句
 "长期密钥不需要出现在货架机上"。**文档自己写的规矩，被文档自己写的命令破掉**，
 照着做的人不会察觉。2026-08-11 复核抓出（同一轮里，这是第二次出现"文字和命令各说各话"）。
+
+🔴 **每个命令块开头那行 `# @machine` 不是注释，是被测试卡住的。**
+改完第一版之后，控制机那段仍然引用着 `$OLD` / `$BAK` —— 而这两个变量**只在货架机上存在**，
+照着敲会展开成空串，`--root` 后面什么都没有，`upload` 对着空参数报一个看不懂的错。
+**跨机流程最容易破的地方不是命令本身，是变量在哪台机器上有值。**
+所以现在由 `test/release-doc.test.js` 逐块检查：每个命令块必须声明机器，
+块里用到的每个变量必须在**同一台机器**的本块或前面的块里赋过值。
+漏一个就报红 —— 这条规矩不再靠人读文档时自己发现。
 
 🔴 **`upload` 之后必须紧跟 `verify`。** `upload` 报告的是"我写出去的每个字节都对得上"，
 `verify` 是**从存储那边反过来数**：备份里少了货架上的文件，或者多出货架上没有的文件，
@@ -257,19 +316,34 @@ cat /tmp/cos-creds.sh | ssh <货架机> 'eval "$(cat)" && \
 **恢复验证（必须在另一台机器上做，不能在货架机上做）** —— 备份没验过就等于没有：
 
 ```bash
-# 在一台不是货架机的机器上。先决条件见下面那条 🔴
-PREFIX="rollback/yos-dist.bak-$OLD-$STAMP/"
+# @machine 恢复机
+# 一台不是货架机的机器。先决条件见下面那条 🔴。
+# 长期密钥在控制机上；这里要么由控制机把临时钥匙送过来，要么这台就是控制机本身。
+OLD=<抄自货架机>
+STAMP=<抄自货架机>
+export COS_BUCKET=<桶名>  COS_REGION=<地域>
+RUN="rollback/$OLD-$STAMP/"
+
 eval "$(node scripts/cos-sts-token.mjs --bucket "$COS_BUCKET" --region "$COS_REGION" \
-          --prefix "$PREFIX")"
+          --prefix "$RUN")"
 
 # --dest 必须是不存在或空的目录。往有东西的目录里恢复，旧文件会留下来，
 # 恢复出来的就是"备份 + 本来就在这儿的东西"的混合物，而事后没有任何检查分得出来。
 node scripts/shelf-offsite.mjs restore --dest /tmp/restore-$STAMP \
   --bucket "$COS_BUCKET" --region "$COS_REGION" \
-  --prefix "$PREFIX"     # 空前缀会报红，不会"恢复了 0 个文件"然后成功
+  --prefix "${RUN}shelf/"   # 空前缀会报红，不会"恢复了 0 个文件"然后成功
 
 # 逐个文件按它自己的 index.json 核 —— 能拉下来 ≠ 每个字节都对
 node scripts/verify-public-shelf.mjs --local /tmp/restore-$STAMP --full
+
+# 凭据也拉一份下来核对：第 8 步要用它当回退基准，
+# 而"存进去了"和"取得回来"是两件事
+node scripts/shelf-offsite.mjs restore --dest /tmp/restore-$STAMP-meta \
+  --bucket "$COS_BUCKET" --region "$COS_REGION" --prefix "${RUN}meta/"
+node -e 'const s=require(process.argv[1]);
+  if (s.pass !== true) { console.error("站外那份凭据来自一次失败的自审，停"); process.exit(1); }
+  console.log(`off-site cred OK: buildId=${s.buildId} indexSha256=${s.indexSha256}`);' \
+  /tmp/restore-$STAMP-meta/shelf.json
 ```
 
 🔴 **`restore` 会拒绝三件事，都是"看起来恢复成功了"的样子**（2026-08-11 复核补上，
@@ -336,6 +410,7 @@ node scripts/verify-public-shelf.mjs --local /tmp/restore-$STAMP --full
 内核保证没有中间态）：
 
 ```bash
+# @machine 货架机
 NEW=/srv/yos-dist.<新版本>-$(date +%Y%m%d-%H%M)
 
 # 一次性改造（只做一次）：把 /srv/yos-dist 从真目录变成符号链接
@@ -369,6 +444,7 @@ readlink -f /srv/yos-dist               # 核验指向
 证明客户实际拿到的就是验过的那份。**有脚本，不要手点：**
 
 ```bash
+# @machine 发布机
 node scripts/verify-public-shelf.mjs \
   --base-url https://yoyooai.com/dist \
   --signoff \
@@ -433,19 +509,34 @@ buildId 一字不变。所以必须**两个参数一起给**：`--expect-build-i
 
 第 6、7 步任何一项对不上，立刻回退，不要在线上边修边试：
 
+**【货架机】** 换回去：
+
 ```bash
+# @machine 货架机
+OLD=<旧版本>
+STAMP=<第 5 步那个时间戳>
+BAK=/srv/yos-dist.bak-$OLD-$STAMP
+
 # 符号链接布局（第 6 步改造之后）：把指向换回旧目录，同样是原子的
-ln -sfn /srv/yos-dist.bak-<旧版本>-<STAMP> /srv/yos-dist.staging
+ln -sfn $BAK /srv/yos-dist.staging
 mv -T /srv/yos-dist.staging /srv/yos-dist
 readlink -f /srv/yos-dist
 
 # 真目录布局（还没改造）：整目录换回，失败的那份改名留着
 mv /srv/yos-dist /srv/yos-dist.failed-$(date +%Y%m%d-%H%M)
-mv /srv/yos-dist.bak-<旧版本>-<STAMP> /srv/yos-dist
+mv $BAK /srv/yos-dist
+```
 
-# 回退后必须重跑第 7 步 —— 同样是签字级，三样凭据用【旧货架】那一套。
-# 旧的 buildId 与 index 摘要在第 5 步 ④ 已经存好，从那个文件读，不要凭记忆
-CRED=/var/backups/yos-dist-<旧版本>-<STAMP>.shelf.json
+**【发布机】** 回退后必须重跑第 7 步 —— 同样是签字级，三样凭据用**旧货架**那一套：
+
+```bash
+# @machine 发布机
+OLD=<旧版本>
+STAMP=<第 5 步那个时间戳>
+
+# 旧的 buildId 与 index 摘要在第 5 步 ④ 已经存好，从那个文件读，不要凭记忆。
+# 这份文件在【货架机】上；货架机整台没了，就从站外那份取（见下）
+CRED=/var/backups/yos-dist-$OLD-$STAMP.shelf.json
 
 # 先断言这份凭据来自一次通过的自审，再用它 —— 否则等于拿没验过的东西当基准
 node -e 'const s=require(process.argv[1]); if (s.pass !== true) {
@@ -459,6 +550,10 @@ node scripts/verify-public-shelf.mjs --signoff --full \
   --expect-index-sha256 "$OLDSHA" \
   --expect-versions yos=<旧版本>,feishu=<旧版本>,weixin=<旧版本>
 ```
+
+**货架机整台没了的情况**：`$CRED` 跟着机器一起没了 —— 这正是第 5 步要把它
+一起推到站外 `${RUN}meta/` 的原因。按第 5 步「恢复验证」那段把
+`${RUN}meta/` 恢复下来，`shelf.json` 就是同一份凭据，`OLDID` / `OLDSHA` 照样取得到。
 
 - **回退不是把命令跑完就算完，是第 7 步对旧版本重新过一遍才算完。**
   没重验的回退，等于把"现在线上是什么"这个问题又变成了猜。
@@ -475,6 +570,7 @@ node scripts/verify-public-shelf.mjs --signoff --full \
 **`install.sh` 返回 200 不等于装得上。** 必须在一台干净机器上走完整客户路径：
 
 ```bash
+# @machine 客户机
 curl -fsSL https://yoyooai.com/install.sh | bash -s -- -y
 yos --version                                  # 应等于本次发布的 OS 版本
 pm2 list                                       # 四个服务 online、restarts=0
@@ -499,23 +595,56 @@ yos capability list                            # 能力目录客户端本地能�
 第 5 步推的是**旧**货架（回退用）。终验过了，新货架才值得进站外备份 ——
 早推可能把一份坏货当成救命稻草存起来。
 
+**结构和第 5 步⑤ 完全一样，只是推的是新货架、前缀换成 `shelf/`。**
+同样跨两台机器，同样是控制机拿钥匙、驱动货架机推。
+
+**【货架机】** 先把真实目录解析出来（`/srv/yos-dist` 是符号链接，直接推会只推到那根链接）：
+
 ```bash
-PREFIX="shelf/<新版本>-$(date +%Y%m%d)/"
-# 同第 5 步：这一句在控制机跑（它要读长期密钥），把 COS_* 送到货架机再执行下面两条
-eval "$(node scripts/cos-sts-token.mjs --bucket "$COS_BUCKET" --region "$COS_REGION" \
-          --prefix "$PREFIX")"
+# @machine 货架机
 REAL=$(readlink -f /srv/yos-dist)
+test -d "$REAL" && test ! -L "$REAL" || { echo "REAL 不是真目录，停下查布局"; exit 1; }
+echo "REAL=$REAL"     # 抄到控制机
+```
 
-node scripts/shelf-offsite.mjs upload --root "$REAL" \
-  --bucket "$COS_BUCKET" --region "$COS_REGION" --prefix "$PREFIX" || exit 1
+**【控制机】**
 
+```bash
+# @machine 控制机
+NEWVER=<新版本>
+REAL=<抄自货架机>
+SHELF=<货架机 ssh 目标>
+REPO=<货架机上本仓库的目录>
+export COS_BUCKET=<桶名>  COS_REGION=<地域>
+
+RUN="shelf/$NEWVER-$(date +%Y%m%d)/"
+
+node scripts/cos-sts-token.mjs --bucket "$COS_BUCKET" --region "$COS_REGION" \
+  --prefix "$RUN" > /tmp/cos-creds.sh || exit 1
+
+{
+  cat /tmp/cos-creds.sh
+  cat <<EOF
+set -euo pipefail
+cd $REPO
+node scripts/shelf-offsite.mjs upload --root $REAL \
+  --bucket $COS_BUCKET --region $COS_REGION --prefix $RUN
 # 立刻回读核一遍：upload 说它写成功了，verify 是从存储那边反过来数
-node scripts/shelf-offsite.mjs verify --root "$REAL" \
-  --bucket "$COS_BUCKET" --region "$COS_REGION" --prefix "$PREFIX" || exit 1
+node scripts/shelf-offsite.mjs verify --root $REAL \
+  --bucket $COS_BUCKET --region $COS_REGION --prefix $RUN
+EOF
+} | ssh "$SHELF" bash -s || { echo "新货架站外备份失败"; rm -f /tmp/cos-creds.sh; exit 1; }
+
+rm -f /tmp/cos-creds.sh
+echo "off-site RUN prefix: $RUN"     # 写进本轮发布记录
 ```
 
 `verify` 两个方向都查：备份里少了货架上的文件，和备份里多出货架上没有的文件。
 **只数个数只能发现前一种。**
+
+**这一步没有 `meta/` 子前缀** —— 新货架的 buildId 与 index 摘要就是第 4 步量的那一套，
+已经在本轮发布记录里，不需要再存一份。第 5 步要存，是因为**旧**货架的那两个值
+除了那次自审之外没有别的来源。
 
 ---
 
@@ -562,6 +691,21 @@ node scripts/shelf-offsite.mjs verify --root "$REAL" \
   报红、本地删文件报"备份里有货架上没有"、空前缀 `restore` 报红、错桶报红。
   **在货架机上执行的部分只有只读的 `verify`**（对已推上去的备份核 924/924），
   `upload` 是从货架机推出去的 —— 只读货架、只写桶，没有改动生产上的任何东西。
+- **第 5 步⑤ 与第 10 步的双机流程（2026-08-12 补）**：控制机那段命令由
+  `test/release-doc.test.js` **从这份文件里原样取出来真跑一遍**（假 STS + 假 COS，
+  只把 `ssh` 换成本机 `bash -s`，且每一处替换都断言"恰好命中一次"，
+  否则文档改动会让这个测试自己报红而不是悄悄测了别的东西）。
+  跑通的内容：一把钥匙覆盖 `shelf/` 与 `meta/` 两个子前缀、货架树与凭据都上传并回读、
+  钥匙用完即删、上传失败时整段中止且不再传凭据。
+  **另外每个命令块的 `# @machine` 与变量闭合由同一个测试逐块检查** ——
+  这份文件两轮复核里犯的是同一个错（跨机变量），现在它是机器判的。
+- **临时钥匙的前缀权限（2026-08-12 对真 COS 实测，`GetBucket` 收窄）**：
+  `<桶>/` → 403；`<桶>/<前缀>*` → **200，且只对该前缀**；`<桶>/*` → 200（全桶可列）。
+  用 `rollback/*` 的钥匙实测：列 `shelf/` **403**、列整桶 **403**、
+  列比自己更深的前缀 **200**（这正是一把钥匙同时覆盖 `shelf/`+`meta/` 的依据）。
+  ⇒ 列举权限已从全桶收到本次前缀。**08-11 那次"收窄失败、只能全桶"的结论是半截的**：
+  当时只试了 `<桶>/` 这一种写法。收窄后又用真 COS 跑了一遍
+  upload→verify→restore（2 文件，恢复物与源逐字节相同，探针对象已删除）。
 - **第 5~6、8 步在货架机上的其余部分（打包/符号链接切换/回退）
   不是本文件作者亲手执行的** —— 货架机属于生产，未获授权不碰。
   命令形态出自 0.1.4~0.1.14 各次实际上架记录与 `rename(2)` 的语义，

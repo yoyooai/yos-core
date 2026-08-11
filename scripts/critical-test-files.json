@@ -218,12 +218,28 @@
     },
     {
       "path": "test/shelf-offsite.test.js",
-      "minimumTests": 20
+      "minimumTests": 25
     },
     {
       "path": "test/cos-sts-token.test.js",
+      "minimumTests": 18
+    },
+    {
+      "path": "scripts/shelf-offsite.mjs"
+    },
+    {
+      "path": "scripts/cos-sts-token.mjs"
+    },
+    {
+      "path": "scripts/release-doc-policy.mjs"
+    },
+    {
+      "path": "docs/release.md"
+    },
+    {
+      "path": "test/release-doc.test.js",
       "minimumTests": 14
     }
   ],
-  "approvedDigest": "6e4188dcea9ea062860ae6e72e4d0d53bde3884a8190a6527807a99d98e23329"
+  "approvedDigest": "8062f671e591f68a93cb21cfbbe90485c1f659a48a811aa00f6fa1989c280867"
 }
