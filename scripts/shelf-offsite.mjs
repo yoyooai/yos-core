@@ -50,14 +50,18 @@
  * `scripts/cos-sts-token.mjs`. The shelf machine is production; a long-lived
  * key does not need to be there for a copy to happen.
  *
+ * `COS_ENDPOINT` is a test-only hook (see `test/shelf-offsite.test.js`) and is
+ * restricted to loopback http, so no typo in it can send a real backup
+ * somewhere else.
+ *
  * Exit code is 0 only when every file was transferred and verified. There is no
  * partial pass.
  */
 
 import crypto from 'node:crypto';
-import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import http from 'node:http';
 import https from 'node:https';
 
 const COMMANDS = new Set(['upload', 'restore', 'verify']);
@@ -167,7 +171,8 @@ function encodeKey(key) {
   return `/${key.split('/').map(encodeRfc3986).join('/')}`;
 }
 
-function request(creds, { method, host, uri, params = {}, body = null, expectStatus = 200 }) {
+function request(creds, { method, endpoint, uri, params = {}, body = null, expectStatus = 200 }) {
+  const { transport, host } = endpoint;
   const headers = { Host: host };
   const authorization = buildAuthorization(creds, method, uri, params, headers);
   const query = Object.entries(params)
@@ -175,10 +180,11 @@ function request(creds, { method, host, uri, params = {}, body = null, expectSta
     .join('&');
 
   return new Promise((resolve, reject) => {
-    const req = https.request(
+    const req = transport.request(
       {
         method,
-        host,
+        host: endpoint.hostname,
+        port: endpoint.port,
         path: uri + (query ? `?${query}` : ''),
         headers: {
           Host: host,
@@ -228,7 +234,39 @@ async function withRetries(label, fn, attempts = 3) {
 }
 
 const md5 = (buffer) => crypto.createHash('md5').update(buffer).digest('hex');
-const hostFor = (options) => `${options.bucket}.cos.${options.region}.myqcloud.com`;
+
+/**
+ * Where the requests go. `COS_ENDPOINT` exists so the tests can point this at a
+ * fake COS and exercise the failure paths for real — and it is restricted to
+ * loopback http, so it can never quietly redirect an actual backup somewhere
+ * else. A test-only hook that a typo could aim at production is not a hook worth
+ * having.
+ */
+function endpointFor(options) {
+  const override = process.env.COS_ENDPOINT;
+  if (!override) {
+    const host = `${options.bucket}.cos.${options.region}.myqcloud.com`;
+    return { transport: https, host, hostname: host, port: undefined };
+  }
+  let url;
+  try {
+    url = new URL(override);
+  } catch {
+    throw new Error(`COS_ENDPOINT is not a URL: ${override}`);
+  }
+  if (url.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(url.hostname)) {
+    throw new Error(
+      'COS_ENDPOINT is a test-only hook and must be http://127.0.0.1[:port] or ' +
+        `http://localhost[:port] — got ${override}`,
+    );
+  }
+  return {
+    transport: http,
+    host: url.port ? `${url.hostname}:${url.port}` : url.hostname,
+    hostname: url.hostname,
+    port: url.port || undefined,
+  };
+}
 
 /* ------------------------------------------------------------------ walk --
  * Returns files plus anything that would make the copy quietly incomplete:
@@ -288,14 +326,14 @@ function unescapeXml(value) {
 }
 
 async function listObjects(creds, options) {
-  const host = hostFor(options);
+  const endpoint = endpointFor(options);
   const found = [];
   let marker = '';
   for (;;) {
     const params = { prefix: options.prefix, 'max-keys': '1000' };
     if (marker) params.marker = marker;
     const res = await withRetries('list objects', () =>
-      request(creds, { method: 'GET', host, uri: '/', params }),
+      request(creds, { method: 'GET', endpoint, uri: '/', params }),
     );
     const xml = res.body.toString('utf8');
     for (const [, block] of xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)) {
@@ -330,7 +368,7 @@ async function upload(creds, options) {
     process.exit(1);
   }
 
-  const host = hostFor(options);
+  const endpoint = endpointFor(options);
   const verified = [];
   const problems = [];
 
@@ -340,7 +378,7 @@ async function upload(creds, options) {
       const body = await fsp.readFile(file);
       const local = md5(body);
       const res = await withRetries(`put ${key}`, () =>
-        request(creds, { method: 'PUT', host, uri: encodeKey(key), body }),
+        request(creds, { method: 'PUT', endpoint, uri: encodeKey(key), body }),
       );
       const etag = String(res.headers.etag || '').replace(/"/g, '');
       if (!/^[0-9a-f]{32}$/.test(etag)) {
@@ -420,7 +458,7 @@ async function restore(creds, options) {
     };
   }
 
-  const host = hostFor(options);
+  const endpoint = endpointFor(options);
   const dest = path.resolve(options.dest);
   await fsp.mkdir(dest, { recursive: true });
   const problems = [];
@@ -436,7 +474,7 @@ async function restore(creds, options) {
     }
     try {
       const res = await withRetries(`get ${object.key}`, () =>
-        request(creds, { method: 'GET', host, uri: encodeKey(object.key) }),
+        request(creds, { method: 'GET', endpoint, uri: encodeKey(object.key) }),
       );
       const got = md5(res.body);
       if (/^[0-9a-f]{32}$/.test(object.etag) && got !== object.etag) {
