@@ -187,6 +187,16 @@ describe('version catalog (rendering)', () => {
     const twice = renderCatalogMarkdown(fakeIndex(), { baseUrl: BASE, registry: REGISTRY });
     expect(once).toBe(twice);
   });
+
+  test('labels the deterministic source timestamp honestly', () => {
+    const markdown = renderCatalogMarkdown(fakeIndex(), {
+      baseUrl: BASE,
+      registry: REGISTRY,
+      builtAt: '2026-08-10T08:00:00Z',
+    });
+    expect(markdown).toContain('_源码基准时间：2026-08-10T08:00:00Z_');
+    expect(markdown).not.toContain('出货时间');
+  });
 });
 
 describe('version catalog (published by the build)', () => {

@@ -238,7 +238,7 @@ export function renderCatalogMarkdown(index, { baseUrl, registry, builtAt } = {}
   out.push('这张表不是手写的 —— 它和货是同一次生成的，数据来自镜像自己的 `index.json`（真实 tag、真实制品）。');
   out.push('所以它不可能和实际货架说的不一样。GitHub 上的仓是源码正本和备胎，**不是取货口**。');
   out.push('');
-  if (builtAt) out.push(`_出货时间：${builtAt}_`);
+  if (builtAt) out.push(`_源码基准时间：${builtAt}_`);
   out.push('');
 
   out.push('## 最新版本');
