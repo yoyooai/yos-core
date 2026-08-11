@@ -14,7 +14,10 @@
  *     --repo yoyooai/yos-core=. \
  *     --repo yoyooai/yos-components=../yos-components \
  *     [--tags 50] [--default-branch main] [--vendor-cache <dir>]
+ *     [--base-url https://yoyooai.com/dist]
  *     [--skip-vendor] [--allow-missing-vendor] [--allow-tag-drop]
+ *
+ * Release procedure (which order, what to re-check, how to roll back): docs/release.md
  *
  * Output layout (under <dir>):
  *   install.sh                                   installer from the newest core release
