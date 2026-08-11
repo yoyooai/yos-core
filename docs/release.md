@@ -183,11 +183,36 @@ node -e 'const s=require(process.argv[1]);
   console.log(`self-audit: ${s.matchedFiles}/${s.registeredFiles} 命中`);' "$CRED" \
   || exit 1
 
-# ⑤ 推到另一台机器（--checksum 按内容比，不信时间戳）
-rsync -av --checksum \
-  /var/backups/yos-dist-$OLD-$STAMP.tar.gz{,.sha256} "$CRED" \
-  <备份机>:/srv/yos-dist-backups/
+# ⑤ 推到站外对象存储 —— 存的是目录树，不是 tar 包
+#    桶名/地域是我们的基础设施，不写在这份公开仓的文件里，见内部发布记录
+export COS_BUCKET=<桶名>  COS_REGION=<地域>
+
+#    临时凭据：只能写这一个桶、没有删除权、自己会过期。
+#    长期密钥不需要出现在货架机上 —— 货架机是生产，出现过就得当它泄漏过。
+eval "$(node scripts/cos-sts-token.mjs --bucket "$COS_BUCKET" --region "$COS_REGION")"
+
+node scripts/shelf-offsite.mjs upload --root "$BAK" \
+  --bucket "$COS_BUCKET" --region "$COS_REGION" \
+  --prefix "rollback/$(basename "$BAK")/" || { echo "站外备份没成，停"; exit 1; }
+
+#    ④ 那份凭据也要跟着走：第 8 步回退时要靠它证明线上就是这一份。
+#    放在同级的 -meta/ 前缀，不塞进副本目录 —— 塞进去会让 verify 报"多出一个文件"
+mkdir -p /tmp/offsite-meta && cp "$CRED" /tmp/offsite-meta/
+node scripts/shelf-offsite.mjs upload --root /tmp/offsite-meta \
+  --bucket "$COS_BUCKET" --region "$COS_REGION" \
+  --prefix "rollback/$(basename "$BAK")-meta/" || exit 1
 ```
+
+**为什么站外存目录树而不是 tar 包**：tar 包只能整包校验，坏一个字节就整包不可信，
+而且恢复时必须先落地几百 M 再解开。目录树可以**逐个文件比哈希**（`verify` 子命令做的
+就是这件事），恢复出来还能**直接喂给 `verify-public-shelf.mjs --local`**。
+本地那份 tar（②）仍然要打 —— 它服务的是"同机快速回退"，两者用途不同。
+
+**`upload` 会在三种情况下报红而不是"看起来成功"**：目录里有符号链接（不加
+`--follow-symlinks` 就停 —— 早先那版 python 上传器在这里是**静默跳过**的，
+真有符号链接就会少备份恰好那些文件而照报成功）；某个对象的 ETag 与本地 MD5 对不上；
+以及返回的 ETag 不是单次 PUT 的 32 位 MD5。空目录会**点名列出** —— 对象存储存不了
+空目录，恢复回来时它们不会在，这一点必须是明说的，不能让 `restore` 悄悄少给。
 
 **④ 那一步是为第 8 步准备的。** 回退之后要证明"线上现在确实是备份那一份"，
 就得有旧货架的 `buildId` 和 `index.json` 摘要。**这两个值必须在回退之前就存下来** ——
@@ -209,31 +234,57 @@ rsync -av --checksum \
 `--local --full` 抓缺文件由测试钉住。但**在货架机上对真实生产备份跑 ④ 未实测** ——
 货架机属于生产。）
 
-**恢复验证（必须在备份机上做，不能在货架机上做）** —— 备份没验过就等于没有：
+**恢复验证（必须在另一台机器上做，不能在货架机上做）** —— 备份没验过就等于没有：
 
 ```bash
-cd /srv/yos-dist-backups
-sha256sum -c yos-dist-$OLD-$STAMP.tar.gz.sha256   # 包本身没坏
-mkdir -p /tmp/restore && tar -xzf yos-dist-$OLD-$STAMP.tar.gz -C /tmp/restore
+# 在一台不是货架机的机器上。先决条件见下面那条 🔴
+eval "$(node scripts/cos-sts-token.mjs --bucket "$COS_BUCKET" --region "$COS_REGION")"
 
-# 解出来的必须是真目录。是链接就说明打包时踩了上面那个坑
-test ! -L /tmp/restore/yos-dist.bak-$OLD-$STAMP \
-  || { echo "包里只有一根链接，这份备份是空的"; exit 1; }
+node scripts/shelf-offsite.mjs restore --dest /tmp/restore \
+  --bucket "$COS_BUCKET" --region "$COS_REGION" \
+  --prefix "rollback/yos-dist.bak-$OLD-$STAMP/"     # 空前缀会报红，不会"恢复了 0 个文件"然后成功
 
-# 逐个文件按它自己的 index.json 核 —— 能解开 ≠ 每个字节都还在
-node scripts/verify-public-shelf.mjs --local /tmp/restore/yos-dist.bak-$OLD-$STAMP --full
+# 逐个文件按它自己的 index.json 核 —— 能拉下来 ≠ 每个字节都对
+node scripts/verify-public-shelf.mjs --local /tmp/restore --full
 ```
+
+🔴 **恢复机的先决条件，出事那天没时间现查**：`restore` 只用 Node 内置模块，
+一台装了 Node 的空机器就够；但**紧接着的 `verify-public-shelf.mjs` 需要 `semver`**
+（经 `scripts/lib/release-tags.mjs`）。2026-08-11 演练时目标机是出厂状态的空机，
+**连 Node 都没有** —— 装 Node 与备好 `semver` 都得算进恢复时间里。
+把依赖预先备在恢复机上，比出事当天现连 npm 源可靠。
 
 - ⚠️ **为什么恢复演练不能在货架机上做**：货架机上那条绝对路径是存在的，
   所以即使包里只有一根链接，`--local` 也会顺着链接读到真货架、**报 PASS**。
   2026-08-11 实测确认过这个假通过。在备份机上做才有意义 ——
   那台机器没有这条路径，链接立刻悬空报红。
+  换成对象存储之后这条**依然成立**，只是理由多了一层：货架机上跑恢复，
+  验的可能是本机本来就有的东西，而且**这么验永远回答不了真正的问题** ——
+  "货架机整台没了，另一台机器能不能重建它"。那个问题只有在另一台机器上才问得出口。
 - 本地副本用来**快速回退**；站外备份用来**扛住货架机本身出事**。
   只有本地副本等于没有备份 —— 机器没了，回滚副本跟着一起没。
 - **`tar` 能解开不代表内容没缺。** 上面最后一条命令是唯一能证明
   "这份备份真能拿来恢复"的做法，`--local` 就是为它加的。
-- 站外备份要记下**存放位置**和**包的 sha256**，写进本轮发布记录。
+- 站外备份要记下**桶、前缀、对象数**，写进本轮发布记录 —— 对象数是下次
+  `verify` 唯一能对照的基准。
 - 两份备份都保留到下一个版本终验通过之后再清。
+
+**2026-08-11 首次全程演练（这一节以前只是方案，现在是实测）**：
+把生产货架 924 个文件推进对象存储，再到**一台出厂状态的空机**上 `restore`
+（924/924，逐个哈希，2 分 33 秒）→ `verify-public-shelf.mjs --local --full`
+**923/923 命中，buildId 与 `index.json` 摘要跟生产逐字相同** → 把恢复出来的目录
+用 nginx 挂在**回环地址**上（`http://127.0.0.1:8080/dist`，装机脚本明确允许回环，
+所以演练不必让任何东西上公网）→ 用客户原命令装。
+
+**装出来的是 `0.1.14` + 飞书 `0.1.4` + 微信 `0.1.3`，与生产一致**，且 nginx
+访问日志逐条坐实取货确实来自这份恢复物：核心包 `yos-0.1.14.tgz`、vendor
+`better-sqlite3-v12.6.2`、`feishu-v0.1.4.tar.gz`、`weixin-v0.1.3.tar.gz`。
+
+⚠️ **演练里差点被自己骗过去的一处**：第一次装是在一个**当天下午装过 YOS 的用户**下跑的，
+`install.sh` 复用了已有组件，访问日志里**根本没有组件请求** —— 只看"装成功了"
+就会把"组件也能从备份恢复"算进结论，而它当时并没有被验证。换成一个干净用户重跑，
+组件包的请求才真的出现在日志里。**装机成功不等于每一件东西都来自你以为的那个来源；
+日志才是来源的证据。**
 
 ### 第 6 步 · 原子切换
 
@@ -400,6 +451,34 @@ yos capability list                            # 能力目录客户端本地能�
 > 直接跑 `yos` 会报 command not found。用 `bash -lic "yos ..."`。
 > 这是测试方法的坑，不是装机失败 —— 别误判。
 
+> ⚠️ **在一台装过 YOS 的机器上验，等于什么都没验。** `install.sh` 会复用已有组件，
+> `yos add` 直接跳过下载 —— 装机照样"成功"，但那几个组件根本没从货架取过。
+> 2026-08-11 演练里就这么被骗过一次，是查货架访问日志才发现的。
+> 干净机器拿不到时，退而求其次用一个**全新用户**，并**核对货架访问日志里
+> 确实出现了这次的组件包请求**。
+
+### 第 10 步 · 把新货架也推站外（否则备份永远差一个版本）
+
+第 5 步推的是**旧**货架（回退用）。终验过了，新货架才值得进站外备份 ——
+早推可能把一份坏货当成救命稻草存起来。
+
+```bash
+eval "$(node scripts/cos-sts-token.mjs --bucket "$COS_BUCKET" --region "$COS_REGION")"
+REAL=$(readlink -f /srv/yos-dist)
+
+node scripts/shelf-offsite.mjs upload --root "$REAL" \
+  --bucket "$COS_BUCKET" --region "$COS_REGION" \
+  --prefix "shelf/<新版本>-$(date +%Y%m%d)/" || exit 1
+
+# 立刻回读核一遍：upload 说它写成功了，verify 是从存储那边反过来数
+node scripts/shelf-offsite.mjs verify --root "$REAL" \
+  --bucket "$COS_BUCKET" --region "$COS_REGION" \
+  --prefix "shelf/<新版本>-$(date +%Y%m%d)/" || exit 1
+```
+
+`verify` 两个方向都查：备份里少了货架上的文件，和备份里多出货架上没有的文件。
+**只数个数只能发现前一种。**
+
 ---
 
 ## 三、这份文件的证据来源
@@ -435,7 +514,17 @@ yos capability list                            # 能力目录客户端本地能�
   四服务 online，`yos capability list` 认出两个渠道）。
 - **第 1~2 步的核指向命令**：本地实测过（`ls-remote` 的
   `refs/tags/...^{}` 解引用行为、push 后远端指向核对）。
-- **第 5~6、8 步在货架机上的部分（打包/推备份机/符号链接切换/回退）
+- **第 5 步⑤ 与第 10 步的站外备份、以及恢复验证**：2026-08-11 苏白批准后
+  **全程实跑过**（`scripts/shelf-offsite.mjs` / `scripts/cos-sts-token.mjs`
+  随本次一起加）。生产货架 924 文件推入对象存储并逐个核 ETag；到一台**出厂状态
+  空机**上 `restore` 924/924；`verify-public-shelf.mjs --local --full` 923/923，
+  buildId 与 `index.json` 摘要同生产逐字相同；再用客户原命令从这份恢复物装出
+  `0.1.14`+飞书 `0.1.4`+微信 `0.1.3`，取货来源由货架访问日志逐条坐实。
+  两个脚本的失败路径都单独打红过：符号链接不加开关即停、篡改一个字节 `verify`
+  报红、本地删文件报"备份里有货架上没有"、空前缀 `restore` 报红、错桶报红。
+  **在货架机上执行的部分只有只读的 `verify`**（对已推上去的备份核 924/924），
+  `upload` 是从货架机推出去的 —— 只读货架、只写桶，没有改动生产上的任何东西。
+- **第 5~6、8 步在货架机上的其余部分（打包/符号链接切换/回退）
   不是本文件作者亲手执行的** —— 货架机属于生产，未获授权不碰。
   命令形态出自 0.1.4~0.1.14 各次实际上架记录与 `rename(2)` 的语义，
   第 6 步那三条 nginx 前置条件**是待核项不是结论**。
