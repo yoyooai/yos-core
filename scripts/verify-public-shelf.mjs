@@ -37,7 +37,10 @@
  *   --signoff is for the two moments the answer gets quoted as a verdict —
  *   releasing and rolling back. It refuses to run at all unless --full and all
  *   three credentials are present, so "the shelf is verified" cannot come from a
- *   run that skipped one. Everyday checks and backup self-audits need none of it.
+ *   run that skipped one; and it refuses once it can see the catalog unless
+ *   --expect-versions names the core plus every provider the shelf serves,
+ *   because a flag that is merely present covers nothing it does not mention.
+ *   Everyday checks and backup self-audits need none of it.
  *
  *   --local <dir> reads the same index.json from a directory instead of a URL,
  *   which is how a restored off-site backup gets checked: an archive that
@@ -327,11 +330,37 @@ async function mapLimit(items, limit, fn) {
  * its line — a provider pinned to a tag that a newer tag has superseded means
  * the catalog and the shelf disagree about what is current.
  */
-async function checkVersions(options, { index, providers, reader, note }) {
-  const wanted = new Map(options.expectVersions.split(',').map((pair) => {
+export function parseExpectedVersions(spec) {
+  return new Map(String(spec).split(',').map((pair) => {
     const [name, version] = pair.split('=');
     return [name.trim(), (version ?? '').trim()];
   }));
+}
+
+/**
+ * Under sign-off, the expectation has to name everything the shelf serves.
+ *
+ * Requiring `--expect-versions` to be *present* was not enough: a shelf with two
+ * providers signed off while the flag named only one of them (2026-08-11
+ * review). The unnamed provider was then covered by nothing at all — the flag
+ * was satisfied, and the second channel could have been any version.
+ *
+ * @returns {string[]} what the expectation fails to cover
+ */
+export function versionCoverageGaps(wanted, providers) {
+  const gaps = [];
+  if (!wanted.has('yos')) gaps.push('yos (the core version) is not named in --expect-versions');
+  const named = new Set(wanted.keys());
+  for (const registryName of new Set(providers.map((p) => p.registryName))) {
+    if (!named.has(registryName)) {
+      gaps.push(`provider ${registryName} is on the shelf but not named in --expect-versions`);
+    }
+  }
+  return gaps;
+}
+
+async function checkVersions(options, { index, providers, reader, note }) {
+  const wanted = parseExpectedVersions(options.expectVersions);
 
   const coreWanted = wanted.get('yos');
   if (coreWanted) {
@@ -428,6 +457,19 @@ async function main() {
   const providers = (caps.capabilities ?? []).flatMap((c) => c.providers ?? []);
   if (providers.length === 0) note('capabilities.json has no providers');
   if (caps.buildId !== index.buildId) note(`capabilities.json buildId ${caps.buildId} != index.json buildId ${index.buildId}`);
+
+  // Sign-off preconditions, checked on the three small files fetched so far and
+  // before the bulk download: an expectation that does not name everything the
+  // shelf serves is not worth 900 downloads to discover.
+  if (options.signoff) {
+    const gaps = versionCoverageGaps(parseExpectedVersions(options.expectVersions), providers);
+    if (gaps.length > 0) {
+      for (const gap of gaps) note(`--signoff: ${gap}`);
+      if (options.json) console.log(JSON.stringify({ source: reader.label, signoff: true, problems, pass: false }, null, 2));
+      else console.error('[shelf] FAILED before downloading anything else: the expectation does not cover this shelf');
+      process.exit(1);
+    }
+  }
 
   if (options.expectVersions) await checkVersions(options, { index, providers, reader, note });
 

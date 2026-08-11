@@ -170,28 +170,44 @@ sha256sum /var/backups/yos-dist-$OLD-$STAMP.tar.gz \
 tar -tzf /var/backups/yos-dist-$OLD-$STAMP.tar.gz | wc -l    # 应是几百条以上
 tar -tzf /var/backups/yos-dist-$OLD-$STAMP.tar.gz | head -3   # 第一条必须是目录，不是 ->
 
-# ④ 记下旧货架的凭据，存成文件跟着备份一起走 —— 回退时要用，别指望人记笔记
-node scripts/verify-public-shelf.mjs --local "$BAK" --sample 1 --json \
-  > /var/backups/yos-dist-$OLD-$STAMP.shelf.json
-node -p 'const s=require("/var/backups/yos-dist-'$OLD'-'$STAMP'.shelf.json");
-  `old buildId=${s.buildId}\nold indexSha256=${s.indexSha256}`'
+# ④ 自审副本 + 记下旧货架凭据，存成文件跟着备份一起走。
+#    必须 --full（逐个核），失败就删掉凭据文件并立刻停 —— 不许带着没验过的备份往下走
+CRED=/var/backups/yos-dist-$OLD-$STAMP.shelf.json
+node scripts/verify-public-shelf.mjs --local "$BAK" --full --json > "$CRED" \
+  || { echo "备份自审失败，停止发布"; rm -f "$CRED"; exit 1; }
+
+# 读回来之前先断言它自己说通过了（--json 失败时也会输出内容，只是 pass=false）
+node -e 'const s=require(process.argv[1]);
+  if (s.pass !== true) { console.error("凭据来自一次失败的自审，停"); process.exit(1); }
+  console.log(`old buildId=${s.buildId}\nold indexSha256=${s.indexSha256}`);
+  console.log(`self-audit: ${s.matchedFiles}/${s.registeredFiles} 命中`);' "$CRED" \
+  || exit 1
 
 # ⑤ 推到另一台机器（--checksum 按内容比，不信时间戳）
 rsync -av --checksum \
-  /var/backups/yos-dist-$OLD-$STAMP.tar.gz{,.sha256,.shelf.json} \
+  /var/backups/yos-dist-$OLD-$STAMP.tar.gz{,.sha256} "$CRED" \
   <备份机>:/srv/yos-dist-backups/
 ```
 
 **④ 那一步是为第 8 步准备的。** 回退之后要证明"线上现在确实是备份那一份"，
 就得有旧货架的 `buildId` 和 `index.json` 摘要。**这两个值必须在回退之前就存下来** ——
 等回退完再去量，量到的是回退结果本身，自己证明自己，什么也没证明。
-顺带这一步还会**自审一遍备份副本**（`--local` 逐个核哈希），
-所以它同时是"这份本地副本是完整的"的证据。
 
-⚠️ **④ 报红就停下**，别当成"文件已经写出来了就行"：它报红说明**旧货架本身
-或这份副本有问题**，这种时候不该继续发布。（`--json` 的字段名
-`buildId` / `indexSha256` 已实测存在；`--local` 这条路径由测试覆盖，
-但**在货架机上对真实生产备份跑 ④ 未实测** —— 货架机属于生产。）
+🔴 **④ 必须 `--full`，不能用 `--sample`。** 这份手册第一版在这里写的就是
+`--sample 1`，旁边却写着"逐个核哈希、证明副本完整"—— **文字和命令自相矛盾，
+照着做的人会以为自己验过了**。2026-08-11 复核实测：一个 906 文件的生产形态副本
+删掉一个普通文件（`install-v0.1.0-alpha.2.sh`），`--sample 1` **只查了 68 个、
+报 exit 0 通过**；换成 `--full` 查满 906 个，**当场抓到并 exit 1**。
+抽查永远不能当证据 —— 这也是 `--signoff` 直接拒绝 `--sample` 的原因。
+
+🔴 **失败必须当场断流。** `--json` 在失败时**照样会输出内容**（只是 `pass: false`），
+重定向出来的文件同样存在。所以上面必须做两件事：**失败即删凭据并 `exit 1`**，
+以及**读回来时先断言 `pass === true`**。否则会出现最糟的一种情况 ——
+自审失败了，凭据文件还在，后面的步骤照读照传，**流程看起来一路顺利**。
+
+（`--json` 的字段名 `buildId` / `indexSha256` / `pass` / `matchedFiles` 均已实测存在；
+`--local --full` 抓缺文件由测试钉住。但**在货架机上对真实生产备份跑 ④ 未实测** ——
+货架机属于生产。）
 
 **恢复验证（必须在备份机上做，不能在货架机上做）** —— 备份没验过就等于没有：
 
@@ -341,8 +357,14 @@ mv /srv/yos-dist.bak-<旧版本>-<STAMP> /srv/yos-dist
 
 # 回退后必须重跑第 7 步 —— 同样是签字级，三样凭据用【旧货架】那一套。
 # 旧的 buildId 与 index 摘要在第 5 步 ④ 已经存好，从那个文件读，不要凭记忆
-OLDID=$(node -p 'require("/var/backups/yos-dist-<旧版本>-<STAMP>.shelf.json").buildId')
-OLDSHA=$(node -p 'require("/var/backups/yos-dist-<旧版本>-<STAMP>.shelf.json").indexSha256')
+CRED=/var/backups/yos-dist-<旧版本>-<STAMP>.shelf.json
+
+# 先断言这份凭据来自一次通过的自审，再用它 —— 否则等于拿没验过的东西当基准
+node -e 'const s=require(process.argv[1]); if (s.pass !== true) {
+  console.error("凭据来自一次失败的自审，不能作为回退基准"); process.exit(1); }' "$CRED" || exit 1
+
+OLDID=$(node -p 'require(process.argv[1]).buildId' "$CRED")
+OLDSHA=$(node -p 'require(process.argv[1]).indexSha256' "$CRED")
 
 node scripts/verify-public-shelf.mjs --signoff --full \
   --expect-build-id "$OLDID" \
@@ -392,13 +414,16 @@ yos capability list                            # 能力目录客户端本地能�
 - **第 7 步**：`scripts/verify-public-shelf.mjs` 是随这份文件一起加的，
   2026-08-11 对当时的生产货架**实跑过 `--full`，923/923 命中**；
   它自己的失败路径由 `test/verify-public-shelf.test.js` 用本地假货架
-  逐条钉住（**30 条**：篡改、截断、空能力目录、掉标签、非 production、
+  逐条钉住（**36 条**：篡改、截断、空能力目录、掉标签、非 production、
   buildId 不符、组件版本不符、取不到、恢复副本完好/损坏，
   加第一轮复核后补的 包/归档/always 文件/vendor 来源**漏登记**四条、
   清单摘要不符与相符各一条、**货架有更新版本**、组件标签未镜像、
   组件被更新标签盖住、卡死不挂死、5xx 重试后通过、4xx 不重试，
   再加第二轮复核后补的 **慢但在传的大文件不许误判**、涓流被兜底终止、
-  签字缺凭据拒跑（全缺/缺一项/抽查模式）与全凭据通过），
+  签字缺凭据拒跑（全缺/缺一项/抽查模式）与全凭据通过，
+  以及第三轮复核后补的 **签字必须覆盖每一个 provider**（漏一个 provider /
+  漏核心版本 / 全覆盖通过 / 日常抽查不受此约束）、
+  **`--full` 抓得到普通缺文件**、抽查只覆盖一部分且自己声明不构成证明），
   **该红的每条都必须 exit 1**。
   第一版的三条假绿（漏登记、版本认字面、无超时）是**先用这组测试打红旧版脚本
   复现出来的**（旧版 12 条红），不是照着改法反推的测试。

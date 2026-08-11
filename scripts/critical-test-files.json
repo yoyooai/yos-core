@@ -189,7 +189,7 @@
     },
     {
       "path": "test/verify-public-shelf.test.js",
-      "minimumTests": 30
+      "minimumTests": 36
     },
     {
       "path": "test/capability-index.test.js",
@@ -217,5 +217,5 @@
       "path": "scripts/verify-public-shelf.mjs"
     }
   ],
-  "approvedDigest": "17de0b454287bc596f60a2bf34b9f6b2b6ba98d532142911b7034e5c5a181cf0"
+  "approvedDigest": "31ab8835bc6eba0c6c5ceac64458dad93bd44e683ea66f5770bfa9a3ed997f85"
 }

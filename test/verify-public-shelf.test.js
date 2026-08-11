@@ -521,4 +521,115 @@ describe('public shelf verifier: sign-off mode', () => {
     expect(stdout).toContain('[shelf] PASS');
     expect(code).toBe(0);
   });
+
+  /**
+   * Present is not the same as complete. A two-provider shelf signed off while
+   * --expect-versions named only one of them (2026-08-11 review): the flag was
+   * satisfied and the second channel was covered by nothing.
+   */
+  test('sign-off fails when a provider is not named in the expectation', async () => {
+    const shelf = makeShelf({ providers: 2 });
+    const { base, hits } = await serve(shelf);
+    const { code, stderr } = await run(base, [
+      '--signoff',
+      '--expect-build-id', shelf.buildId,
+      '--expect-index-sha256', shelf.indexSha256,
+      '--expect-versions', 'yos=0.1.14,feishu=0.1.4',
+    ]);
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/provider c1 is on the shelf but not named/);
+    // And it stops before the bulk download: index.json and capabilities.json
+    // are enough to know the expectation is incomplete.
+    expect(hits.get(`${CORE}/package/yos-0.1.14.tgz`)).toBeUndefined();
+  });
+
+  test('sign-off fails when the core version is not named', async () => {
+    const shelf = makeShelf();
+    const { base } = await serve(shelf);
+    const { code, stderr } = await run(base, [
+      '--signoff',
+      '--expect-build-id', shelf.buildId,
+      '--expect-index-sha256', shelf.indexSha256,
+      '--expect-versions', 'feishu=0.1.4',
+    ]);
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/yos \(the core version\) is not named/);
+  });
+
+  test('sign-off passes when every provider is named', async () => {
+    const shelf = makeShelf({ providers: 2 });
+    const { base } = await serve(shelf);
+    const { code, stdout } = await run(base, [
+      '--signoff',
+      '--expect-build-id', shelf.buildId,
+      '--expect-index-sha256', shelf.indexSha256,
+      '--expect-versions', 'yos=0.1.14,feishu=0.1.4,c1=0.1.4',
+    ]);
+    expect(stdout).toContain('[shelf] PASS');
+    expect(code).toBe(0);
+  });
+
+  test('an everyday check is still allowed to name only what it cares about', async () => {
+    // The coverage rule belongs to sign-off alone. Making it universal would
+    // turn every quick "is feishu 0.1.4 up" into a chore, and chores get skipped.
+    const shelf = makeShelf({ providers: 2 });
+    const { base } = await serve(shelf);
+    const { code, stdout } = await run(base, ['--expect-versions', 'feishu=0.1.4']);
+    expect(stdout).toContain('[shelf] PASS');
+    expect(code).toBe(0);
+  });
+});
+
+/**
+ * The backup credential step in docs/release.md claimed to prove the copy was
+ * complete while running --sample 1. A 906-file production-shaped copy with one
+ * ordinary file deleted passed it: 68 files checked, exit 0 (2026-08-11 review).
+ * The two tests below are the same shape — one plain file removed, nothing
+ * tampered — and they pin the difference between the two modes rather than
+ * trusting a sentence about it.
+ */
+describe('public shelf verifier: sample mode is not proof', () => {
+  const plainFile = `${CORE}/raw/v0.1.14/VERSION`;
+
+  function restoreDir(shelf, { remove = null } = {}) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-restore-'));
+    for (const [key, body] of shelf.bodies) {
+      if (key === remove) continue;
+      const target = path.join(dir, key);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, body);
+    }
+    return dir;
+  }
+
+  test('--full catches an ordinary missing file in a restored copy', async () => {
+    const dir = restoreDir(makeShelf(), { remove: plainFile });
+    const { code, stderr } = await runLocal(dir);
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/VERSION: missing on disk/);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  /**
+   * Why the step above must be --full, stated as a property rather than as an
+   * exit code: sample mode checks strictly fewer files than are registered, so
+   * whether it happens to notice a given missing file depends on the shelf's
+   * size and the file's position. On the real shelf it did not notice: 906
+   * registered, 68 checked, exit 0 with one ordinary file deleted. On this
+   * fixture — two dozen files — the same file falls inside the sample and is
+   * caught. That difference is exactly why a sampled run can never be the
+   * evidence, and why --signoff rejects it outright (see the sign-off block).
+   */
+  test('sample mode checks only part of the shelf and says so', async () => {
+    const dir = restoreDir(makeShelf());
+    const { stdout } = await new Promise((resolve) => {
+      execFile(process.execPath, [SCRIPT, '--local', dir, '--sample', '1'], { timeout: 30_000 },
+        (error, out, err) => resolve({ code: error ? error.code ?? 1 : 0, stdout: out, stderr: err }));
+    });
+    const [, registered, checked] = stdout.match(/(\d+) registered, checking (\d+)/);
+    expect(Number(checked)).toBeLessThan(Number(registered));
+    expect(stdout).toContain('not proof of the whole shelf');
+    expect(stdout).toContain('Release sign-off requires --full');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
 });
