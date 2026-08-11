@@ -188,6 +188,10 @@
       "minimumTests": 22
     },
     {
+      "path": "test/verify-public-shelf.test.js",
+      "minimumTests": 11
+    },
+    {
       "path": "test/capability-index.test.js",
       "minimumTests": 2
     },
@@ -208,7 +212,10 @@
     },
     {
       "path": "docs/progress.md"
+    },
+    {
+      "path": "scripts/verify-public-shelf.mjs"
     }
   ],
-  "approvedDigest": "181dd246b756cfbf4a7decffc2711004a34cea989fe68d299186d31e57030f59"
+  "approvedDigest": "20678d97cd294a49daccb23fb647517a0345ad4b88e3ba44d752fd9a61920fe8"
 }
