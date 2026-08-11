@@ -185,7 +185,7 @@
     },
     {
       "path": "test/dist-catalog.test.js",
-      "minimumTests": 21
+      "minimumTests": 22
     },
     {
       "path": "test/capability-index.test.js",
@@ -210,5 +210,5 @@
       "path": "docs/progress.md"
     }
   ],
-  "approvedDigest": "7fc1bd24290f90401062f5fe3e67616ce398f799c8c7d6fa88758f649bfacf7f"
+  "approvedDigest": "181dd246b756cfbf4a7decffc2711004a34cea989fe68d299186d31e57030f59"
 }
