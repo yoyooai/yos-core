@@ -184,24 +184,44 @@ node -e 'const s=require(process.argv[1]);
   || exit 1
 
 # ⑤ 推到站外对象存储 —— 存的是目录树，不是 tar 包
-#    桶名/地域是我们的基础设施，不写在这份公开仓的文件里，见内部发布记录
-export COS_BUCKET=<桶名>  COS_REGION=<地域>
-
-#    临时凭据：只能写这一个桶、没有删除权、自己会过期。
-#    长期密钥不需要出现在货架机上 —— 货架机是生产，出现过就得当它泄漏过。
-eval "$(node scripts/cos-sts-token.mjs --bucket "$COS_BUCKET" --region "$COS_REGION")"
-
-node scripts/shelf-offsite.mjs upload --root "$BAK" \
-  --bucket "$COS_BUCKET" --region "$COS_REGION" \
-  --prefix "rollback/$(basename "$BAK")/" || { echo "站外备份没成，停"; exit 1; }
-
-#    ④ 那份凭据也要跟着走：第 8 步回退时要靠它证明线上就是这一份。
-#    放在同级的 -meta/ 前缀，不塞进副本目录 —— 塞进去会让 verify 报"多出一个文件"
-mkdir -p /tmp/offsite-meta && cp "$CRED" /tmp/offsite-meta/
-node scripts/shelf-offsite.mjs upload --root /tmp/offsite-meta \
-  --bucket "$COS_BUCKET" --region "$COS_REGION" \
-  --prefix "rollback/$(basename "$BAK")-meta/" || exit 1
+#    ⚠️ 这一步跨两台机器。换钥匙在控制机，推货在货架机 —— 别在一台上跑完。
 ```
+
+**【控制机】** 长期密钥只存在这里，**不要登到货架机上执行这一段**：
+
+```bash
+# 桶名/地域是我们的基础设施，不写在这份公开仓的文件里，见内部发布记录
+export COS_BUCKET=<桶名>  COS_REGION=<地域>
+PREFIX="rollback/yos-dist.bak-$OLD-$STAMP/"
+
+# 换一把弱钥匙：只能写这一个前缀、没有删除权、自己会过期
+node scripts/cos-sts-token.mjs --bucket "$COS_BUCKET" --region "$COS_REGION" \
+  --prefix "$PREFIX" > /tmp/cos-creds.sh
+```
+
+**【货架机】** 把那三个 `COS_*` 变量**经管道喂进去**，不要落盘到货架机：
+
+```bash
+cat /tmp/cos-creds.sh | ssh <货架机> 'eval "$(cat)" && \
+  cd <仓库目录> && \
+  node scripts/shelf-offsite.mjs upload --root '"$BAK"' \
+    --bucket '"$COS_BUCKET"' --region '"$COS_REGION"' --prefix '"$PREFIX"' && \
+  node scripts/shelf-offsite.mjs verify --root '"$BAK"' \
+    --bucket '"$COS_BUCKET"' --region '"$COS_REGION"' --prefix '"$PREFIX"''
+
+# ④ 那份凭据也要跟着走：第 8 步回退时要靠它证明线上就是这一份。
+# 放在同级的 -meta/ 前缀，不塞进副本目录 —— 塞进去会让 verify 报"多出一个文件"
+# （它需要自己的一把钥匙：钥匙按前缀发，一把只开一个前缀）
+```
+
+🔴 **为什么换钥匙必须在控制机**：这份手册第一版把 `cos-sts-token.mjs` 写在货架机那段里，
+**而它要读长期密钥** —— 等于要求把长期密钥放到货架机上，正好推翻旁边那句
+"长期密钥不需要出现在货架机上"。**文档自己写的规矩，被文档自己写的命令破掉**，
+照着做的人不会察觉。2026-08-11 复核抓出（同一轮里，这是第二次出现"文字和命令各说各话"）。
+
+🔴 **`upload` 之后必须紧跟 `verify`。** `upload` 报告的是"我写出去的每个字节都对得上"，
+`verify` 是**从存储那边反过来数**：备份里少了货架上的文件，或者多出货架上没有的文件，
+两个方向都查。只有 `upload` 而没有 `verify`，等于只听了写入方的一面之词。
 
 **为什么站外存目录树而不是 tar 包**：tar 包只能整包校验，坏一个字节就整包不可信，
 而且恢复时必须先落地几百 M 再解开。目录树可以**逐个文件比哈希**（`verify` 子命令做的
@@ -238,15 +258,32 @@ node scripts/shelf-offsite.mjs upload --root /tmp/offsite-meta \
 
 ```bash
 # 在一台不是货架机的机器上。先决条件见下面那条 🔴
-eval "$(node scripts/cos-sts-token.mjs --bucket "$COS_BUCKET" --region "$COS_REGION")"
+PREFIX="rollback/yos-dist.bak-$OLD-$STAMP/"
+eval "$(node scripts/cos-sts-token.mjs --bucket "$COS_BUCKET" --region "$COS_REGION" \
+          --prefix "$PREFIX")"
 
-node scripts/shelf-offsite.mjs restore --dest /tmp/restore \
+# --dest 必须是不存在或空的目录。往有东西的目录里恢复，旧文件会留下来，
+# 恢复出来的就是"备份 + 本来就在这儿的东西"的混合物，而事后没有任何检查分得出来。
+node scripts/shelf-offsite.mjs restore --dest /tmp/restore-$STAMP \
   --bucket "$COS_BUCKET" --region "$COS_REGION" \
-  --prefix "rollback/yos-dist.bak-$OLD-$STAMP/"     # 空前缀会报红，不会"恢复了 0 个文件"然后成功
+  --prefix "$PREFIX"     # 空前缀会报红，不会"恢复了 0 个文件"然后成功
 
 # 逐个文件按它自己的 index.json 核 —— 能拉下来 ≠ 每个字节都对
-node scripts/verify-public-shelf.mjs --local /tmp/restore --full
+node scripts/verify-public-shelf.mjs --local /tmp/restore-$STAMP --full
 ```
+
+🔴 **`restore` 会拒绝三件事，都是"看起来恢复成功了"的样子**（2026-08-11 复核补上，
+三条当时都是真的假绿，先写测试复现红了才改）：
+
+1. **`--dest` 非空就停。** 往已有内容的目录里恢复，旧文件会留下来，
+   得到的是"备份 + 本来就在这儿的东西"的混合物 —— 数目对得上、哈希也都对，
+   **事后没有任何检查分得出来**。
+2. **`--dest` 里的符号链接目录挡不住字符串检查。** 只比对拼出来的路径是不是以
+   `--dest` 开头，证明的是"这串字看着在里面"；只要中间某一级是符号链接，
+   写入就落到外面去了。现在是创建之后核**解析后的真实位置**。
+3. **ETag 不是单次 PUT 的 MD5 就停，不是跳过校验。** 旧写法是
+   `如果(像MD5 且 对不上)就报错` —— 于是**凡是不像 MD5 的一律不校验、照写照计数**，
+   检查恰好在最该警觉的情况下自己免除了自己。
 
 🔴 **恢复机的先决条件，出事那天没时间现查**：`restore` 只用 Node 内置模块，
 一台装了 Node 的空机器就够；但**紧接着的 `verify-public-shelf.mjs` 需要 `semver`**
@@ -463,17 +500,18 @@ yos capability list                            # 能力目录客户端本地能�
 早推可能把一份坏货当成救命稻草存起来。
 
 ```bash
-eval "$(node scripts/cos-sts-token.mjs --bucket "$COS_BUCKET" --region "$COS_REGION")"
+PREFIX="shelf/<新版本>-$(date +%Y%m%d)/"
+# 同第 5 步：这一句在控制机跑（它要读长期密钥），把 COS_* 送到货架机再执行下面两条
+eval "$(node scripts/cos-sts-token.mjs --bucket "$COS_BUCKET" --region "$COS_REGION" \
+          --prefix "$PREFIX")"
 REAL=$(readlink -f /srv/yos-dist)
 
 node scripts/shelf-offsite.mjs upload --root "$REAL" \
-  --bucket "$COS_BUCKET" --region "$COS_REGION" \
-  --prefix "shelf/<新版本>-$(date +%Y%m%d)/" || exit 1
+  --bucket "$COS_BUCKET" --region "$COS_REGION" --prefix "$PREFIX" || exit 1
 
 # 立刻回读核一遍：upload 说它写成功了，verify 是从存储那边反过来数
 node scripts/shelf-offsite.mjs verify --root "$REAL" \
-  --bucket "$COS_BUCKET" --region "$COS_REGION" \
-  --prefix "shelf/<新版本>-$(date +%Y%m%d)/" || exit 1
+  --bucket "$COS_BUCKET" --region "$COS_REGION" --prefix "$PREFIX" || exit 1
 ```
 
 `verify` 两个方向都查：备份里少了货架上的文件，和备份里多出货架上没有的文件。

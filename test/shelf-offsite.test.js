@@ -50,7 +50,12 @@ function tmpDir(prefix = 'offsite-') {
  * defend against (a wrong ETag, a multipart-style ETag, an object whose bytes
  * changed after it was listed).
  */
-async function fakeCos({ store = new Map(), etagOverride = null, corruptOnGet = null } = {}) {
+async function fakeCos({
+  store = new Map(),
+  etagOverride = null,
+  listEtagOverride = null,
+  corruptOnGet = null,
+} = {}) {
   server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
     const key = decodeURIComponent(url.pathname.replace(/^\//, ''));
@@ -75,7 +80,8 @@ async function fakeCos({ store = new Map(), etagOverride = null, corruptOnGet = 
         .sort(([a], [b]) => (a < b ? -1 : 1))
         .map(
           ([k, v]) =>
-            `<Contents><Key>${xmlEscape(k)}</Key><ETag>&quot;${md5(v)}&quot;</ETag>` +
+            `<Contents><Key>${xmlEscape(k)}</Key>` +
+            `<ETag>&quot;${listEtagOverride ?? md5(v)}&quot;</ETag>` +
             `<Size>${v.length}</Size></Contents>`,
         )
         .join('');
@@ -310,6 +316,79 @@ describe('restore', () => {
 
     expect(result.code).toBe(1);
     expect(result.stderr).toMatch(/escapes --dest/);
+  });
+
+  /*
+   * The three below are 小C's 2026-08-11 review findings, reproduced before
+   * being fixed. Checking the destination path as a *string* is not the same as
+   * checking where the write lands, "restored 924/924" is not the same as "this
+   * directory is the backup", and a check written as `if (looks-normal && wrong)`
+   * silently waives itself on everything that does not look normal.
+   */
+  /*
+   * This one earns its keep by asserting the CONSEQUENCE (nothing written
+   * outside) rather than the mechanism. It first passed for a reason other than
+   * the one intended: the non-empty check stopped the run before path handling
+   * mattered, so removing the symlink guard left it green. That made the guard
+   * unreachable code — a branch no test could reach — and it was removed in
+   * favour of the invariant the non-empty check already provides, documented at
+   * the check itself. Keep this test pointed at the outcome: if a --force ever
+   * allows writing into a non-empty directory, it goes red.
+   */
+  test('nothing is written outside --dest when it contains a symlink out of it', async () => {
+    const { port } = await fakeCos();
+    const dir = makeTree();
+    await run(['upload', '--root', dir, ...BUCKET, '--prefix', 'p/'], { port });
+
+    const base = tmpDir();
+    const dest = path.join(base, 'restored');
+    const outside = path.join(base, 'outside');
+    fs.mkdirSync(dest, { recursive: true });
+    fs.mkdirSync(outside, { recursive: true });
+    // `sub/` inside the destination is a link pointing out of it. Every key the
+    // script writes under sub/ resolves outside --dest, while the joined path
+    // string still starts with --dest.
+    fs.symlinkSync(outside, path.join(dest, 'sub'));
+
+    const result = await run(['restore', '--dest', dest, ...BUCKET, '--prefix', 'p/'], { port });
+
+    expect(fs.existsSync(path.join(outside, 'pkg.tgz'))).toBe(false);
+    expect(result.code).toBe(1);
+  });
+
+  test('restoring into a directory that already has files does not pass with them left behind', async () => {
+    const { port } = await fakeCos();
+    const dir = makeTree();
+    await run(['upload', '--root', dir, ...BUCKET, '--prefix', 'p/'], { port });
+
+    const dest = path.join(tmpDir(), 'restored');
+    fs.mkdirSync(dest, { recursive: true });
+    fs.writeFileSync(path.join(dest, 'stale.txt'), 'from an older restore');
+
+    const result = await run(['restore', '--dest', dest, ...BUCKET, '--prefix', 'p/'], { port });
+
+    // Either it refuses, or it leaves a directory that IS the backup — never a
+    // PASS over a mixture of the backup and whatever was already there.
+    if (result.code === 0) {
+      expect(fs.existsSync(path.join(dest, 'stale.txt'))).toBe(false);
+    } else {
+      expect(result.stderr).toMatch(/not empty|already/i);
+    }
+  });
+
+  test('an ETag that is not a plain MD5 fails the restore instead of waiving the hash check', async () => {
+    // A multipart-style ETag is what a large object returns. The old check read
+    // `if (isPlainMd5(etag) && downloaded !== etag)`, so anything not matching
+    // that shape skipped verification entirely and still counted as restored.
+    const { port } = await fakeCos({ etagOverride: `${'a'.repeat(32)}-3`, listEtagOverride: `${'a'.repeat(32)}-3` });
+    const dir = makeTree();
+    await run(['upload', '--root', dir, ...BUCKET, '--prefix', 'p/', '--follow-symlinks'], { port });
+
+    const dest = path.join(tmpDir(), 'restored');
+    const result = await run(['restore', '--dest', dest, ...BUCKET, '--prefix', 'p/'], { port });
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toMatch(/not a single-PUT MD5|cannot be verified/i);
   });
 });
 

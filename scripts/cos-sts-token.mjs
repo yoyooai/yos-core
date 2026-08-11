@@ -14,8 +14,16 @@
  * a credential that reaches production should not be able to erase the backup
  * it is there to create.
  *
+ * `--prefix` is required, and object access is scoped to it. A credential that
+ * could write anywhere in the bucket could overwrite every previous release's
+ * backup, which is most of what the bucket is for; scoping it to the one prefix
+ * this run is about means the worst a leaked token can do is damage the copy it
+ * was minted to create. Listing stays bucket-wide because `GetBucket` is a read
+ * and `shelf-offsite.mjs` passes the prefix on every list it makes.
+ *
  * Usage:
- *   node scripts/cos-sts-token.mjs --bucket <name> --region <region> [--duration 7200] [--json]
+ *   node scripts/cos-sts-token.mjs --bucket <name> --region <region> \
+ *     --prefix <prefix/> [--duration 7200] [--json]
  *
  * Reads TENCENTCLOUD_SECRET_ID / TENCENTCLOUD_SECRET_KEY from the environment.
  * Default output is shell-eval-able, so the token never has to be pasted:
@@ -26,6 +34,7 @@
  */
 
 import crypto from 'node:crypto';
+import http from 'node:http';
 import https from 'node:https';
 
 const ENDPOINT = 'sts.tencentcloudapi.com';
@@ -37,7 +46,7 @@ function usage(msg) {
   if (msg) console.error(`error: ${msg}\n`);
   console.error(
     'usage: node scripts/cos-sts-token.mjs --bucket <name> --region <region> ' +
-      '[--duration 7200] [--name label] [--json]\n\n' +
+      '--prefix <prefix/> [--duration 7200] [--name label] [--json]\n\n' +
       'credentials: TENCENTCLOUD_SECRET_ID, TENCENTCLOUD_SECRET_KEY',
   );
   process.exit(1);
@@ -56,6 +65,7 @@ function parseArgs(argv) {
     switch (arg) {
       case '--bucket': options.bucket = next(); break;
       case '--region': options.region = next(); break;
+      case '--prefix': options.prefix = next(); break;
       case '--duration': options.duration = Number(next()); break;
       case '--name': options.name = next(); break;
       case '--json': options.json = true; break;
@@ -64,6 +74,9 @@ function parseArgs(argv) {
   }
   if (!options.bucket) usage('--bucket is required');
   if (!options.region) usage('--region is required');
+  if (!options.prefix) usage('--prefix is required — an unscoped credential can overwrite every other backup in the bucket');
+  if (options.prefix.startsWith('/')) usage('--prefix must not start with /');
+  if (!options.prefix.endsWith('/')) options.prefix += '/';
   if (!Number.isInteger(options.duration) || options.duration < 900 || options.duration > 43200) {
     usage('--duration must be an integer between 900 and 43200 seconds');
   }
@@ -104,14 +117,39 @@ function sign(secretId, secretKey, payload, timestamp) {
   );
 }
 
+/**
+ * `STS_ENDPOINT` lets the tests answer as STS. Like the one in shelf-offsite.mjs
+ * it is restricted to loopback http, so it cannot become a way to send a real
+ * account key somewhere else — the restriction is enforced, not documented.
+ */
+function transportFor() {
+  const override = process.env.STS_ENDPOINT;
+  if (!override) return { transport: https, hostname: ENDPOINT, port: undefined };
+  let url;
+  try {
+    url = new URL(override);
+  } catch {
+    throw new Error(`STS_ENDPOINT is not a URL: ${override}`);
+  }
+  if (url.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(url.hostname)) {
+    throw new Error(
+      'STS_ENDPOINT is a test-only hook and must be http://127.0.0.1[:port] or ' +
+        `http://localhost[:port] — got ${override}`,
+    );
+  }
+  return { transport: http, hostname: url.hostname, port: url.port || undefined };
+}
+
 function post(secretId, secretKey, payload, region) {
   const timestamp = Math.floor(Date.now() / 1000);
   const body = JSON.stringify(payload);
+  const { transport, hostname, port } = transportFor();
   return new Promise((resolve, reject) => {
-    const req = https.request(
+    const req = transport.request(
       {
         method: 'POST',
-        host: ENDPOINT,
+        host: hostname,
+        port,
         path: '/',
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
@@ -153,19 +191,25 @@ async function main() {
     process.exit(1);
   }
 
-  const resource = `qcs::cos:${options.region}:uid/${options.appid}:${options.bucket}/*`;
+  const qcsBase = `qcs::cos:${options.region}:uid/${options.appid}:${options.bucket}`;
   const policy = {
     version: '2.0',
     statement: [
       {
+        // Objects: only under this run's prefix.
         effect: 'allow',
-        action: [
-          'name/cos:PutObject',
-          'name/cos:GetObject',
-          'name/cos:HeadObject',
-          'name/cos:GetBucket',
-        ],
-        resource: [resource, resource.replace(/\/\*$/, '/')],
+        action: ['name/cos:PutObject', 'name/cos:GetObject', 'name/cos:HeadObject'],
+        resource: [`${qcsBase}/${options.prefix}*`],
+      },
+      {
+        // Listing is a read, and shelf-offsite.mjs always lists with a prefix.
+        // COS resolves GetBucket against the object namespace, so this has to be
+        // `/*`, not `/` — with `/` it returns 403 on the list and `restore` cannot
+        // even see what to fetch (measured against the real service 2026-08-11).
+        // The narrowing that matters is on the writes above.
+        effect: 'allow',
+        action: ['name/cos:GetBucket'],
+        resource: [`${qcsBase}/*`],
       },
     ],
   };
@@ -207,7 +251,9 @@ async function main() {
     console.log(`export COS_SECRET_ID='${credentials.TmpSecretId}'`);
     console.log(`export COS_SECRET_KEY='${credentials.TmpSecretKey}'`);
     console.log(`export COS_SESSION_TOKEN='${credentials.Token}'`);
-    console.log(`# expires ${response.Response.Expiration} — bucket ${options.bucket} only, no delete`);
+    console.log(
+      `# expires ${response.Response.Expiration} — ${options.prefix} in ${options.bucket} only, no delete`,
+    );
   }
 }
 

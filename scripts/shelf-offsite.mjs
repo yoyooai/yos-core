@@ -460,34 +460,98 @@ async function restore(creds, options) {
 
   const endpoint = endpointFor(options);
   const dest = path.resolve(options.dest);
+
+  // The destination has to end up BEING the backup. Restoring on top of whatever
+  // was already there leaves a mixture — older files the backup does not contain
+  // survive, and every count still adds up, so the run reports a clean restore
+  // of a directory that is not the backup.
+  //
+  // 🔴 This check is also what makes the path handling below safe, and anyone
+  // relaxing it has to restore that safety by hand. A symlinked directory sitting
+  // inside --dest sends every write under it somewhere else entirely, while the
+  // joined path string still starts with --dest — so a string comparison does not
+  // catch it. Nothing here can plant such a link, because the directory is empty
+  // and this script creates every subdirectory in it. Add a --force that writes
+  // into a non-empty directory and that stops being true: then each created
+  // directory must be re-checked against its RESOLVED location, not its name.
+  const existing = await fsp.readdir(dest).catch((error) => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+  if (existing && existing.length > 0) {
+    return {
+      command: 'restore',
+      prefix: options.prefix,
+      dest,
+      objectsFound: objects.length,
+      restoredVerified: 0,
+      problems: [
+        {
+          key: dest,
+          error:
+            `--dest is not empty (${existing.length} entr${existing.length === 1 ? 'y' : 'ies'}). ` +
+            'Restoring over existing files leaves a mixture of the backup and what was ' +
+            'already here, which no later check can tell apart. Point --dest at a new ' +
+            'directory, or empty this one first.',
+        },
+      ],
+    };
+  }
+
   await fsp.mkdir(dest, { recursive: true });
+  // Resolve once, and compare against the resolved path from here on: comparing
+  // against the unresolved --dest would only prove a path string looks contained.
+  const realDest = await fsp.realpath(dest);
   const problems = [];
   let restored = 0;
 
   await pool(objects, options.concurrency, async (object) => {
     const relative = object.key.slice(options.prefix.length);
     if (!relative || relative.endsWith('/')) return;
-    const target = path.join(dest, ...relative.split('/'));
-    if (!target.startsWith(dest + path.sep)) {
+    const target = path.join(realDest, ...relative.split('/'));
+    if (!target.startsWith(realDest + path.sep)) {
       problems.push({ key: object.key, error: 'key escapes --dest' });
       return;
     }
     try {
+      // An ETag this script did not write as a single PUT cannot be checked
+      // against an MD5. Waiving the check for those (`if (looksLikeMd5 && …)`)
+      // means every object with an unexpected ETag is written unverified and
+      // counted as restored — the check silently excuses exactly the cases it
+      // was there to catch.
+      if (!/^[0-9a-f]{32}$/.test(object.etag)) {
+        problems.push({
+          key: object.key,
+          error:
+            `stored ETag ${object.etag || '(absent)'} is not a single-PUT MD5, ` +
+            'so the downloaded bytes cannot be verified',
+        });
+        return;
+      }
       const res = await withRetries(`get ${object.key}`, () =>
         request(creds, { method: 'GET', endpoint, uri: encodeKey(object.key) }),
       );
       const got = md5(res.body);
-      if (/^[0-9a-f]{32}$/.test(object.etag) && got !== object.etag) {
+      if (got !== object.etag) {
         problems.push({ key: object.key, error: `downloaded md5 ${got} != stored etag ${object.etag}` });
         return;
       }
       await fsp.mkdir(path.dirname(target), { recursive: true });
-      await fsp.writeFile(target, res.body);
+      await fsp.writeFile(target, res.body, { flag: 'wx' });
       restored += 1;
     } catch (error) {
       problems.push({ key: object.key, error: error.message });
     }
   });
+
+  // Objects that are all directory markers would otherwise leave an empty
+  // directory and a clean exit code.
+  if (restored === 0 && problems.length === 0) {
+    problems.push({
+      key: options.prefix,
+      error: `${objects.length} object(s) listed but none was a file — nothing was restored`,
+    });
+  }
 
   return {
     command: 'restore',

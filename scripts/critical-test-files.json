@@ -215,7 +215,15 @@
     },
     {
       "path": "scripts/verify-public-shelf.mjs"
+    },
+    {
+      "path": "test/shelf-offsite.test.js",
+      "minimumTests": 20
+    },
+    {
+      "path": "test/cos-sts-token.test.js",
+      "minimumTests": 14
     }
   ],
-  "approvedDigest": "31ab8835bc6eba0c6c5ceac64458dad93bd44e683ea66f5770bfa9a3ed997f85"
+  "approvedDigest": "6e4188dcea9ea062860ae6e72e4d0d53bde3884a8190a6527807a99d98e23329"
 }
