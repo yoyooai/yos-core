@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { parseCapabilitySkill } from './capability-schema.js';
+import { canonicalCapabilityTitle } from './capability-titles.js';
 import {
   checkNodeEngine,
   checkYosCoreCompatibility,
@@ -128,7 +129,7 @@ export function buildLocalCapabilityCatalog({
       if (!byCapability.has(declaration.id)) {
         byCapability.set(declaration.id, {
           id: declaration.id,
-          title: declaration.title,
+          title: canonicalCapabilityTitle(declaration.id),
           keywords: new Set(),
           operations: new Set(),
           providers: [],
@@ -164,6 +165,7 @@ export function buildLocalCapabilityCatalog({
     .sort((a, b) => a.id.localeCompare(b.id, 'en'))
     .map((capability) => ({
       ...capability,
+      title: canonicalCapabilityTitle(capability.id),
       keywords: [...capability.keywords].sort((a, b) => a.localeCompare(b, 'en')),
       operations: [...capability.operations].sort((a, b) => a.localeCompare(b, 'en')),
       providers: capability.providers.sort((a, b) => {
@@ -215,13 +217,14 @@ export function mergeCapabilityCatalogs(local, remote, {
       if (!byCapability.has(declaration.id)) {
         byCapability.set(declaration.id, {
           id: declaration.id,
-          title: declaration.title,
+          title: canonicalCapabilityTitle(declaration.id),
           keywords: new Set(),
           operations: new Set(),
           providers: [],
         });
       }
       const capability = byCapability.get(declaration.id);
+      capability.title = canonicalCapabilityTitle(declaration.id);
       for (const keyword of declaration.keywords ?? []) capability.keywords.add(keyword);
       for (const operation of declaration.operations ?? []) capability.operations.add(operation);
 

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { parseCapabilitySkill } from '../../cli/lib/capability-schema.js';
+import { canonicalCapabilityTitle } from '../../cli/lib/capability-titles.js';
 import {
   readDeclaredNodeRange,
   readDeclaredYosContract,
@@ -58,7 +59,7 @@ export function deriveCapabilityIndex({ index, registry, outputRoot }) {
       if (!byCapability.has(capabilityDeclaration.id)) {
         byCapability.set(capabilityDeclaration.id, {
           id: capabilityDeclaration.id,
-          title: capabilityDeclaration.title,
+          title: canonicalCapabilityTitle(capabilityDeclaration.id),
           keywords: new Set(),
           operations: new Set(),
           providers: [],
@@ -69,6 +70,7 @@ export function deriveCapabilityIndex({ index, registry, outputRoot }) {
       capabilityDeclaration.operations.forEach((operation) => capability.operations.add(operation));
       capability.providers.push({
         id: yos.id,
+        title: declaration.frontmatter.name ?? yos.id,
         registryName,
         repo: metadata.repo,
         tag,
