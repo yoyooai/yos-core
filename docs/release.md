@@ -187,17 +187,18 @@ tar -tzf /var/backups/yos-dist-$OLD-$STAMP.tar.gz | head -3   # 第一条必须�
 # ④ 自审副本 + 记下旧货架凭据，存成文件跟着备份一起走。
 #    必须 --full（逐个核），失败就删掉凭据文件并立刻停 —— 不许带着没验过的备份往下走
 CRED=/var/backups/yos-dist-$OLD-$STAMP.shelf.json
-# 0.1.13 生产货架生成于 publicationMode 字段加入之前；兼容开关只认这一版、
-# 只认“有 buildId 但唯独缺 publicationMode”的历史形状。更新版本带它会直接报错。
+# 0.1.13 生产货架没有 buildId、publicationMode 和 capabilities.json；兼容开关
+# 只认这三项都缺席且 index.json 摘要等于切换前留档值的真实历史形状。
 LEGACY_MODE=
-test "$OLD" = "0.1.13" && LEGACY_MODE=--allow-legacy-missing-publication-mode
+test "$OLD" = "0.1.13" && \
+  LEGACY_MODE="--allow-legacy-0.1.13 --expect-index-sha256 ea64d43821e814c12a7e83e90269dfc7b67e9ab6b1f8ef5d7dd838095b04f9c1"
 node scripts/verify-public-shelf.mjs --local "$BAK" --full $LEGACY_MODE --json > "$CRED" \
   || { echo "备份自审失败，停止发布"; rm -f "$CRED"; exit 1; }
 
 # 读回来之前先断言它自己说通过了（--json 失败时也会输出内容，只是 pass=false）
 node -e 'const s=require(process.argv[1]);
   if (s.pass !== true) { console.error("凭据来自一次失败的自审，停"); process.exit(1); }
-  console.log(`old buildId=${s.buildId}\nold indexSha256=${s.indexSha256}`);
+  console.log(`old buildId=${s.buildId ?? "(legacy absent)"}\nold indexSha256=${s.indexSha256}`);
   console.log(`self-audit: ${s.matchedFiles}/${s.registeredFiles} 命中`);' "$CRED" \
   || exit 1
 
@@ -544,7 +545,7 @@ mv $BAK /srv/yos-dist
 OLD=<旧版本>
 STAMP=<第 5 步那个时间戳>
 
-# 旧的 buildId 与 index 摘要在第 5 步 ④ 已经存好，从那个文件读，不要凭记忆。
+# 旧的发布凭据在第 5 步 ④ 已经存好，从那个文件读，不要凭记忆。
 # 这份文件在【货架机】上；货架机整台没了，就从站外那份取（见下）
 CRED=/var/backups/yos-dist-$OLD-$STAMP.shelf.json
 
@@ -552,18 +553,29 @@ CRED=/var/backups/yos-dist-$OLD-$STAMP.shelf.json
 node -e 'const s=require(process.argv[1]); if (s.pass !== true) {
   console.error("凭据来自一次失败的自审，不能作为回退基准"); process.exit(1); }' "$CRED" || exit 1
 
-OLDID=$(node -p 'require(process.argv[1]).buildId' "$CRED")
 OLDSHA=$(node -p 'require(process.argv[1]).indexSha256' "$CRED")
 
-# 同第 5 步：只有旧货架 0.1.13 缺 publicationMode，其他版本不许借兼容开关放宽。
+# 同第 5 步：只有真实旧货架 0.1.13 同时缺三项现代元数据。它没有 buildId，
+# 回退签字改由已留档的完整 index 摘要识别；更新版本仍必须提供 buildId。
 LEGACY_MODE=
-test "$OLD" = "0.1.13" && LEGACY_MODE=--allow-legacy-missing-publication-mode
+BUILD_MODE=
+EXPECTED_VERSIONS=
+if test "$OLD" = "0.1.13"; then
+  LEGACY_MODE=--allow-legacy-0.1.13
+  EXPECTED_VERSIONS="yos=0.1.13"
+  test "$OLDSHA" = "ea64d43821e814c12a7e83e90269dfc7b67e9ab6b1f8ef5d7dd838095b04f9c1" \
+    || { echo "旧货架 index 摘要不是已留档值，停止回退签字"; exit 1; }
+else
+  OLDID=$(node -p 'require(process.argv[1]).buildId' "$CRED")
+  BUILD_MODE="--expect-build-id $OLDID"
+  EXPECTED_VERSIONS="yos=$OLD,feishu=<旧版本>,weixin=<旧版本>"
+fi
 
 node scripts/verify-public-shelf.mjs --signoff --full \
   $LEGACY_MODE \
-  --expect-build-id "$OLDID" \
+  $BUILD_MODE \
   --expect-index-sha256 "$OLDSHA" \
-  --expect-versions yos=<旧版本>,feishu=<旧版本>,weixin=<旧版本>
+  --expect-versions "$EXPECTED_VERSIONS"
 ```
 
 **货架机整台没了的情况**：`$CRED` 跟着机器一起没了 —— 这正是第 5 步要把它
@@ -574,13 +586,14 @@ node scripts/verify-public-shelf.mjs --signoff --full \
   没重验的回退，等于把"现在线上是什么"这个问题又变成了猜。
 - 🔴 **回退核验只卡版本号是不够的**（这份手册第一版就只卡了版本号，
   2026-08-11 复核抓出来）：版本号对得上，**不代表线上这份就是备份那一份** ——
-  可能是另一次构建、也可能是回退只完成了一半。所以**必须连 buildId 和
-  index 摘要一起卡**，也就是必须带 `--signoff`：它会在缺任何一项时拒跑。
-- `--allow-legacy-missing-publication-mode` **不是通用降级开关**。它只为已经发布过的
-  `0.1.13` 货架补历史格式兼容：该货架有 `buildId` 和完整文件哈希，但生成时还没有
-  `publicationMode` 字段。脚本会同时核最新 Core 标签必须是 `v0.1.13`、`buildId`
-  必须存在且格式正确、`publicationMode` 必须是“缺席”而不是 `test-only`；任何新货架
-  带这个参数都会失败。正常发布签字不要带它。
+  可能是另一次构建、也可能是回退只完成了一半。现代货架必须连 buildId 和
+  index 摘要一起卡；历史 0.1.13 没有 buildId，改由已留档的 index 摘要单独钉死。
+  两种路径都必须带 `--signoff`，缺各自所需凭据时会在下载前拒跑。
+- `--allow-legacy-0.1.13` **不是通用降级开关**。它只认已经发布过的那一份
+  `0.1.13`：`buildId`、`publicationMode`、`capabilities.json` 三项都缺，最新 Core
+  标签为 `v0.1.13`，且 `index.json` SHA-256 必须等于切换前留档的
+  `ea64d43821e814c12a7e83e90269dfc7b67e9ab6b1f8ef5d7dd838095b04f9c1`。
+  正常发布签字不要带它。
 - 失败的那份**留着别删**（改名到 `.failed-*`），它是查原因的现场。
 - 本地副本也用不了的情况下，用第 5 步的站外备份恢复 ——
   恢复完先跑 `--local` 核一遍再换入，别把一份坏包换上线。

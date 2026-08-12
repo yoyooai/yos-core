@@ -442,15 +442,20 @@ describe('the minted credential never becomes a file', () => {
 });
 
 describe('the one legacy shelf exception stays narrow in the runbook', () => {
-  test('backup self-audit enables legacy mode only for 0.1.13', () => {
+  test('backup self-audit pins the exact legacy index only for 0.1.13', () => {
     expect(DOC).toMatch(
-      /test "\$OLD" = "0\.1\.13" && LEGACY_MODE=--allow-legacy-missing-publication-mode[\s\S]*?--local "\$BAK" --full \$LEGACY_MODE --json/,
+      /test "\$OLD" = "0\.1\.13"[\s\S]*?LEGACY_MODE="--allow-legacy-0\.1\.13 --expect-index-sha256 ea64d43821e814c12a7e83e90269dfc7b67e9ab6b1f8ef5d7dd838095b04f9c1"[\s\S]*?--local "\$BAK" --full \$LEGACY_MODE --json/,
     );
   });
 
-  test('rollback sign-off enables the same narrow compatibility mode', () => {
+  test('rollback sign-off omits buildId only inside the exact legacy branch', () => {
     expect(DOC).toMatch(
-      /test "\$OLD" = "0\.1\.13" && LEGACY_MODE=--allow-legacy-missing-publication-mode[\s\S]*?--signoff --full \\\n\s+\$LEGACY_MODE/,
+      /if test "\$OLD" = "0\.1\.13"; then[\s\S]*?LEGACY_MODE=--allow-legacy-0\.1\.13[\s\S]*?EXPECTED_VERSIONS="yos=0\.1\.13"[\s\S]*?test "\$OLDSHA" = "ea64d43821e814c12a7e83e90269dfc7b67e9ab6b1f8ef5d7dd838095b04f9c1"[\s\S]*?else[\s\S]*?BUILD_MODE="--expect-build-id \$OLDID"[\s\S]*?EXPECTED_VERSIONS="yos=\$OLD,feishu=<旧版本>,weixin=<旧版本>"[\s\S]*?--signoff --full/,
     );
+  });
+
+  test('the runbook records all three fields absent from the real legacy shelf', () => {
+    expect(DOC).toMatch(/没有 buildId、publicationMode 和 capabilities\.json/);
+    expect(DOC).not.toMatch(/有 `buildId` 和完整文件哈希/);
   });
 });
