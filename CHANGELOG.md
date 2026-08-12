@@ -4,6 +4,24 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
+## [0.1.16] - 2026-08-13
+
+### Fixed
+
+- Stop reporting a degraded install as a successful one. `yos add` ended on
+  "installed successfully!" with exit code 0 even when a component's
+  post-install hook had failed and fetched none of its sub-skills; the closing
+  verdict now goes through `classifyInstallOutcome()`, which cannot celebrate an
+  install whose setup hook did not finish. The install itself still continues —
+  the failing part is usually an optional add-on — but it is named, not hidden.
+- Refuse to install the shelf off-site backup timer for a repository path that
+  systemd's `WorkingDirectory=` cannot express. That field is read literally:
+  neither quoting nor `\xNN` escaping survives it, so any such path produced a
+  unit that passed `systemd-analyze verify`, loaded, and then died at startup
+  with `status=200/CHDIR` — a timer that looked healthy while no backup was ever
+  written. Installation now fails immediately and names the offending
+  characters.
+
 ## [0.1.15] - 2026-08-13
 
 ### Fixed
