@@ -66,10 +66,35 @@ test('components without an explicit repair hook preserve the old no-op behavior
 });
 
 test('repair hook paths must remain inside the installed skill directory', () => {
-  const skillDir = makeSkill('lifecycle:\n  hooks:\n    repair: ../outside.js');
-  const result = runComponentRepair({ componentName: 'feishu', skillDir, stdio: 'pipe' });
-  assert.equal(result.success, false);
-  assert.equal(result.code, 'component_repair_invalid');
+  const skillDir = makeSkill('name: repair-path-fixture');
+  const outsideHook = `${skillDir}-outside.js`;
+  const marker = `${skillDir}-outside-executed`;
+  fs.writeFileSync(outsideHook, `import fs from 'node:fs'; fs.writeFileSync(${JSON.stringify(marker)}, 'executed');\n`);
+
+  const assertRejectedWithoutExecution = (repairRef) => {
+    fs.writeFileSync(
+      path.join(skillDir, 'SKILL.md'),
+      `---\nlifecycle:\n  hooks:\n    repair: ${repairRef}\n---\n`,
+    );
+    const result = runComponentRepair({ componentName: 'feishu', skillDir, stdio: 'pipe' });
+    assert.equal(result.success, false);
+    assert.equal(result.code, 'component_repair_invalid');
+    assert.equal(fs.existsSync(marker), false, 'a component executed a repair script outside its directory');
+  };
+
+  assertRejectedWithoutExecution(`../${path.basename(outsideHook)}`);
+
+  const linkedHook = path.join(skillDir, 'hooks', 'repair.js');
+  fs.mkdirSync(path.dirname(linkedHook), { recursive: true });
+  fs.symlinkSync(outsideHook, linkedHook);
+  assertRejectedWithoutExecution('hooks/repair.js');
+
+  const repairSource = fs.readFileSync(path.join(ROOT, 'cli/lib/component-repair.js'), 'utf8');
+  assert.equal(
+    repairSource.match(/!isInside\(root, /g)?.length,
+    2,
+    'both the lexical-path and resolved-symlink boundaries must remain explicit',
+  );
 });
 
 test('component upgrade runs repair before reporting a same-version component healthy', () => {
