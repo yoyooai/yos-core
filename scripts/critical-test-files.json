@@ -238,7 +238,7 @@
     },
     {
       "path": "test/release-doc.test.js",
-      "minimumTests": 20
+      "minimumTests": 21
     },
     {
       "path": "scripts/lib/cos-prefix.mjs"
@@ -246,7 +246,27 @@
     {
       "path": "test/cos-prefix.test.js",
       "minimumTests": 22
+    },
+    {
+      "path": "scripts/shelf-auto-backup.mjs"
+    },
+    {
+      "path": "scripts/install-shelf-auto-backup.mjs"
+    },
+    {
+      "path": "test/shelf-auto-backup.test.js",
+      "minimumTests": 29
+    },
+    {
+      "path": "test/install-shelf-auto-backup.test.js",
+      "minimumTests": 5
+    },
+    {
+      "path": "docs/plans/2026-08-12-shelf-auto-backup-design.md"
+    },
+    {
+      "path": "开发过程/005_Feature_货架自动站外备份.md"
     }
   ],
-  "approvedDigest": "b665873f7f6422af1d04d42ea6788d5ad4a919574e20edcc62300ff8662381f2"
+  "approvedDigest": "1c68c056198a2888c6c005f1bf70494d53559402f97217992f1d1ab73914c15f"
 }
