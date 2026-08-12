@@ -371,6 +371,13 @@ describe('public shelf verifier: the file list itself', () => {
     expect(stderr).toMatch(/install\.sh is part of every shelf but not registered/);
   });
 
+  test('a capability catalog present on the shelf but missing from index.json fails', async () => {
+    const { base } = await serve(makeShelf({ unregister: 'capabilities.json' }));
+    const { code, stderr } = await run(base);
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/capabilities\.json is part of every shelf but not registered/);
+  });
+
   test('a mirrored source archive missing from index.json fails', async () => {
     const { base } = await serve(makeShelf({ unregister: `${CORE}/tarball/tags/v0.1.14.tar.gz` }));
     const { code, stderr } = await run(base);
