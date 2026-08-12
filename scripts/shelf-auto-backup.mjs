@@ -11,6 +11,17 @@ import { normalizeCosPrefix } from './lib/cos-prefix.mjs';
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const REQUIRED_PATHS = ['localRepo', 'stateDir', 'restoreRoot'];
+const TOP_LEVEL_KEYS = new Set([
+  'schemaVersion', 'localRepo', 'stateDir', 'restoreRoot', 'shelf', 'cos',
+  'credentialCommand', 'alertCommand', 'keepSuccessful', 'restoreEvery',
+  'lockStaleSeconds', 'commandTimeoutSeconds',
+]);
+const SHELF_KEYS = new Set(['sshTarget', 'nodePath', 'repoDir', 'root']);
+const COS_KEYS = new Set(['bucket', 'region', 'basePrefix']);
+const CLOUD_ENV_KEYS = [
+  'TENCENTCLOUD_SECRET_ID', 'TENCENTCLOUD_SECRET_KEY',
+  'COS_SECRET_ID', 'COS_SECRET_KEY', 'COS_SESSION_TOKEN',
+];
 const SECRET_ASSIGNMENT = /[A-Z0-9_]*(?:SECRET|PASSWORD|TOKEN|PRIVATE_KEY|SESSION_TOKEN|API_KEY)\s*=/i;
 const AKID = /AKID[A-Za-z0-9]{12,}/;
 const SECRET_VALUE = /(?:sk-|ghp_)[A-Za-z0-9_-]{16,}/i;
@@ -25,6 +36,11 @@ function assertPlainObject(value, label) {
 
 function assertPositiveInteger(value, label) {
   if (!Number.isInteger(value) || value < 1) fail(`${label} must be a positive integer`);
+}
+
+function assertAllowedKeys(value, allowed, label) {
+  const unknown = Object.keys(value).filter((key) => !allowed.has(key));
+  if (unknown.length > 0) fail(`${label} contains unknown field(s): ${unknown.join(', ')}`);
 }
 
 function isSecretKey(key) {
@@ -81,11 +97,13 @@ export async function loadBackupConfig(configPath) {
   }
   assertPlainObject(config, 'config');
   inspectForSecrets(config);
+  assertAllowedKeys(config, TOP_LEVEL_KEYS, 'config');
   if (config.schemaVersion !== 1) fail('schemaVersion must be 1');
   for (const key of REQUIRED_PATHS) {
     if (!path.isAbsolute(config[key] ?? '')) fail(`${key} must be an absolute path`);
   }
   assertPlainObject(config.shelf, 'shelf');
+  assertAllowedKeys(config.shelf, SHELF_KEYS, 'shelf');
   if (!config.shelf.sshTarget || /[\s\n\r]/.test(config.shelf.sshTarget) || config.shelf.sshTarget.startsWith('-')) {
     fail('shelf.sshTarget must be a single SSH target');
   }
@@ -93,6 +111,7 @@ export async function loadBackupConfig(configPath) {
     if (!path.posix.isAbsolute(config.shelf[key] ?? '')) fail(`shelf.${key} must be an absolute POSIX path`);
   }
   assertPlainObject(config.cos, 'cos');
+  assertAllowedKeys(config.cos, COS_KEYS, 'cos');
   if (!/^[a-z0-9][a-z0-9.-]+-\d+$/.test(config.cos.bucket ?? '')) fail('cos.bucket is invalid');
   if (!/^[a-z][a-z0-9-]+$/.test(config.cos.region ?? '')) fail('cos.region is invalid');
   config.cos.basePrefix = normalizeCosPrefix(config.cos.basePrefix);
@@ -145,8 +164,9 @@ function defaultRunProcess({
   includeStderr = true,
 }) {
   return new Promise((resolve, reject) => {
-    const childEnv = { ...process.env, ...env };
+    const childEnv = { ...process.env };
     for (const key of stripEnv) delete childEnv[key];
+    Object.assign(childEnv, env);
     const child = spawn(command, args, {
       env: childEnv,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -215,6 +235,7 @@ export function createDefaultOperations(config, { runProcess = defaultRunProcess
       '--', config.shelf.sshTarget, 'bash', '-s',
     ],
     stdin: script,
+    stripEnv: CLOUD_ENV_KEYS,
     timeout: timeout + 30_000,
   });
   const offsiteArgs = (action, locationFlag, location, prefix) => [
@@ -230,10 +251,7 @@ export function createDefaultOperations(config, { runProcess = defaultRunProcess
       const [command, ...baseArgs] = config.credentialCommand;
       const { stdout } = await runProcess({
         label: 'mint_credentials', command, args: [...baseArgs, '--prefix', prefix, '--json'],
-        stripEnv: [
-          'TENCENTCLOUD_SECRET_ID', 'TENCENTCLOUD_SECRET_KEY',
-          'COS_SECRET_ID', 'COS_SECRET_KEY', 'COS_SESSION_TOKEN',
-        ],
+        stripEnv: CLOUD_ENV_KEYS,
         includeStderr: false,
         timeout,
       });
@@ -276,7 +294,7 @@ export function createDefaultOperations(config, { runProcess = defaultRunProcess
       const { stdout } = await runProcess({
         label: 'upload_metadata', command: process.execPath,
         args: offsiteArgs('upload', '--root', root, prefix),
-        env: credentialEnv(credentials), timeout,
+        env: credentialEnv(credentials), stripEnv: CLOUD_ENV_KEYS, timeout,
       });
       return parseJson(stdout, 'metadata upload');
     },
@@ -284,7 +302,7 @@ export function createDefaultOperations(config, { runProcess = defaultRunProcess
       const { stdout } = await runProcess({
         label: 'verify_metadata', command: process.execPath,
         args: offsiteArgs('verify', '--root', root, prefix),
-        env: credentialEnv(credentials), timeout,
+        env: credentialEnv(credentials), stripEnv: CLOUD_ENV_KEYS, timeout,
       });
       return parseJson(stdout, 'metadata verification');
     },
@@ -292,7 +310,7 @@ export function createDefaultOperations(config, { runProcess = defaultRunProcess
       const { stdout } = await runProcess({
         label: 'restore_shelf', command: process.execPath,
         args: offsiteArgs('restore', '--dest', dest, prefix),
-        env: credentialEnv(credentials), timeout,
+        env: credentialEnv(credentials), stripEnv: CLOUD_ENV_KEYS, timeout,
       });
       return parseJson(stdout, 'shelf restore');
     },
@@ -308,6 +326,7 @@ export function createDefaultOperations(config, { runProcess = defaultRunProcess
       await runProcess({
         label: 'alert', command, args, stdin: `${JSON.stringify(event)}\n`,
         includeStderr: false,
+        stripEnv: CLOUD_ENV_KEYS,
         timeout: Math.min(timeout, 60_000),
       });
       return { pass: true };
@@ -477,6 +496,10 @@ export async function runAutomaticBackup(config, operations, runtime = {}) {
       };
     }
 
+    stage = 'cleanup_restore';
+    await fsp.rm(restoreDest, { recursive: true, force: true });
+
+    stage = 'write_metadata';
     const evidence = {
       runId,
       prefix: runPrefix,
@@ -507,6 +530,7 @@ export async function runAutomaticBackup(config, operations, runtime = {}) {
       prefix: `${runPrefix}meta/`, credentials, root: metaRoot,
     }), 'verify metadata');
 
+    stage = 'commit_state';
     const entry = { ...evidence, pass: true };
     state.history.push(entry);
     const successful = state.history.filter((item) => item.pass);

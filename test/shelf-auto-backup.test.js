@@ -112,6 +112,14 @@ describe('automatic shelf backup configuration', () => {
     await expectSecretConfigRejected({ token: 'do-not-store-this' });
   });
 
+  test('rejects unknown configuration fields instead of trusting their names', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-unknown-config-'));
+    const file = path.join(root, 'config.json');
+    fs.writeFileSync(file, JSON.stringify(fixtureConfig(root, { harmlessLookingValue: 'secret material' })));
+
+    await expect(loadBackupConfig(file)).rejects.toThrow(/unknown field.*harmlessLookingValue/i);
+  });
+
   test('rejects a secret assignment embedded in a command', async () => {
     await expectSecretConfigRejected({
       credentialCommand: ['/bin/sh', '-c', 'COS_SECRET_ID=AKID1234567890123456'],
@@ -426,6 +434,7 @@ describe('automatic shelf backup command wiring', () => {
 
     const credentials = await operations.mintCredentials('scheduled/run/');
     await operations.uploadShelf({ prefix: 'scheduled/run/shelf/', credentials });
+    await operations.alert({ type: 'test' });
 
     const upload = calls.find((call) => call.label === 'upload_shelf');
     expect(upload.args.join(' ')).not.toContain(SECRET.secretKey);
@@ -438,6 +447,14 @@ describe('automatic shelf backup command wiring', () => {
       '-o', 'ConnectTimeout=30',
       '--', 'backup-test.example', 'bash', '-s',
     ]);
+    const alert = calls.find((call) => call.label === 'alert');
+    expect(alert.stripEnv).toEqual(expect.arrayContaining([
+      'TENCENTCLOUD_SECRET_ID',
+      'TENCENTCLOUD_SECRET_KEY',
+      'COS_SECRET_ID',
+      'COS_SECRET_KEY',
+      'COS_SESSION_TOKEN',
+    ]));
   });
 
   test('the credential command cannot inherit ambient Tencent or COS secrets', async () => {
