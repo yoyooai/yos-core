@@ -24,6 +24,7 @@ import { fetchRawFile } from '../lib/github.js';
 import { resolveReleaseRepo } from '../lib/release-source.js';
 import { promptYesNo, confirmInteractive } from '../lib/prompts.js';
 import { evaluateUpgrade } from '../lib/claude-eval.js';
+import { runComponentRepair } from '../lib/component-repair.js';
 
 /**
  * Print a single upgrade step result in real time.
@@ -621,12 +622,43 @@ async function handleUpgradeFlow(component, { jsonOutput, skipConfirm, skipEval,
     }
 
     if (!branch && check.success && !check.hasUpdate) {
+      const repair = runComponentRepair({
+        componentName: component,
+        skillDir,
+        stdio: jsonOutput ? 'pipe' : 'inherit',
+      });
+      if (!repair.success) {
+        if (jsonOutput) {
+          const errOutput = {
+            action: 'repair',
+            component,
+            success: false,
+            error: repair.code,
+            message: repair.message,
+            remediation: repair.remediation || undefined,
+          };
+          errOutput.reply = formatC4Reply('error', { message: repair.message });
+          console.log(JSON.stringify(errOutput, null, 2));
+        } else {
+          console.error(`Error [${repair.code}]: ${repair.message}`);
+          if (repair.remediation) console.error(repair.remediation);
+        }
+        return false;
+      }
       if (jsonOutput) {
-        const output = { action: 'check', component, ...check };
-        output.reply = formatC4Reply('check', { component, ...check });
+        const output = {
+          action: repair.declared ? 'integrity_check' : 'check',
+          component,
+          ...check,
+          integrityVerified: repair.declared,
+        };
+        output.reply = repair.declared
+          ? `${component} integrity verified (v${check.current})`
+          : formatC4Reply('check', { component, ...check });
         console.log(JSON.stringify(output, null, 2));
       } else {
-        console.log(success(`${bold(component)} is up to date (v${check.current})`));
+        const status = repair.declared ? 'integrity verified' : 'up to date';
+        console.log(success(`${bold(component)} is ${status} (v${check.current})`));
       }
       return true;
     }
