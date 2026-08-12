@@ -26,6 +26,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test } from '@jest/globals';
 
+import {
+  LEGACY_0_1_13_INDEX_SHA256,
+  legacy013Problems,
+  missingRegistrations,
+} from '../scripts/verify-public-shelf.mjs';
+
 const SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'verify-public-shelf.mjs');
 
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
@@ -54,6 +60,7 @@ function makeShelf({
   omitBody = null,
   omitPublicationMode = false,
   omitBuildId = false,
+  omitCapabilities = false,
 } = {}) {
   const bodies = new Map();
   const put = (p, text) => bodies.set(p, Buffer.from(text, 'utf8'));
@@ -105,7 +112,7 @@ function makeShelf({
       }]
       : [],
   };
-  put('capabilities.json', JSON.stringify(capabilities));
+  if (!omitCapabilities) put('capabilities.json', JSON.stringify(capabilities));
 
   // index.json does not register itself — it cannot carry its own hash. The
   // real shelf behaves the same way, so the fixture must too, and the verifier
@@ -525,7 +532,7 @@ describe('public shelf verifier: sign-off mode', () => {
   test('a fully credentialled sign-off passes', async () => {
     const shelf = makeShelf();
     const { base } = await serve(shelf);
-    const { code, stdout } = await run(base, [
+    const { code, stdout, stderr } = await run(base, [
       '--signoff',
       '--expect-build-id', shelf.buildId,
       '--expect-index-sha256', shelf.indexSha256,
@@ -594,54 +601,124 @@ describe('public shelf verifier: sign-off mode', () => {
 });
 
 /**
- * The production shelf immediately before 0.1.14 was built by the short-lived
- * catalog-capable generator between capability indexing and publication-mode
- * recording. Its index has buildId and the complete file catalog, but no
- * publicationMode. Treating that historical omission as a normal production
- * index would weaken every future release, so compatibility is explicit and
- * restricted to the 0.1.13 rollback shape.
+ * The production shelf immediately before 0.1.14 predates all three modern
+ * release markers: buildId, publicationMode, and capabilities.json. Compatibility
+ * therefore has to recognise that exact shape and pin its complete index bytes;
+ * treating any missing field as production would weaken every future release.
  */
 describe('public shelf verifier: 0.1.13 rollback compatibility', () => {
   test('the legacy shelf still fails closed without the explicit compatibility flag', async () => {
     const { base } = await serve(makeShelf({
       coreTags: ['v0.1.13'],
       omitPublicationMode: true,
+      omitBuildId: true,
+      omitCapabilities: true,
     }));
     const { code, stderr } = await run(base, ['--expect-versions', 'yos=0.1.13']);
 
     expect(code).toBe(1);
-    expect(stderr).toMatch(/publicationMode is undefined, expected production/);
+    expect(stderr).toMatch(/publicationMode|capabilities\.json/);
   });
 
-  test('a full local audit can explicitly verify the 0.1.13 legacy shelf', async () => {
-    const shelf = makeShelf({ coreTags: ['v0.1.13'], omitPublicationMode: true });
-    const dir = restoreDir(shelf);
-    const { code, stdout } = await runLocal(dir, ['--allow-legacy-missing-publication-mode']);
+  test('a full local audit verifies the pinned three-field-absent 0.1.13 shelf', async () => {
+    const shelf = makeShelf({
+      coreTags: ['v0.1.13'],
+      omitPublicationMode: true,
+      omitBuildId: true,
+      omitCapabilities: true,
+    });
+    const index = JSON.parse(shelf.bodies.get('index.json').toString('utf8'));
 
-    expect(stdout).toContain('[shelf] LEGACY: accepting missing publicationMode for core 0.1.13');
-    expect(stdout).toContain('[shelf] PASS');
-    expect(code).toBe(0);
+    expect(legacy013Problems(index, shelf.indexSha256, { acceptedDigest: shelf.indexSha256 })).toEqual([]);
+    expect(missingRegistrations(index, { legacy013: true })).toEqual([]);
+  });
+
+  test('rollback sign-off uses the index digest instead of a nonexistent buildId', async () => {
+    const shelf = makeShelf({
+      coreTags: ['v0.1.13'],
+      omitPublicationMode: true,
+      omitBuildId: true,
+      omitCapabilities: true,
+    });
+    const { base } = await serve(shelf);
+    const { code, stdout, stderr } = await run(base, [
+      '--allow-legacy-0.1.13',
+      '--signoff',
+      '--expect-index-sha256', LEGACY_0_1_13_INDEX_SHA256,
+      '--expect-versions', 'yos=0.1.13',
+    ]);
+
+    expect(code).toBe(1);
+    expect(stdout).not.toContain('[shelf] PASS');
+    expect(stderr).not.toContain('--expect-build-id');
+  });
+
+  test('legacy mode itself requires a full audit', async () => {
+    const shelf = makeShelf({
+      coreTags: ['v0.1.13'],
+      omitPublicationMode: true,
+      omitBuildId: true,
+      omitCapabilities: true,
+    });
+    const dir = restoreDir(shelf);
+    const { code, stderr } = await new Promise((resolve) => {
+      execFile(process.execPath, [
+        SCRIPT,
+        '--local', dir,
+        '--allow-legacy-0.1.13',
+        '--expect-index-sha256', LEGACY_0_1_13_INDEX_SHA256,
+      ], { timeout: 30_000 }, (error, stdout, err) => resolve({
+        code: error ? error.code ?? 1 : 0,
+        stdout,
+        stderr: err,
+      }));
+    });
+
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/--allow-legacy-0\.1\.13 requires --full/);
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  test('rollback sign-off can explicitly verify the pinned 0.1.13 legacy shelf', async () => {
-    const shelf = makeShelf({ coreTags: ['v0.1.13'], omitPublicationMode: true });
-    const { base } = await serve(shelf);
-    const { code, stdout } = await run(base, [
-      '--allow-legacy-missing-publication-mode',
-      '--signoff',
-      '--expect-build-id', shelf.buildId,
-      '--expect-index-sha256', shelf.indexSha256,
-      '--expect-versions', 'yos=0.1.13,feishu=0.1.4',
-    ]);
+  test('legacy mode requires an externally pinned index digest', async () => {
+    const shelf = makeShelf({
+      coreTags: ['v0.1.13'],
+      omitPublicationMode: true,
+      omitBuildId: true,
+      omitCapabilities: true,
+    });
+    const dir = restoreDir(shelf);
+    const { code, stderr } = await runLocal(dir, ['--allow-legacy-0.1.13']);
 
-    expect(stdout).toContain('[shelf] PASS');
-    expect(code).toBe(0);
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/--allow-legacy-0\.1\.13 requires --expect-index-sha256/);
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  test('the compatibility flag cannot excuse a newer shelf missing publicationMode', async () => {
-    const dir = restoreDir(makeShelf({ omitPublicationMode: true }));
-    const { code, stderr } = await runLocal(dir, ['--allow-legacy-missing-publication-mode']);
+  test('legacy mode rejects an index digest other than the pinned one', async () => {
+    const shelf = makeShelf({
+      coreTags: ['v0.1.13'],
+      omitPublicationMode: true,
+      omitBuildId: true,
+      omitCapabilities: true,
+    });
+    const dir = restoreDir(shelf);
+    const { code, stderr } = await runLocal(dir, [
+      '--allow-legacy-0.1.13',
+      '--expect-index-sha256', 'f'.repeat(64),
+    ]);
+
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/--allow-legacy-0\.1\.13 requires the recorded index sha256/);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('legacy mode cannot excuse a newer three-field-absent shelf', async () => {
+    const shelf = makeShelf({ omitPublicationMode: true, omitBuildId: true, omitCapabilities: true });
+    const dir = restoreDir(shelf);
+    const { code, stderr } = await runLocal(dir, [
+      '--allow-legacy-0.1.13',
+      '--expect-index-sha256', LEGACY_0_1_13_INDEX_SHA256,
+    ]);
 
     expect(code).toBe(1);
     expect(stderr).toMatch(/only valid through core 0\.1\.13/);
@@ -649,48 +726,68 @@ describe('public shelf verifier: 0.1.13 rollback compatibility', () => {
   });
 
   test('the compatibility flag cannot excuse an explicit non-production mode', async () => {
-    const dir = restoreDir(makeShelf({ coreTags: ['v0.1.13'], publicationMode: 'test-only' }));
-    const { code, stderr } = await runLocal(dir, ['--allow-legacy-missing-publication-mode']);
+    const shelf = makeShelf({
+      coreTags: ['v0.1.13'],
+      publicationMode: 'test-only',
+      omitBuildId: true,
+      omitCapabilities: true,
+    });
+    const dir = restoreDir(shelf);
+    const { code, stderr } = await runLocal(dir, [
+      '--allow-legacy-0.1.13',
+      '--expect-index-sha256', LEGACY_0_1_13_INDEX_SHA256,
+    ]);
 
     expect(code).toBe(1);
     expect(stderr).toMatch(/publicationMode is test-only, expected production/);
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  test('the compatibility flag cannot excuse an index missing buildId too', async () => {
-    const dir = restoreDir(makeShelf({
+  test('legacy mode rejects a shelf that already has buildId', async () => {
+    const shelf = makeShelf({
       coreTags: ['v0.1.13'],
       omitPublicationMode: true,
-      omitBuildId: true,
-    }));
-    const { code, stderr } = await runLocal(dir, ['--allow-legacy-missing-publication-mode']);
+      omitCapabilities: true,
+    });
+    const dir = restoreDir(shelf);
+    const { code, stderr } = await runLocal(dir, [
+      '--allow-legacy-0.1.13',
+      '--expect-index-sha256', LEGACY_0_1_13_INDEX_SHA256,
+    ]);
 
     expect(code).toBe(1);
-    expect(stderr).toMatch(/legacy compatibility requires a 64-character hex buildId/);
+    expect(stderr).toMatch(/legacy compatibility requires buildId to be absent/);
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  test('the compatibility flag cannot excuse a malformed legacy buildId', async () => {
-    const shelf = makeShelf({ coreTags: ['v0.1.13'], omitPublicationMode: true });
-    const index = JSON.parse(shelf.bodies.get('index.json').toString('utf8'));
-    index.buildId = 'not-a-build-id';
-    shelf.bodies.set('index.json', Buffer.from(JSON.stringify(index), 'utf8'));
+  test('legacy mode rejects a shelf that already registers capabilities.json', async () => {
+    const shelf = makeShelf({ coreTags: ['v0.1.13'], omitPublicationMode: true, omitBuildId: true });
     const dir = restoreDir(shelf);
-    const { code, stderr } = await runLocal(dir, ['--allow-legacy-missing-publication-mode']);
+    const { code, stderr } = await runLocal(dir, [
+      '--allow-legacy-0.1.13',
+      '--expect-index-sha256', LEGACY_0_1_13_INDEX_SHA256,
+    ]);
 
     expect(code).toBe(1);
-    expect(stderr).toMatch(/legacy compatibility requires a 64-character hex buildId/);
+    expect(stderr).toMatch(/legacy compatibility requires capabilities\.json to be absent/);
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
   test('the compatibility flag is rejected outside local audit or sign-off', async () => {
-    const { base, hits } = await serve(makeShelf({ coreTags: ['v0.1.13'], omitPublicationMode: true }));
+    const shelf = makeShelf({
+      coreTags: ['v0.1.13'],
+      omitPublicationMode: true,
+      omitBuildId: true,
+      omitCapabilities: true,
+    });
+    const { base, hits } = await serve(shelf);
     const { code, stderr } = await new Promise((resolve) => {
       execFile(process.execPath, [
         SCRIPT,
         '--base-url', base,
         '--full',
-        '--allow-legacy-missing-publication-mode',
+        '--allow-legacy-0.1.13',
+        '--expect-index-sha256', LEGACY_0_1_13_INDEX_SHA256,
       ], { timeout: 30_000 }, (error, stdout, err) => resolve({
         code: error ? error.code ?? 1 : 0,
         stdout,

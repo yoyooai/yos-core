@@ -33,12 +33,12 @@
  *     [--expect-index-sha256 <hex>]
  *     [--expect-versions yos=0.1.14,feishu=0.1.4,weixin=0.1.3]
  *     [--signoff] [--stall-ms 30000] [--max-file-seconds 600] [--retries 2] [--json]
- *     [--allow-legacy-missing-publication-mode]
+ *     [--allow-legacy-0.1.13]
  *
  *   --signoff is for the two moments the answer gets quoted as a verdict —
- *   releasing and rolling back. It refuses to run at all unless --full and all
- *   three credentials are present, so "the shelf is verified" cannot come from a
- *   run that skipped one; and it refuses once it can see the catalog unless
+ *   releasing and rolling back. Modern shelves require --full and all three
+ *   credentials; the pinned pre-catalog 0.1.13 shelf has no buildId and uses its
+ *   immutable index digest instead. It refuses once it can see the catalog unless
  *   --expect-versions names the core plus every provider the shelf serves,
  *   because a flag that is merely present covers nothing it does not mention.
  *   Everyday checks and backup self-audits need none of it.
@@ -60,10 +60,15 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { newestReleaseTag, tagPrefixOf, tagVersion } from './lib/release-tags.mjs';
 
 const ALWAYS = ['index.json', 'capabilities.json', 'VERSIONS.md', 'index.html', 'install.sh'];
+
+/** The immutable index recorded before the 0.1.14 shelf replaced production. */
+export const LEGACY_0_1_13_INDEX_SHA256 =
+  'ea64d43821e814c12a7e83e90269dfc7b67e9ab6b1f8ef5d7dd838095b04f9c1';
 
 /** The three credentials that make a run a sign-off rather than a look. */
 const SIGNOFF_REQUIRED = [
@@ -76,7 +81,7 @@ function parseArgs(argv) {
   const o = {
     baseUrl: 'https://yoyooai.com/dist', local: null, full: false, sample: 40, concurrency: 8,
     json: false, expectBuildId: null, expectIndexSha256: null, expectVersions: null,
-    signoff: false, allowLegacyMissingPublicationMode: false,
+    signoff: false, allowLegacy013: false,
     stallMs: 30_000, maxFileSeconds: 600, retries: 2,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -95,8 +100,8 @@ function parseArgs(argv) {
     else if (a === '--expect-index-sha256') o.expectIndexSha256 = val().trim().toLowerCase();
     else if (a === '--expect-versions') o.expectVersions = val();
     else if (a === '--signoff') o.signoff = true;
-    else if (a === '--allow-legacy-missing-publication-mode') {
-      o.allowLegacyMissingPublicationMode = true;
+    else if (a === '--allow-legacy-0.1.13') {
+      o.allowLegacy013 = true;
     }
     else if (a === '--stall-ms') o.stallMs = Number(val());
     else if (a === '--max-file-seconds') o.maxFileSeconds = Number(val());
@@ -119,18 +124,29 @@ function parseArgs(argv) {
   // this replaces — the runbook said "别省这个参数" and the rollback command in
   // that same file forgot two of them (2026-08-11 review).
   if (o.signoff) {
-    const missing = SIGNOFF_REQUIRED.filter(([key]) => !o[key]).map(([, flag]) => flag);
+    const required = o.allowLegacy013
+      ? SIGNOFF_REQUIRED.filter(([key]) => key !== 'expectBuildId')
+      : SIGNOFF_REQUIRED;
+    const missing = required.filter(([key]) => !o[key]).map(([, flag]) => flag);
     if (!o.full) missing.push('--full');
     if (missing.length > 0) {
       throw new Error(`--signoff requires ${missing.join(', ')} — a sign-off with a missing credential is not a sign-off`);
     }
   }
-  if (o.allowLegacyMissingPublicationMode && !o.full) {
-    throw new Error('--allow-legacy-missing-publication-mode requires --full');
+  if (o.allowLegacy013 && !o.full) {
+    throw new Error('--allow-legacy-0.1.13 requires --full');
   }
-  if (o.allowLegacyMissingPublicationMode && !o.local && !o.signoff) {
+  if (o.allowLegacy013 && !o.expectIndexSha256) {
+    throw new Error('--allow-legacy-0.1.13 requires --expect-index-sha256');
+  }
+  if (o.allowLegacy013 && o.expectIndexSha256 !== LEGACY_0_1_13_INDEX_SHA256) {
     throw new Error(
-      '--allow-legacy-missing-publication-mode is only valid with --local --full or --signoff --full',
+      `--allow-legacy-0.1.13 requires the recorded index sha256 ${LEGACY_0_1_13_INDEX_SHA256}`,
+    );
+  }
+  if (o.allowLegacy013 && !o.local && !o.signoff) {
+    throw new Error(
+      '--allow-legacy-0.1.13 is only valid with --local --full or --signoff --full',
     );
   }
   return o;
@@ -262,7 +278,7 @@ export function pickEntries(files, { full = false, sample = 40 } = {}) {
  * @returns {string[]} human-readable problems, empty when the manifest agrees
  *   with itself
  */
-export function missingRegistrations(index) {
+export function missingRegistrations(index, { legacy013 = false } = {}) {
   const registered = new Map((index.files ?? []).map((f) => [f.path, f]));
   const problems = [];
   const require_ = (p, why) => {
@@ -273,6 +289,7 @@ export function missingRegistrations(index) {
   // exists for. Everything else on the always-list must be listed.
   for (const p of ALWAYS) {
     if (p === 'index.json') continue;
+    if (legacy013 && p === 'capabilities.json') continue;
     require_(p, 'part of every shelf');
   }
 
@@ -322,22 +339,31 @@ export function newestVersionOnShelf(index, { repoSuffix = '/yos-core', prefix =
 /**
  * The one legacy manifest shape the rollback path is allowed to accept.
  *
- * The production shelf immediately before 0.1.14 was built after buildId and
- * the capability catalog existed, but before publicationMode was recorded. A
- * global "missing means production" rule would let any future shelf drop the
- * field and pass. Compatibility therefore needs an explicit operator flag and
- * this exact historical fingerprint: newest core v0.1.13, a non-empty buildId,
- * and publicationMode absent rather than set to a non-production value.
+ * The production shelf immediately before 0.1.14 predates buildId,
+ * publicationMode, and capabilities.json. A global "missing means production"
+ * rule would let any future shelf drop those fields and pass. Compatibility
+ * therefore needs an explicit operator flag and the immutable index digest
+ * recorded before the production switch.
  */
-export function legacyPublicationModeProblems(index) {
+export function legacy013Problems(
+  index,
+  indexDigest,
+  { acceptedDigest = LEGACY_0_1_13_INDEX_SHA256 } = {},
+) {
   const problems = [];
   if (index.publicationMode !== undefined) {
     problems.push(
       `legacy compatibility only applies when publicationMode is absent, got ${index.publicationMode}`,
     );
   }
-  if (typeof index.buildId !== 'string' || !/^[0-9a-f]{64}$/.test(index.buildId)) {
-    problems.push('legacy compatibility requires a 64-character hex buildId');
+  if (index.buildId !== undefined) {
+    problems.push('legacy compatibility requires buildId to be absent');
+  }
+  if ((index.files ?? []).some((entry) => entry.path === 'capabilities.json')) {
+    problems.push('legacy compatibility requires capabilities.json to be absent');
+  }
+  if (indexDigest !== acceptedDigest) {
+    problems.push(`legacy compatibility requires index.json sha256 ${acceptedDigest}, got ${indexDigest}`);
   }
   const newest = newestVersionOnShelf(index);
   if (newest.error) problems.push(newest.error);
@@ -482,17 +508,17 @@ async function main() {
     note(`index.json sha256 ${indexDigest} does not match expected ${options.expectIndexSha256}`);
   }
 
-  let legacyPublicationModeAccepted = false;
-  if (options.allowLegacyMissingPublicationMode) {
-    const legacyProblems = legacyPublicationModeProblems(index);
+  let legacy013Accepted = false;
+  if (options.allowLegacy013) {
+    const legacyProblems = legacy013Problems(index, indexDigest);
     for (const problem of legacyProblems) note(problem);
-    legacyPublicationModeAccepted = legacyProblems.length === 0;
+    legacy013Accepted = legacyProblems.length === 0;
   }
-  if (index.publicationMode !== 'production' && !legacyPublicationModeAccepted) {
+  if (index.publicationMode !== 'production' && !legacy013Accepted) {
     note(`publicationMode is ${index.publicationMode}, expected production`);
   }
-  if (legacyPublicationModeAccepted && !options.json) {
-    console.log('[shelf] LEGACY: accepting missing publicationMode for core 0.1.13');
+  if (legacy013Accepted && !options.json) {
+    console.log('[shelf] LEGACY: accepting the pinned pre-catalog core 0.1.13 shelf');
   }
   if (options.expectBuildId && index.buildId !== options.expectBuildId) {
     note(`buildId ${index.buildId} does not match expected ${options.expectBuildId}`);
@@ -500,15 +526,18 @@ async function main() {
   for (const repo of index.repos ?? []) {
     if ((repo.droppedTags ?? []).length > 0) note(`${repo.repo} dropped tags: ${repo.droppedTags.join(', ')}`);
   }
-  for (const problem of missingRegistrations(index)) note(problem);
+  for (const problem of missingRegistrations(index, { legacy013: legacy013Accepted })) note(problem);
 
-  // capabilities.json must not be empty: an empty catalog is the exact failure
-  // a shelf built before the tags existed produces, and it still serves 200.
-  const capsBuf = await reader.read('capabilities.json');
-  const caps = JSON.parse(capsBuf.toString('utf8'));
-  const providers = (caps.capabilities ?? []).flatMap((c) => c.providers ?? []);
-  if (providers.length === 0) note('capabilities.json has no providers');
-  if (caps.buildId !== index.buildId) note(`capabilities.json buildId ${caps.buildId} != index.json buildId ${index.buildId}`);
+  let providers = [];
+  if (!legacy013Accepted) {
+    // Modern shelves must publish a non-empty capability catalog. The pinned
+    // 0.1.13 shelf predates the file and is identified by its complete index.
+    const capsBuf = await reader.read('capabilities.json');
+    const caps = JSON.parse(capsBuf.toString('utf8'));
+    providers = (caps.capabilities ?? []).flatMap((c) => c.providers ?? []);
+    if (providers.length === 0) note('capabilities.json has no providers');
+    if (caps.buildId !== index.buildId) note(`capabilities.json buildId ${caps.buildId} != index.json buildId ${index.buildId}`);
+  }
 
   // Sign-off preconditions, checked on the three small files fetched so far and
   // before the bulk download: an expectation that does not name everything the
@@ -564,7 +593,7 @@ async function main() {
     buildId: index.buildId,
     indexSha256: indexDigest,
     publicationMode: index.publicationMode,
-    legacyPublicationModeAccepted,
+    legacy013Accepted,
     registeredFiles: files.length,
     checkedFiles: entries.length,
     matchedFiles: matched,
@@ -590,7 +619,9 @@ async function main() {
   process.exit(problems.length === 0 ? 0 : 1);
 }
 
-main().catch((error) => {
-  console.error(`[shelf] FAILED: ${error.message}`);
-  process.exit(1);
-});
+if (path.resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(`[shelf] FAILED: ${error.message}`);
+    process.exit(1);
+  });
+}
