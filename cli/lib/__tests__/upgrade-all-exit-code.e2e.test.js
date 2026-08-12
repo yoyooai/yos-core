@@ -23,20 +23,27 @@ function makeFixture() {
   return { root, yosDir };
 }
 
-function writeSkill(dir, { name, version = '1.0.0' }) {
+function writeSkill(dir, { name, version = '1.0.0', repairHook = null }) {
   fs.mkdirSync(dir, { recursive: true });
+  const lifecycle = repairHook
+    ? '\nlifecycle:\n  hooks:\n    repair: hooks/repair.js'
+    : '';
   fs.writeFileSync(
     path.join(dir, 'SKILL.md'),
-    `---\nname: ${name}\nversion: ${version}\ndescription: Exit-code contract E2E fixture\n---\n\n# Fixture\n`,
+    `---\nname: ${name}\nversion: ${version}\ndescription: Exit-code contract E2E fixture${lifecycle}\n---\n\n# Fixture\n`,
     'utf8'
   );
+  if (repairHook) {
+    fs.mkdirSync(path.join(dir, 'hooks'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'hooks', 'repair.js'), repairHook, 'utf8');
+  }
   fs.writeFileSync(path.join(dir, 'payload.txt'), `${name} payload\n`, 'utf8');
 }
 
 // Remote component registered as github-release; latest tag is served by the
 // fake curl below, so `latestTag` controls whether an update is "available".
-function installRemoteComponent(yosDir, { name }) {
-  writeSkill(path.join(yosDir, '.claude', 'skills', name), { name });
+function installRemoteComponent(yosDir, { name, repairHook = null }) {
+  writeSkill(path.join(yosDir, '.claude', 'skills', name), { name, repairHook });
   const componentsPath = path.join(yosDir, '.yos', 'components.json');
   const components = JSON.parse(fs.readFileSync(componentsPath, 'utf8'));
   components[name] = {
@@ -95,6 +102,22 @@ function runCheckAll(root, yosDir, { json }) {
   });
 }
 
+function runUpgrade(root, yosDir, name) {
+  const fakeBin = path.join(root, 'bin');
+  return spawnSync(process.execPath, [CLI, 'upgrade', name, '--yes', '--json'], {
+    cwd: root,
+    env: {
+      ...process.env,
+      YOS_DIR: yosDir,
+      PATH: `${fakeBin}${path.delimiter}${process.env.PATH}`,
+      GITHUB_TOKEN: 'test-token',
+      GH_TOKEN: '',
+    },
+    encoding: 'utf8',
+    timeout: 30000,
+  });
+}
+
 describe('upgrade --all exit-code contract (#706): JSON and non-JSON agree', () => {
   it('all checks pass → exit 0 in both modes', () => {
     const { root, yosDir } = makeFixture();
@@ -145,5 +168,23 @@ describe('upgrade --all exit-code contract (#706): JSON and non-JSON agree', () 
     const plain = runCheckAll(root, yosDir, { json: false });
     assert.equal(plain.status, 1, plain.stderr);
     assert.match(plain.stdout, /No remotely updatable components found/);
+  });
+});
+
+describe('same-version component integrity repair', () => {
+  it('returns a stage-specific failure instead of claiming the component is up to date', () => {
+    const { root, yosDir } = makeFixture();
+    installRemoteComponent(yosDir, {
+      name: 'repair-failure-e2e',
+      repairHook: `console.error('[feishu_subskills_fetch_failed] GitHub assets are incomplete.');\nprocess.exit(1);\n`,
+    });
+    installFakeCurl(root, { latestTag: 'v1.0.0' });
+
+    const result = runUpgrade(root, yosDir, 'repair-failure-e2e');
+    assert.equal(result.status, 1, result.stderr);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.success, false);
+    assert.equal(output.error, 'feishu_subskills_fetch_failed');
+    assert.doesNotMatch(output.reply, /up to date/i);
   });
 });
