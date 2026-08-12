@@ -4,6 +4,16 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
+### Fixed
+
+- Run an explicitly declared component repair hook before reporting a
+  same-version component healthy. Components without that hook keep the old
+  behavior; a declared repair failure returns a stable error code instead of a
+  false "up to date" result.
+- Derive shared capability titles from one Core-owned resolver so local and
+  shelf catalogs cannot inherit the title of whichever provider was read first.
+  Provider display names remain attached to provider records.
+
 ## [0.1.14] - 2026-08-10
 
 ### Added

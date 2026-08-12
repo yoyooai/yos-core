@@ -61,4 +61,13 @@ Final development-side evidence:
   referencing unpublished tags, and JSON exposure of doctor-only health paths
   each have an independent test that fails when its guard is removed.
 
+## Shared title contract
+
+Shared capability titles are now Core-owned and provider-neutral. Local catalog
+reads and shelf publication both call the same resolver, while each provider
+keeps its own display title on the provider record. Reversing provider order
+therefore cannot rename a shared capability. Unknown capability IDs receive a
+deterministic fallback title so a newly published provider does not require a
+Core release merely to appear in the catalog.
+
 This record does not claim independent acceptance, merge, tag or publication.
