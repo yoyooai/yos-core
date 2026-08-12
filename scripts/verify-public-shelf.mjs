@@ -619,7 +619,10 @@ async function main() {
   process.exit(problems.length === 0 ? 0 : 1);
 }
 
-if (path.resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
+const invokedScript = process.argv[1]
+  ? fs.realpathSync(process.argv[1])
+  : null;
+if (invokedScript === fs.realpathSync(fileURLToPath(import.meta.url))) {
   main().catch((error) => {
     console.error(`[shelf] FAILED: ${error.message}`);
     process.exit(1);

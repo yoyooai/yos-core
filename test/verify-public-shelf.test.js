@@ -249,6 +249,26 @@ describe('public shelf verifier', () => {
     expect(stderr).toMatch(/yos-0\.1\.14\.tgz/);
   });
 
+  test('running the verifier through a symlink still executes the gate', async () => {
+    const { base } = await serve(makeShelf({ tamper: 'install.sh' }));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-verifier-link-'));
+    const linkedScript = path.join(dir, 'verify-shelf.mjs');
+    fs.symlinkSync(SCRIPT, linkedScript);
+
+    const { code, stderr } = await new Promise((resolve) => {
+      execFile(process.execPath, [linkedScript, '--base-url', base, '--full'], { timeout: 30_000 },
+        (error, stdout, childStderr) => resolve({
+          code: error ? error.code ?? 1 : 0,
+          stdout,
+          stderr: childStderr,
+        }));
+    });
+
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/install\.sh/);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
   test('a truncated file fails on byte length', async () => {
     const { base } = await serve(makeShelf({ truncate: 'install.sh' }));
     const { code, stderr } = await run(base);
