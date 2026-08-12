@@ -430,14 +430,25 @@ describe('the minted credential never becomes a file', () => {
     expect(DOC).not.toMatch(/cos-creds/);
   });
 
-  test('the control-machine block clears the credential from the shell on both paths', () => {
-    const controlBlocks = extractCommandBlocks(DOC).filter((b) => b.machine === '控制机');
-    expect(controlBlocks.length).toBeGreaterThan(0);
-    for (const block of controlBlocks) {
+  test('every control-machine block that mints a credential clears it on both paths', () => {
+    const credentialBlocks = extractCommandBlocks(DOC).filter((block) => {
+      if (block.machine !== '控制机') return false;
+      return block.lines.some((line) => line.text.includes('cos-sts-token.mjs'));
+    });
+    expect(credentialBlocks).toHaveLength(2);
+    for (const block of credentialBlocks) {
       const text = block.lines.map((l) => l.text).join('\n');
       // once on the failure path inside `|| { … }`, once after success
       expect(text.match(/unset CREDS/g)?.length).toBeGreaterThanOrEqual(2);
     }
+  });
+
+  test('control-machine blocks without credential minting need no fake cleanup', () => {
+    const timerBlock = extractCommandBlocks(DOC).find((block) =>
+      block.lines.some((line) => line.text.includes('enable --now yos-shelf-backup.timer')),
+    );
+    expect(timerBlock?.machine).toBe('控制机');
+    expect(timerBlock?.lines.map((line) => line.text).join('\n')).not.toContain('unset CREDS');
   });
 });
 
