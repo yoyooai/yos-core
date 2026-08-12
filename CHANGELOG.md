@@ -4,6 +4,8 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
+## [0.1.15] - 2026-08-13
+
 ### Fixed
 
 - Run an explicitly declared component repair hook before reporting a
