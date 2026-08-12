@@ -4,6 +4,7 @@ import path from 'node:path';
 import { describe, expect, test } from '@jest/globals';
 
 import { deriveCapabilityIndex } from '../scripts/lib/capability-index.mjs';
+import { buildLocalCapabilityCatalog } from '../cli/lib/capability-catalog.js';
 
 function write(root, relative, contents) {
   const target = path.join(root, relative);
@@ -40,5 +41,53 @@ describe('derived shelf capability index', () => {
     const a = deriveCapabilityIndex({ index, registry: { components: { z: {}, a: {} } }, outputRoot: root });
     const b = deriveCapabilityIndex({ index, registry: { components: { a: {}, z: {} } }, outputRoot: root });
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+  });
+
+  test('uses one provider-neutral title in shelf and local catalogs regardless of provider order', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-capability-title-'));
+    const providers = [
+      { name: 'feishu', id: 'channel.feishu', title: '飞书消息', tag: 'feishu-v0.1.4' },
+      { name: 'weixin', id: 'channel.weixin', title: '微信消息', tag: 'weixin-v0.1.3' },
+    ];
+    for (const provider of providers) {
+      const base = `yoyooai/yos-components/raw/${provider.tag}/channels/${provider.name}`;
+      write(root, `${base}/SKILL.md`, `---\nname: ${provider.name}\ncapabilities:\n  - id: communication.message\n    title: ${provider.title}\n    operations: [send, receive]\n    keywords: [chat]\n    stability: stable\n---\n`);
+      write(root, `${base}/package.json`, JSON.stringify({
+        name: `yos-${provider.name}`,
+        version: provider.tag.replace(/^.*-v/, ''),
+        yos: { id: provider.id, core: '>=0.1.0-alpha.1 <0.2.0' },
+        engines: { node: '>=20.20.0' },
+      }));
+    }
+    const index = {
+      schemaVersion: 1,
+      buildId: 'f'.repeat(64),
+      repos: [{ repo: 'yoyooai/yos-components', tags: providers.map((provider) => provider.tag) }],
+      files: [],
+    };
+    const registry = {
+      components: Object.fromEntries([...providers].reverse().map((provider) => [provider.name, {
+        repo: 'yoyooai/yos-components',
+        path: `channels/${provider.name}`,
+        tagPrefix: provider.name,
+        official: true,
+      }])),
+    };
+
+    const shelf = deriveCapabilityIndex({ index, registry, outputRoot: root });
+    const local = buildLocalCapabilityCatalog({
+      componentProviders: [...providers].reverse().map((provider) => ({
+        id: provider.id,
+        dir: path.join(root, `yoyooai/yos-components/raw/${provider.tag}/channels/${provider.name}`),
+        provenance: 'official',
+      })),
+      coreVersion: '0.1.14',
+      nodeVersion: '24.18.0',
+    });
+
+    expect(shelf.capabilities[0].title).toBe('Message routing');
+    expect(local.capabilities[0].title).toBe('Message routing');
+    expect(shelf.capabilities[0].providers.map((provider) => provider.title).sort()).toEqual(['feishu', 'weixin']);
+    expect(local.capabilities[0].providers.map((provider) => provider.title).sort()).toEqual(['feishu', 'weixin']);
   });
 });
