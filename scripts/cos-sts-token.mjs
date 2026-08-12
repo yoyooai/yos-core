@@ -37,6 +37,8 @@ import crypto from 'node:crypto';
 import http from 'node:http';
 import https from 'node:https';
 
+import { normalizeCosPrefix } from './lib/cos-prefix.mjs';
+
 const ENDPOINT = 'sts.tencentcloudapi.com';
 const SERVICE = 'sts';
 const VERSION = '2018-08-13';
@@ -75,8 +77,15 @@ function parseArgs(argv) {
   if (!options.bucket) usage('--bucket is required');
   if (!options.region) usage('--region is required');
   if (!options.prefix) usage('--prefix is required — an unscoped credential can overwrite every other backup in the bucket');
-  if (options.prefix.startsWith('/')) usage('--prefix must not start with /');
-  if (!options.prefix.endsWith('/')) options.prefix += '/';
+  // The prefix is interpolated into a CAM resource, where `*` and `?` match.
+  // Validating it is not tidiness: `--prefix '*'` used to mint a credential for
+  // the whole bucket, undoing the scoping with the very argument that names the
+  // run it is supposed to be scoped to.
+  try {
+    options.prefix = normalizeCosPrefix(options.prefix);
+  } catch (error) {
+    usage(`--prefix ${error.message}`);
+  }
   if (!Number.isInteger(options.duration) || options.duration < 900 || options.duration > 43200) {
     usage('--duration must be an integer between 900 and 43200 seconds');
   }

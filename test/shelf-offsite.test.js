@@ -491,6 +491,34 @@ describe('refusals', () => {
     expect(result.stderr).toMatch(/COS_SECRET_ID and COS_SECRET_KEY/);
   });
 
+  /*
+   * The same prefix rule as the credential minter, enforced here too: this is
+   * where the prefix becomes an object key, and a `..` segment aims a write
+   * outside the run. Refused at the argument, so nothing is walked or written.
+   */
+  test.each([['*'], ['rollback/*'], ['../'], ['a/../../b/'], ['?'], ['a//b/']])(
+    'upload refuses a prefix of %s before touching anything',
+    async (prefix) => {
+      const { port, store } = await fakeCos();
+      const dir = makeTree();
+      const result = await run(['upload', '--root', dir, ...BUCKET, '--prefix', prefix], { port });
+
+      expect(result.code).toBe(1);
+      expect(result.stderr).toMatch(/--prefix/);
+      expect(store.size).toBe(0);
+    },
+  );
+
+  test('restore refuses the same prefixes, so a bad one cannot write outside --dest', async () => {
+    const { port } = await fakeCos();
+    const dest = path.join(tmpDir(), 'restored');
+    const result = await run(['restore', '--dest', dest, ...BUCKET, '--prefix', '../'], { port });
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toMatch(/--prefix/);
+    expect(fs.existsSync(dest)).toBe(false);
+  });
+
   test('the test-only endpoint hook refuses to point anywhere but loopback', async () => {
     const { port } = await fakeCos();
     const dir = makeTree();

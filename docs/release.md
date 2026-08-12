@@ -229,16 +229,22 @@ export COS_BUCKET=<桶名>  COS_REGION=<地域>
 #    否则这一步要发两把钥匙。
 RUN="rollback/$OLD-$STAMP/"
 
-# ③ 换一把弱钥匙：只能写这个 RUN 前缀、没有删除权、自己会过期
-node scripts/cos-sts-token.mjs --bucket "$COS_BUCKET" --region "$COS_REGION" \
-  --prefix "$RUN" > /tmp/cos-creds.sh || exit 1
+# ③ 换一把弱钥匙：只能写这个 RUN 前缀、没有删除权、自己会过期。
+#    🔴 **不落盘**——临时钥匙只活在这个 shell 变量里。
+#    写成文件是错的：`>` 重定向在默认 umask(022) 下建出来是 **0644，同机任何用户可读**；
+#    放 /tmp 还多一层——固定文件名可以被别人抢先做成软链接，把钥匙写到他的目录里去。
+#    "改 600 + 退出时清理"能补这两条，但**根本没有文件**比"有文件而记得清理"
+#    少掉一整类出错方式（漏一条退出路径就前功尽弃）。
+CREDS=$(node scripts/cos-sts-token.mjs --bucket "$COS_BUCKET" --region "$COS_REGION" \
+          --prefix "$RUN") || exit 1
+test -n "$CREDS" || { echo "没拿到临时钥匙，停止"; exit 1; }
 
 # ④ 钥匙经管道喂进货架机执行，不落盘到货架机。
 #    下面是不带引号的 heredoc：所有 $变量 都在控制机这边就展开成字面值，
 #    送到货架机的是一段已经填好路径的脚本。货架机上没有这些变量，
 #    正因为如此，上面那几行赋值一个都不能少。
 {
-  cat /tmp/cos-creds.sh
+  printf '%s\n' "$CREDS"
   cat <<EOF
 set -euo pipefail
 cd $REPO
@@ -256,10 +262,10 @@ node scripts/shelf-offsite.mjs upload --root $METADIR \
 node scripts/shelf-offsite.mjs verify --root $METADIR \
   --bucket $COS_BUCKET --region $COS_REGION --prefix ${RUN}meta/
 EOF
-} | ssh "$SHELF" bash -s || { echo "站外备份失败，停止发布"; rm -f /tmp/cos-creds.sh; exit 1; }
+} | ssh "$SHELF" bash -s || { unset CREDS; echo "站外备份失败，停止发布"; exit 1; }
 
-# ⑤ 钥匙用完就删；它本来就会自己过期，但没有理由多留一分钟
-rm -f /tmp/cos-creds.sh
+# ⑤ 钥匙用完就丢；它本来就会自己过期，但没有理由在 shell 里多留一分钟
+unset CREDS
 
 # ⑥ 把 RUN 前缀写进本轮发布记录 —— 第 8 步回退时唯一找得回备份的线索
 echo "off-site RUN prefix: $RUN"
@@ -619,11 +625,13 @@ export COS_BUCKET=<桶名>  COS_REGION=<地域>
 
 RUN="shelf/$NEWVER-$(date +%Y%m%d)/"
 
-node scripts/cos-sts-token.mjs --bucket "$COS_BUCKET" --region "$COS_REGION" \
-  --prefix "$RUN" > /tmp/cos-creds.sh || exit 1
+# 同第 5 步③：钥匙不落盘，只活在这个变量里
+CREDS=$(node scripts/cos-sts-token.mjs --bucket "$COS_BUCKET" --region "$COS_REGION" \
+          --prefix "$RUN") || exit 1
+test -n "$CREDS" || { echo "没拿到临时钥匙，停止"; exit 1; }
 
 {
-  cat /tmp/cos-creds.sh
+  printf '%s\n' "$CREDS"
   cat <<EOF
 set -euo pipefail
 cd $REPO
@@ -633,9 +641,9 @@ node scripts/shelf-offsite.mjs upload --root $REAL \
 node scripts/shelf-offsite.mjs verify --root $REAL \
   --bucket $COS_BUCKET --region $COS_REGION --prefix $RUN
 EOF
-} | ssh "$SHELF" bash -s || { echo "新货架站外备份失败"; rm -f /tmp/cos-creds.sh; exit 1; }
+} | ssh "$SHELF" bash -s || { unset CREDS; echo "新货架站外备份失败"; exit 1; }
 
-rm -f /tmp/cos-creds.sh
+unset CREDS
 echo "off-site RUN prefix: $RUN"     # 写进本轮发布记录
 ```
 
@@ -699,6 +707,19 @@ echo "off-site RUN prefix: $RUN"     # 写进本轮发布记录
   钥匙用完即删、上传失败时整段中止且不再传凭据。
   **另外每个命令块的 `# @machine` 与变量闭合由同一个测试逐块检查** ——
   这份文件两轮复核里犯的是同一个错（跨机变量），现在它是机器判的。
+- **临时钥匙不落盘（2026-08-12 复核第三轮补）**：原来第 5/10 步把钥匙重定向进
+  `/tmp` 下一个**固定文件名** —— 默认 umask(022) 下建出来是 **0644，同机任何用户可读**
+  （实测确认），且固定名字在 /tmp 里可被别人抢先做成软链接、把钥匙引到他的目录。
+  **现在根本不建文件**，钥匙只活在控制机的一个 shell 变量里，两条退出路径都 `unset`。
+  由 `test/release-doc.test.js` 钉住：手册里任何命令块都不许把 `cos-sts-token.mjs`
+  重定向进文件，全文不许出现凭据文件路径，控制机块必须两处 `unset CREDS`。
+- **`--prefix` 白名单（2026-08-12 复核第三轮补）**：前缀会被拼进 CAM 资源
+  `<桶>/<前缀>*`，而 CAM 把 `*` `?` 当通配符 ⇒ `--prefix '*'` 原来会换出一把
+  **覆盖整桶**的钥匙，"收窄"被"给前缀"这个参数自己撤销；`../` 则会让对象键指到 run 外面。
+  规则改为**白名单**（段内只许字母数字和 `. _ -`，禁 `.`/`..`/空段），
+  由 `scripts/lib/cos-prefix.mjs` **一份定义、发钥匙与推货两边共用**（两份规则＝这类洞的回来方式）。
+  攻击用例逐条单独成测试（不用 `test.each` 打表 —— 关键文件门禁数的是源码里的测试调用数，
+  打成一张表会只算一条，删掉十二条也不报红）。
 - **临时钥匙的前缀权限（2026-08-12 对真 COS 实测，`GetBucket` 收窄）**：
   `<桶>/` → 403；`<桶>/<前缀>*` → **200，且只对该前缀**；`<桶>/*` → 200（全桶可列）。
   用 `rollback/*` 的钥匙实测：列 `shelf/` **403**、列整桶 **403**、

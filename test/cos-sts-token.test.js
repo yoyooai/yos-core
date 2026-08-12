@@ -195,6 +195,32 @@ describe('refusals', () => {
     expect(lastRequest).toBeNull();
   });
 
+  /*
+   * The unit tests in cos-prefix.test.js pin the rule; these pin that this
+   * script is actually holding it, and — the part that matters — that it refuses
+   * *before* contacting STS. A credential minted and then rejected is still a
+   * credential that existed.
+   */
+  test.each([['*'], ['rollback/*'], ['../'], ['a/../../b/'], ['?'], ['a//b/']])(
+    'a prefix of %s mints nothing at all',
+    async (prefix) => {
+      const port = await fakeSts();
+      const result = await run([...BASE, '--prefix', prefix], { port });
+
+      expect(result.code).toBe(1);
+      expect(result.stderr).toMatch(/--prefix/);
+      expect(lastRequest).toBeNull();
+      expect(result.stdout).not.toMatch(/export COS_/);
+    },
+  );
+
+  test('a wildcard prefix cannot reach the policy at all', async () => {
+    const port = await fakeSts();
+    await run([...BASE, '--prefix', 'rollback/*'], { port });
+    // the shape this prevents: resource `<bucket>/rollback/*​/*`
+    expect(lastRequest).toBeNull();
+  });
+
   test('a bucket name with no APPID is refused before anything is sent', async () => {
     const port = await fakeSts();
     const result = await run(['--bucket', 'backups', '--region', 'ap-test', '--prefix', 'p/'], { port });

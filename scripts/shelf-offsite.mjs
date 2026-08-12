@@ -43,6 +43,15 @@
  *                       ceiling — see SINGLE_PUT_LIMIT); checked across the whole
  *                       tree before the first PUT, so an oversized file cannot
  *                       leave half a backup behind
+ *
+ * ⚠️ Known limit, deliberate for now (小C's 2026-08-11 review, third round, filed
+ * as non-blocking): every file is read whole into memory, so peak usage is about
+ * `--max-file-bytes × --concurrency` — at the defaults, 5 GiB × 8. Today's shelf
+ * is ~900 files whose largest is a 15 MB vendor archive, so the real peak is
+ * ~120 MB and this is theory. It stops being theory the day something large
+ * lands on the shelf, and the fix is streaming with an incremental MD5 rather
+ * than a smaller ceiling. Until then: if you raise `--max-file-bytes`, lower
+ * `--concurrency` to match.
  *   --json              machine-readable report on stdout
  *
  * Credentials come from the environment, never from flags (a flag lands in the
@@ -67,6 +76,8 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import http from 'node:http';
 import https from 'node:https';
+
+import { normalizeCosPrefix } from './lib/cos-prefix.mjs';
 
 const COMMANDS = new Set(['upload', 'restore', 'verify']);
 
@@ -125,7 +136,15 @@ function parseArgs(argv) {
   for (const required of ['bucket', 'region', 'prefix']) {
     if (!options[required]) usage(`--${required} is required`);
   }
-  if (!options.prefix.endsWith('/')) options.prefix += '/';
+  // Same rule as the credential minter, from the same module. Here the prefix is
+  // pasted in front of every object key, so a `..` segment aims writes outside
+  // the run — and a prefix this script accepts but the token was never scoped
+  // to just fails late with a 403 instead of at the argument.
+  try {
+    options.prefix = normalizeCosPrefix(options.prefix);
+  } catch (error) {
+    usage(`--prefix ${error.message}`);
+  }
   if (!Number.isInteger(options.concurrency) || options.concurrency < 1) {
     usage('--concurrency must be a positive integer');
   }

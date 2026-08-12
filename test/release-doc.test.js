@@ -309,7 +309,6 @@ describe('the off-site backup step, executed out of the document', () => {
       path.join(metadir, 'shelf.json'),
       JSON.stringify({ pass: true, buildId: 'bid-old', indexSha256: 'sha-old' }),
     );
-    const credsFile = path.join(tmpDir('creds-'), 'cos-creds.sh');
 
     const controlBlock = extractCommandBlocks(DOC).find((b) => b.machine === '控制机');
     const lifted = fillIn(
@@ -325,7 +324,7 @@ describe('the off-site backup step, executed out of the document', () => {
         // a test cannot ssh; everything else about the pipeline is kept
         [/\| ssh "\$SHELF" bash -s/, '| bash -s'],
       ],
-    ).replaceAll('/tmp/cos-creds.sh', credsFile);
+    );
 
     const result = await runScript(lifted, {
       STS_ENDPOINT: `http://127.0.0.1:${stsPort}`,
@@ -358,8 +357,6 @@ describe('the off-site backup step, executed out of the document', () => {
     const writes = policy.statement.find((s) => s.action.includes('name/cos:PutObject'));
     expect(writes.resource).toEqual([`qcs::cos:ap-test:uid/1234567890:b-1234567890/${RUN}*`]);
 
-    // the key does not outlive the step
-    expect(fs.existsSync(credsFile)).toBe(false);
     expect(result.stdout).toContain(`off-site RUN prefix: ${RUN}`);
   });
 
@@ -384,7 +381,7 @@ describe('the off-site backup step, executed out of the document', () => {
         [/^export COS_BUCKET=<桶名>\s+COS_REGION=<地域>$/m, 'export COS_BUCKET=b-1234567890 COS_REGION=ap-test'],
         [/\| ssh "\$SHELF" bash -s/, '| bash -s'],
       ],
-    ).replaceAll('/tmp/cos-creds.sh', credsFile);
+    );
 
     const result = await runScript(lifted, {
       STS_ENDPOINT: `http://127.0.0.1:${stsPort}`,
@@ -395,6 +392,51 @@ describe('the off-site backup step, executed out of the document', () => {
 
     expect(result.code).not.toBe(0);
     expect(result.stdout + result.stderr).toMatch(/站外备份失败|停止发布/);
-    expect(fs.existsSync(credsFile)).toBe(false);
+  });
+});
+
+/*
+ * 小C's third round: the minted credential was redirected into
+ * `/tmp/cos-creds.sh`, which a default umask makes 0644 — readable by every
+ * account on the control machine — at a fixed name in a world-writable sticky
+ * directory, where someone can plant a symlink first and receive the token.
+ *
+ * The fix was not to chmod it. A credential that is never a file has no mode to
+ * get wrong, no name to squat, and no cleanup path to miss. These tests pin that
+ * property against the document, because "we removed the file" is exactly the
+ * kind of thing a later edit restores for convenience.
+ */
+describe('the minted credential never becomes a file', () => {
+  /** Joins `\`-continued lines so a redirect split across lines is still seen. */
+  function logicalLines(block) {
+    return block.lines
+      .map((l) => l.text)
+      .join('\n')
+      .replace(/\\\n\s*/g, ' ')
+      .split('\n');
+  }
+
+  test('no command block redirects cos-sts-token.mjs into a file', () => {
+    for (const block of extractCommandBlocks(DOC)) {
+      for (const line of logicalLines(block)) {
+        if (!line.includes('cos-sts-token.mjs')) continue;
+        expect(line).not.toMatch(/>\s*\S/);
+        expect(line).not.toMatch(/\btee\b/);
+      }
+    }
+  });
+
+  test('the runbook mentions no credential file path at all', () => {
+    expect(DOC).not.toMatch(/cos-creds/);
+  });
+
+  test('the control-machine block clears the credential from the shell on both paths', () => {
+    const controlBlocks = extractCommandBlocks(DOC).filter((b) => b.machine === '控制机');
+    expect(controlBlocks.length).toBeGreaterThan(0);
+    for (const block of controlBlocks) {
+      const text = block.lines.map((l) => l.text).join('\n');
+      // once on the failure path inside `|| { … }`, once after success
+      expect(text.match(/unset CREDS/g)?.length).toBeGreaterThanOrEqual(2);
+    }
   });
 });

@@ -218,11 +218,11 @@
     },
     {
       "path": "test/shelf-offsite.test.js",
-      "minimumTests": 25
+      "minimumTests": 26
     },
     {
       "path": "test/cos-sts-token.test.js",
-      "minimumTests": 18
+      "minimumTests": 19
     },
     {
       "path": "scripts/shelf-offsite.mjs"
@@ -238,8 +238,15 @@
     },
     {
       "path": "test/release-doc.test.js",
-      "minimumTests": 14
+      "minimumTests": 17
+    },
+    {
+      "path": "scripts/lib/cos-prefix.mjs"
+    },
+    {
+      "path": "test/cos-prefix.test.js",
+      "minimumTests": 22
     }
   ],
-  "approvedDigest": "8062f671e591f68a93cb21cfbbe90485c1f659a48a811aa00f6fa1989c280867"
+  "approvedDigest": "141178674ddcb39ff8b39c36170081c46bda4bbd7242344c64fe0e2e30cc5491"
 }

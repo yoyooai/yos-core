@@ -157,7 +157,14 @@ export function listTrackedFiles(root, { gitCommand = 'git' } = {}) {
   return files;
 }
 
-function countActiveTests(source) {
+/**
+ * Test *calls* written in the source — not test cases executed. A `test.each`
+ * block is one call and many cases, so this floor and the executed-test baseline
+ * in scripts/test-baselines.json are counting different things on purpose: this
+ * one catches a file being gutted, that one catches cases disappearing.
+ * Exported so the manifest's numbers can be derived rather than guessed.
+ */
+export function countActiveTests(source) {
   return [...stripCommentsAndStrings(source).matchAll(ACTIVE_TEST)].length;
 }
 
