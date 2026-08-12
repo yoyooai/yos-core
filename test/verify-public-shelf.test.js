@@ -52,6 +52,8 @@ function makeShelf({
   providerTag = null,
   unregister = null,
   omitBody = null,
+  omitPublicationMode = false,
+  omitBuildId = false,
 } = {}) {
   const bodies = new Map();
   const put = (p, text) => bodies.set(p, Buffer.from(text, 'utf8'));
@@ -115,8 +117,8 @@ function makeShelf({
   const vendorPath = 'vendor/caddy/v2.8.4/caddy_2.8.4_linux_amd64.tar.gz';
   const index = {
     schemaVersion: 1,
-    publicationMode,
-    buildId,
+    ...(omitPublicationMode ? {} : { publicationMode }),
+    ...(omitBuildId ? {} : { buildId }),
     repos: [
       {
         repo: CORE,
@@ -208,6 +210,17 @@ function run(baseUrl, extra = []) {
     execFile(process.execPath, [SCRIPT, '--base-url', baseUrl, '--full', ...extra], { timeout: 30_000 },
       (error, stdout, stderr) => resolve({ code: error ? error.code ?? 1 : 0, stdout, stderr }));
   });
+}
+
+function restoreDir(shelf, { remove = null } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-restore-'));
+  for (const [key, body] of shelf.bodies) {
+    if (key === remove) continue;
+    const target = path.join(dir, key);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, body);
+  }
+  return dir;
 }
 
 afterEach(async () => {
@@ -581,6 +594,117 @@ describe('public shelf verifier: sign-off mode', () => {
 });
 
 /**
+ * The production shelf immediately before 0.1.14 was built by the short-lived
+ * catalog-capable generator between capability indexing and publication-mode
+ * recording. Its index has buildId and the complete file catalog, but no
+ * publicationMode. Treating that historical omission as a normal production
+ * index would weaken every future release, so compatibility is explicit and
+ * restricted to the 0.1.13 rollback shape.
+ */
+describe('public shelf verifier: 0.1.13 rollback compatibility', () => {
+  test('the legacy shelf still fails closed without the explicit compatibility flag', async () => {
+    const { base } = await serve(makeShelf({
+      coreTags: ['v0.1.13'],
+      omitPublicationMode: true,
+    }));
+    const { code, stderr } = await run(base, ['--expect-versions', 'yos=0.1.13']);
+
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/publicationMode is undefined, expected production/);
+  });
+
+  test('a full local audit can explicitly verify the 0.1.13 legacy shelf', async () => {
+    const shelf = makeShelf({ coreTags: ['v0.1.13'], omitPublicationMode: true });
+    const dir = restoreDir(shelf);
+    const { code, stdout } = await runLocal(dir, ['--allow-legacy-missing-publication-mode']);
+
+    expect(stdout).toContain('[shelf] LEGACY: accepting missing publicationMode for core 0.1.13');
+    expect(stdout).toContain('[shelf] PASS');
+    expect(code).toBe(0);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('rollback sign-off can explicitly verify the pinned 0.1.13 legacy shelf', async () => {
+    const shelf = makeShelf({ coreTags: ['v0.1.13'], omitPublicationMode: true });
+    const { base } = await serve(shelf);
+    const { code, stdout } = await run(base, [
+      '--allow-legacy-missing-publication-mode',
+      '--signoff',
+      '--expect-build-id', shelf.buildId,
+      '--expect-index-sha256', shelf.indexSha256,
+      '--expect-versions', 'yos=0.1.13,feishu=0.1.4',
+    ]);
+
+    expect(stdout).toContain('[shelf] PASS');
+    expect(code).toBe(0);
+  });
+
+  test('the compatibility flag cannot excuse a newer shelf missing publicationMode', async () => {
+    const dir = restoreDir(makeShelf({ omitPublicationMode: true }));
+    const { code, stderr } = await runLocal(dir, ['--allow-legacy-missing-publication-mode']);
+
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/only valid through core 0\.1\.13/);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('the compatibility flag cannot excuse an explicit non-production mode', async () => {
+    const dir = restoreDir(makeShelf({ coreTags: ['v0.1.13'], publicationMode: 'test-only' }));
+    const { code, stderr } = await runLocal(dir, ['--allow-legacy-missing-publication-mode']);
+
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/publicationMode is test-only, expected production/);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('the compatibility flag cannot excuse an index missing buildId too', async () => {
+    const dir = restoreDir(makeShelf({
+      coreTags: ['v0.1.13'],
+      omitPublicationMode: true,
+      omitBuildId: true,
+    }));
+    const { code, stderr } = await runLocal(dir, ['--allow-legacy-missing-publication-mode']);
+
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/legacy compatibility requires a 64-character hex buildId/);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('the compatibility flag cannot excuse a malformed legacy buildId', async () => {
+    const shelf = makeShelf({ coreTags: ['v0.1.13'], omitPublicationMode: true });
+    const index = JSON.parse(shelf.bodies.get('index.json').toString('utf8'));
+    index.buildId = 'not-a-build-id';
+    shelf.bodies.set('index.json', Buffer.from(JSON.stringify(index), 'utf8'));
+    const dir = restoreDir(shelf);
+    const { code, stderr } = await runLocal(dir, ['--allow-legacy-missing-publication-mode']);
+
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/legacy compatibility requires a 64-character hex buildId/);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('the compatibility flag is rejected outside local audit or sign-off', async () => {
+    const { base, hits } = await serve(makeShelf({ coreTags: ['v0.1.13'], omitPublicationMode: true }));
+    const { code, stderr } = await new Promise((resolve) => {
+      execFile(process.execPath, [
+        SCRIPT,
+        '--base-url', base,
+        '--full',
+        '--allow-legacy-missing-publication-mode',
+      ], { timeout: 30_000 }, (error, stdout, err) => resolve({
+        code: error ? error.code ?? 1 : 0,
+        stdout,
+        stderr: err,
+      }));
+    });
+
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/only valid with --local --full or --signoff --full/);
+    expect(hits.size).toBe(0);
+  });
+});
+
+/**
  * The backup credential step in docs/release.md claimed to prove the copy was
  * complete while running --sample 1. A 906-file production-shaped copy with one
  * ordinary file deleted passed it: 68 files checked, exit 0 (2026-08-11 review).
@@ -590,17 +714,6 @@ describe('public shelf verifier: sign-off mode', () => {
  */
 describe('public shelf verifier: sample mode is not proof', () => {
   const plainFile = `${CORE}/raw/v0.1.14/VERSION`;
-
-  function restoreDir(shelf, { remove = null } = {}) {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-restore-'));
-    for (const [key, body] of shelf.bodies) {
-      if (key === remove) continue;
-      const target = path.join(dir, key);
-      fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.writeFileSync(target, body);
-    }
-    return dir;
-  }
 
   test('--full catches an ordinary missing file in a restored copy', async () => {
     const dir = restoreDir(makeShelf(), { remove: plainFile });

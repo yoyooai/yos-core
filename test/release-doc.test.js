@@ -440,3 +440,17 @@ describe('the minted credential never becomes a file', () => {
     }
   });
 });
+
+describe('the one legacy shelf exception stays narrow in the runbook', () => {
+  test('backup self-audit enables legacy mode only for 0.1.13', () => {
+    expect(DOC).toMatch(
+      /test "\$OLD" = "0\.1\.13" && LEGACY_MODE=--allow-legacy-missing-publication-mode[\s\S]*?--local "\$BAK" --full \$LEGACY_MODE --json/,
+    );
+  });
+
+  test('rollback sign-off enables the same narrow compatibility mode', () => {
+    expect(DOC).toMatch(
+      /test "\$OLD" = "0\.1\.13" && LEGACY_MODE=--allow-legacy-missing-publication-mode[\s\S]*?--signoff --full \\\n\s+\$LEGACY_MODE/,
+    );
+  });
+});

@@ -33,6 +33,7 @@
  *     [--expect-index-sha256 <hex>]
  *     [--expect-versions yos=0.1.14,feishu=0.1.4,weixin=0.1.3]
  *     [--signoff] [--stall-ms 30000] [--max-file-seconds 600] [--retries 2] [--json]
+ *     [--allow-legacy-missing-publication-mode]
  *
  *   --signoff is for the two moments the answer gets quoted as a verdict —
  *   releasing and rolling back. It refuses to run at all unless --full and all
@@ -75,7 +76,8 @@ function parseArgs(argv) {
   const o = {
     baseUrl: 'https://yoyooai.com/dist', local: null, full: false, sample: 40, concurrency: 8,
     json: false, expectBuildId: null, expectIndexSha256: null, expectVersions: null,
-    signoff: false, stallMs: 30_000, maxFileSeconds: 600, retries: 2,
+    signoff: false, allowLegacyMissingPublicationMode: false,
+    stallMs: 30_000, maxFileSeconds: 600, retries: 2,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -93,6 +95,9 @@ function parseArgs(argv) {
     else if (a === '--expect-index-sha256') o.expectIndexSha256 = val().trim().toLowerCase();
     else if (a === '--expect-versions') o.expectVersions = val();
     else if (a === '--signoff') o.signoff = true;
+    else if (a === '--allow-legacy-missing-publication-mode') {
+      o.allowLegacyMissingPublicationMode = true;
+    }
     else if (a === '--stall-ms') o.stallMs = Number(val());
     else if (a === '--max-file-seconds') o.maxFileSeconds = Number(val());
     else if (a === '--retries') o.retries = Number(val());
@@ -119,6 +124,14 @@ function parseArgs(argv) {
     if (missing.length > 0) {
       throw new Error(`--signoff requires ${missing.join(', ')} — a sign-off with a missing credential is not a sign-off`);
     }
+  }
+  if (o.allowLegacyMissingPublicationMode && !o.full) {
+    throw new Error('--allow-legacy-missing-publication-mode requires --full');
+  }
+  if (o.allowLegacyMissingPublicationMode && !o.local && !o.signoff) {
+    throw new Error(
+      '--allow-legacy-missing-publication-mode is only valid with --local --full or --signoff --full',
+    );
   }
   return o;
 }
@@ -306,6 +319,34 @@ export function newestVersionOnShelf(index, { repoSuffix = '/yos-core', prefix =
   return { repo: repo.repo, tag, version: tagVersion(tag) };
 }
 
+/**
+ * The one legacy manifest shape the rollback path is allowed to accept.
+ *
+ * The production shelf immediately before 0.1.14 was built after buildId and
+ * the capability catalog existed, but before publicationMode was recorded. A
+ * global "missing means production" rule would let any future shelf drop the
+ * field and pass. Compatibility therefore needs an explicit operator flag and
+ * this exact historical fingerprint: newest core v0.1.13, a non-empty buildId,
+ * and publicationMode absent rather than set to a non-production value.
+ */
+export function legacyPublicationModeProblems(index) {
+  const problems = [];
+  if (index.publicationMode !== undefined) {
+    problems.push(
+      `legacy compatibility only applies when publicationMode is absent, got ${index.publicationMode}`,
+    );
+  }
+  if (typeof index.buildId !== 'string' || !/^[0-9a-f]{64}$/.test(index.buildId)) {
+    problems.push('legacy compatibility requires a 64-character hex buildId');
+  }
+  const newest = newestVersionOnShelf(index);
+  if (newest.error) problems.push(newest.error);
+  else if (newest.version !== '0.1.13') {
+    problems.push(`legacy compatibility is only valid through core 0.1.13, got ${newest.version}`);
+  }
+  return problems;
+}
+
 async function mapLimit(items, limit, fn) {
   const out = new Array(items.length);
   let next = 0;
@@ -441,7 +482,18 @@ async function main() {
     note(`index.json sha256 ${indexDigest} does not match expected ${options.expectIndexSha256}`);
   }
 
-  if (index.publicationMode !== 'production') note(`publicationMode is ${index.publicationMode}, expected production`);
+  let legacyPublicationModeAccepted = false;
+  if (options.allowLegacyMissingPublicationMode) {
+    const legacyProblems = legacyPublicationModeProblems(index);
+    for (const problem of legacyProblems) note(problem);
+    legacyPublicationModeAccepted = legacyProblems.length === 0;
+  }
+  if (index.publicationMode !== 'production' && !legacyPublicationModeAccepted) {
+    note(`publicationMode is ${index.publicationMode}, expected production`);
+  }
+  if (legacyPublicationModeAccepted && !options.json) {
+    console.log('[shelf] LEGACY: accepting missing publicationMode for core 0.1.13');
+  }
   if (options.expectBuildId && index.buildId !== options.expectBuildId) {
     note(`buildId ${index.buildId} does not match expected ${options.expectBuildId}`);
   }
@@ -512,6 +564,7 @@ async function main() {
     buildId: index.buildId,
     indexSha256: indexDigest,
     publicationMode: index.publicationMode,
+    legacyPublicationModeAccepted,
     registeredFiles: files.length,
     checkedFiles: entries.length,
     matchedFiles: matched,

@@ -189,7 +189,7 @@
     },
     {
       "path": "test/verify-public-shelf.test.js",
-      "minimumTests": 36
+      "minimumTests": 44
     },
     {
       "path": "test/capability-index.test.js",
@@ -238,7 +238,7 @@
     },
     {
       "path": "test/release-doc.test.js",
-      "minimumTests": 17
+      "minimumTests": 19
     },
     {
       "path": "scripts/lib/cos-prefix.mjs"
@@ -248,5 +248,5 @@
       "minimumTests": 22
     }
   ],
-  "approvedDigest": "141178674ddcb39ff8b39c36170081c46bda4bbd7242344c64fe0e2e30cc5491"
+  "approvedDigest": "e5e8eb4ceeddc3fff6dba380f3a9fa396d63e9e0156ab687f020548bf037a8f7"
 }
