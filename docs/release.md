@@ -681,6 +681,101 @@ echo "off-site RUN prefix: $RUN"     # 写进本轮发布记录
 已经在本轮发布记录里，不需要再存一份。第 5 步要存，是因为**旧**货架的那两个值
 除了那次自审之外没有别的来源。
 
+### 周期性站外备份（控制机上的独立定时任务）
+
+第 5、10 步仍是发版的硬步骤，不能因为有定时任务就跳过。定时任务解决的是
+**两次发版之间货架机整机损坏**，它不打标签、不构建、不切换、不修改生产货架。
+
+自动任务必须跑在**控制机**，不能跑在货架机：控制机负责拿临时 STS、状态、告警和
+周期性恢复；货架机只通过 SSH 执行全量自审、上传和反向校验。长期腾讯云密钥不能
+写入本仓、配置、systemd unit 或货架机。`credentialCommand` 必须是一个外部命令，
+运行时返回只覆盖本次前缀、无删除权、即将自动过期的 JSON 凭据。
+
+无密钥配置示例（基础设施值由内部发布记录提供）：
+
+```json
+{
+  "schemaVersion": 1,
+  "localRepo": "/absolute/path/to/yos-core",
+  "stateDir": "/absolute/private/path/yos-shelf-backup/state",
+  "restoreRoot": "/absolute/private/path/yos-shelf-backup/restore",
+  "shelf": {
+    "sshTarget": "user@shelf-host",
+    "nodePath": "/usr/local/bin/node",
+    "repoDir": "/absolute/path/to/yos-core",
+    "root": "/srv/yos-dist"
+  },
+  "cos": {
+    "bucket": "bucket-name-appid",
+    "region": "region-name",
+    "basePrefix": "scheduled/"
+  },
+  "credentialCommand": ["/absolute/private/bin/mint-yos-backup-token"],
+  "alertCommand": ["/absolute/private/bin/send-yos-backup-alert"],
+  "keepSuccessful": 30,
+  "restoreEvery": 7,
+  "lockStaleSeconds": 14400,
+  "commandTimeoutSeconds": 7200
+}
+```
+
+`credentialCommand` 的 stdout 合同：
+
+```json
+{
+  "secretId": "temporary id",
+  "secretKey": "temporary key",
+  "token": "temporary session token",
+  "expiration": "future ISO-8601 timestamp"
+}
+```
+
+`alertCommand` 从 stdin 接收一行不含凭据的 JSON；备份失败但告警也失败时，任务仍然
+非零退出并同时保留两个失败原因。不得把 webhook 凭据直接写在 `alertCommand` 参数里，
+由告警命令自己从控制机的凭据设施读取。
+
+先手动跑一次，检查 `state.json`、COS 对象数和恢复证据，再生成 unit：
+
+```bash
+# @machine 控制机
+chmod 600 /absolute/private/path/backup.json
+node scripts/shelf-auto-backup.mjs --config /absolute/private/path/backup.json
+
+node scripts/install-shelf-auto-backup.mjs \
+  --config /absolute/private/path/backup.json \
+  --repo /absolute/path/to/yos-core \
+  --node /absolute/path/to/node \
+  --output-dir "$HOME/.config/systemd/user" \
+  --on-calendar '*-*-* 03:17:00' \
+  --randomized-delay-seconds 1800
+```
+
+安装器**只写文件，不启用 timer**。独立验收通过后，部署人再执行：
+
+```bash
+# @machine 控制机
+systemctl --user daemon-reload
+systemctl --user enable --now yos-shelf-backup.timer
+systemctl --user list-timers yos-shelf-backup.timer
+```
+
+回退自动化部署：
+
+```bash
+# @machine 控制机
+systemctl --user disable --now yos-shelf-backup.timer
+rm "$HOME/.config/systemd/user/yos-shelf-backup.timer" \
+   "$HOME/.config/systemd/user/yos-shelf-backup.service"
+systemctl --user daemon-reload
+```
+
+**保留策略只出清理候选，不自动删除 COS。** `state.json.retentionCandidates` 是待审批
+列表，不是已删除列表。删除历史备份必须使用另一把有删除权的凭据、独立任务和明确授权，
+防止自动任务一旦失控同时抹掉当前副本和全部历史。
+
+上线验收必须分别证明：timer 触发、失败告警送达、成功备份全量回读、第一次真实异机
+恢复通过、生产货架前后全树指纹一致。只看到 systemd `active` 不算备份通过。
+
 ---
 
 ## 三、这份文件的证据来源
