@@ -24,14 +24,33 @@ const componentsSource = fs.readFileSync(path.join(ROOT, 'cli', 'lib', 'componen
 describe('yos add reports what actually happened', () => {
   it('does not print "installed successfully" when the service is not running', () => {
     // The success line has to be reachable only when no service failed.
+    //
+    // 2026-08-13: the branch condition moved out of this file into
+    // classifyInstallOutcome() when a third outcome was added (a post-install
+    // hook that fails — see TD-149). What this test protects is unchanged: the
+    // success line must sit behind the outcome decision, never before it.
     assert.match(addSource, /serviceRunning = Boolean\(svcResult\.success\)/);
-    assert.match(addSource, /if \(serviceRunning === false\) \{/);
+    assert.match(addSource, /classifyInstallOutcome\(\{\s*serviceRunning,\s*postInstallDegraded\s*\}\)/);
+    assert.match(addSource, /if \(outcome === INSTALL_NOT_RUNNING\) \{/);
     assert.match(addSource, /is installed but not running yet/);
 
     const successLine = addSource.indexOf('installed successfully!');
-    const guard = addSource.indexOf('if (serviceRunning === false)');
+    const guard = addSource.indexOf('classifyInstallOutcome({ serviceRunning, postInstallDegraded })');
     assert.ok(guard > 0 && successLine > guard,
       'the success line must sit inside the outcome check, not before it');
+  });
+
+  // TD-149: nothing fetched, the hook ended non-zero, and the install still
+  // signed off with a green "installed successfully!" and exit code 0.
+  it('does not print "installed successfully" when the post-install hook failed', () => {
+    assert.match(addSource, /catch\s*\{\s*postInstallDegraded\s*=\s*true/);
+    assert.match(addSource, /if \(outcome === INSTALL_DEGRADED\) \{/);
+    assert.match(addSource, /its setup did not finish/);
+
+    const successLine = addSource.indexOf('installed successfully!');
+    const degradedBranch = addSource.indexOf('outcome === INSTALL_DEGRADED');
+    assert.ok(degradedBranch > 0 && successLine > degradedBranch,
+      'the degraded outcome must be handled before the success line is reachable');
   });
 
   it('still says "installed successfully" for a component with no service', () => {

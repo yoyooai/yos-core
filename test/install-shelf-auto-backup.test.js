@@ -76,7 +76,7 @@ describe('shelf automatic backup systemd installer', () => {
   test('writes units accepted by systemd-analyze', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-systemd-'));
     const outputDir = path.join(root, 'units');
-    const repoDir = path.join(root, 'repo with spaces');
+    const repoDir = path.join(root, 'repo-plain');
     fs.mkdirSync(repoDir);
     const result = await installSystemdUnits({
       configPath: config(root),
@@ -88,9 +88,11 @@ describe('shelf automatic backup systemd installer', () => {
     });
     const service = fs.readFileSync(result.servicePath, 'utf8');
 
-    // WorkingDirectory= does not unquote a whole value like ExecStart= does.
-    expect(service).toContain(`WorkingDirectory=${repoDir.replaceAll(' ', '\\x20')}\n`);
+    // Written verbatim: WorkingDirectory= is neither unquoted nor unescaped by
+    // systemd, so the only value it can carry is one needing neither.
+    expect(service).toContain(`WorkingDirectory=${repoDir}\n`);
     expect(service).not.toContain(`WorkingDirectory="${repoDir}"`);
+    expect(service).not.toContain('\\x');
 
     const version = spawnSync('systemd-analyze', ['--version'], { encoding: 'utf8' });
     if (process.platform === 'linux') {
@@ -102,6 +104,33 @@ describe('shelf automatic backup systemd installer', () => {
       );
       expect(verified.status).toBe(0, verified.stderr || verified.stdout);
     }
+  });
+
+  // `systemd-analyze verify` passing is NOT evidence the service can run: a
+  // WorkingDirectory= carrying \x20 or a quoted space verifies clean, loads,
+  // and then dies at startup with status=200/CHDIR — ExecStart never executes,
+  // so the timer looks healthy while no backup is ever written. There is no
+  // encoding that survives that field, so installation must refuse the path
+  // rather than emit a unit that only looks installed.
+  test('refuses a repo path systemd WorkingDirectory= cannot express', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-reject-'));
+    const outputDir = path.join(root, 'units');
+    const repoDir = path.join(root, 'repo with spaces');
+    fs.mkdirSync(repoDir);
+
+    await expect(
+      installSystemdUnits({
+        configPath: config(root),
+        repoDir,
+        nodePath: process.execPath,
+        outputDir,
+        onCalendar: 'daily',
+        randomizedDelaySeconds: 900,
+      }),
+    ).rejects.toThrow(/WorkingDirectory=.*unsupported character/s);
+
+    // Refusing must leave nothing half-installed.
+    expect(fs.existsSync(outputDir)).toBe(false);
   });
 
   async function expectUnitRejected(override) {

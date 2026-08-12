@@ -21,16 +21,35 @@ function unitQuote(value) {
   return `"${String(value).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
 }
 
-function unitPath(value) {
-  if (/\r|\n|\0/.test(value)) fail('systemd paths cannot contain newlines or NUL bytes');
-  return [...Buffer.from(String(value), 'utf8')]
-    .map((byte) => {
-      const char = String.fromCharCode(byte);
-      return /[A-Za-z0-9/._:-]/.test(char)
-        ? char
-        : `\\x${byte.toString(16).padStart(2, '0')}`;
-    })
-    .join('');
+// systemd's WorkingDirectory= takes its value literally: it neither strips
+// quotes the way ExecStart= does, nor decodes \xNN escapes. Every encoding we
+// tried on a real machine produced the same outcome — `systemd-analyze verify`
+// exits 0 and the unit loads, then the service dies at startup with
+// status=200/CHDIR and ExecStart never runs. That is the identical silent shape
+// as the bug this code replaced, only later and harder to see: the timer stays
+// green, no backup is ever written, and nothing alerts.
+//
+// Since no encoding works, refuse the input instead of pretending we encoded
+// it. Rejecting at install time is loud, immediate, and costs nothing: real
+// deployment paths contain none of these characters.
+//
+// ExecStart= and ReadWritePaths= are NOT affected — their quoted form is
+// verified working on a real machine. Do not "fix" them to match this.
+const WORKING_DIRECTORY_SAFE_CHAR = /[A-Za-z0-9/._:-]/;
+
+function unitWorkingDirectory(value) {
+  const raw = String(value);
+  const offenders = [...new Set([...raw])].filter((char) => !WORKING_DIRECTORY_SAFE_CHAR.test(char));
+  if (offenders.length > 0) {
+    fail(
+      `repoDir cannot be expressed in systemd WorkingDirectory=: unsupported character(s) ` +
+        `${offenders.map((char) => JSON.stringify(char)).join(', ')}. ` +
+        'systemd reads this field literally — both quoting and \\xNN escaping yield a unit that ' +
+        'loads but fails at startup with status=200/CHDIR, so the backup would silently never run. ' +
+        'Move the repository to a path built only from letters, digits and / . _ : -',
+    );
+  }
+  return raw;
 }
 
 export async function buildSystemdUnits({
@@ -53,7 +72,7 @@ export async function buildSystemdUnits({
   // enough for the full restore run instead of killing it after one stage.
   const timeout = config.commandTimeoutSeconds * MAX_PROCESS_STAGES + 300;
   return {
-    service: `[Unit]\nDescription=YOS shelf off-site backup\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=oneshot\nWorkingDirectory=${unitPath(repoDir)}\nExecStart=${unitQuote(nodePath)} ${unitQuote(runner)} --config ${unitQuote(configPath)}\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=read-only\nReadWritePaths=${unitQuote(config.stateDir)} ${unitQuote(config.restoreRoot)}\nTimeoutStartSec=${timeout}\n`,
+    service: `[Unit]\nDescription=YOS shelf off-site backup\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=oneshot\nWorkingDirectory=${unitWorkingDirectory(repoDir)}\nExecStart=${unitQuote(nodePath)} ${unitQuote(runner)} --config ${unitQuote(configPath)}\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=read-only\nReadWritePaths=${unitQuote(config.stateDir)} ${unitQuote(config.restoreRoot)}\nTimeoutStartSec=${timeout}\n`,
     timer: `[Unit]\nDescription=Schedule YOS shelf off-site backup\n\n[Timer]\nOnCalendar=${onCalendar}\nPersistent=true\nRandomizedDelaySec=${randomizedDelaySeconds}\nUnit=${SERVICE}\n\n[Install]\nWantedBy=timers.target\n`,
   };
 }

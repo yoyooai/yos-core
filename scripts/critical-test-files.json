@@ -113,7 +113,7 @@
     },
     {
       "path": "cli/lib/__tests__/add-honest-outcome.test.js",
-      "minimumTests": 4
+      "minimumTests": 8
     },
     {
       "path": "cli/lib/__tests__/release-source-machine-config.test.js",
@@ -282,14 +282,18 @@
     },
     {
       "path": "test/install-shelf-auto-backup.test.js",
-      "minimumTests": 6
+      "minimumTests": 7
     },
     {
       "path": "docs/plans/2026-08-12-shelf-auto-backup-design.md"
     },
     {
       "path": "开发过程/005_Feature_货架自动站外备份.md"
+    },
+    {
+      "path": "cli/lib/__tests__/install-outcome.test.js",
+      "minimumTests": 4
     }
   ],
-  "approvedDigest": "cdf8b3f155aa94fff9ea799b491be03978b435a35059665e7ea7d3b12f8d5de1"
+  "approvedDigest": "9f05e10af839eb82f72d0a961c75dd0265120cbb682a29dfa4355fb20ad00980"
 }

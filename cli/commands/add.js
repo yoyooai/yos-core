@@ -34,6 +34,7 @@ import { registerService } from '../lib/service.js';
 import { npmInstallEnv } from '../lib/npm-env.js';
 import { checkNodeEngine, describeEngineMismatch, readDeclaredNodeRange } from '../lib/component-engines.js';
 import { bold, dim, green, red, yellow, cyan, success, error, warn, heading } from '../lib/colors.js';
+import { classifyInstallOutcome, INSTALL_DEGRADED, INSTALL_NOT_RUNNING } from '../lib/install-outcome.js';
 
 function printManualCaddyRoutes(result) {
   console.log(`  ${warn('Caddy routes: manual configuration required')}`);
@@ -606,6 +607,14 @@ async function installDeclarative(resolved, skillDir, skipConfirm, jsonOutput, b
   }
 
   // Step 7: Run post-install hook
+  //
+  // A hook that ends non-zero has told us setup did not finish. Printing a
+  // green "complete" here — or letting the closing line below say "installed
+  // successfully!" — is how a component with nothing fetched still looked like
+  // a clean install. Carry the outcome to the summary instead: the install does
+  // continue (the failure is usually an optional add-on), but it must not be
+  // reported as success.
+  let postInstallDegraded = false;
   if (hooks['post-install']) {
     const hookPath = path.resolve(skillDir, hooks['post-install']);
     if (fs.existsSync(hookPath)) {
@@ -620,7 +629,8 @@ async function installDeclarative(resolved, skillDir, skipConfirm, jsonOutput, b
         });
         console.log(`  ${success('Post-install hook complete.')}`);
       } catch {
-        console.log(`  ${warn('Post-install hook had issues (non-fatal).')}`);
+        postInstallDegraded = true;
+        console.log(`  ${warn('Post-install hook did not finish — part of this component is unavailable (reason above).')}`);
       }
     }
   }
@@ -674,8 +684,14 @@ async function installDeclarative(resolved, skillDir, skipConfirm, jsonOutput, b
   // "installed successfully" directly under a red "does not stay running" line
   // reads as success to anyone skimming, and the thing they actually have to do
   // — fill in credentials — gets lost. Say which of the two happened.
-  if (serviceRunning === false) {
+  const outcome = classifyInstallOutcome({ serviceRunning, postInstallDegraded });
+  if (outcome === INSTALL_NOT_RUNNING) {
     console.log(`\n${warn(`${bold(resolved.name)} is installed but not running yet — see the steps above.`)}`);
+  } else if (outcome === INSTALL_DEGRADED) {
+    // Same reason as the line above: the last thing printed is what the user
+    // believes. A component whose setup hook failed is installed, not finished.
+    console.log(`\n${warn(`${bold(resolved.name)} is installed, but its setup did not finish — see above for what is unavailable.`)}`);
+    console.log(`${dim(`To retry that part once the machine can reach it: yos upgrade ${resolved.name}`)}`);
   } else {
     console.log(`\n${success(`${bold(resolved.name)} installed successfully!`)}`);
   }
