@@ -193,7 +193,30 @@
     },
     {
       "path": "test/capability-index.test.js",
-      "minimumTests": 2
+      "minimumTests": 3
+    },
+    {
+      "path": "cli/lib/__tests__/component-repair.test.js",
+      "minimumTests": 6
+    },
+    {
+      "path": "cli/lib/__tests__/upgrade-all-exit-code.e2e.test.js",
+      "minimumTests": 4
+    },
+    {
+      "path": "cli/lib/component-repair.js"
+    },
+    {
+      "path": "cli/lib/capability-titles.js"
+    },
+    {
+      "path": "cli/commands/component.js"
+    },
+    {
+      "path": "cli/lib/capability-catalog.js"
+    },
+    {
+      "path": "scripts/lib/capability-index.mjs"
     },
     {
       "path": "cli/lib/__tests__/claude-install-permissions.test.js",
@@ -248,5 +271,5 @@
       "minimumTests": 22
     }
   ],
-  "approvedDigest": "b665873f7f6422af1d04d42ea6788d5ad4a919574e20edcc62300ff8662381f2"
+  "approvedDigest": "2838243a6e59d044441c32308dc5d33bfbf48a194e26eb588f737165e9341809"
 }
