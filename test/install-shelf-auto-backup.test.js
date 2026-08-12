@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { describe, expect, test } from '@jest/globals';
 
 import {
@@ -70,6 +71,37 @@ describe('shelf automatic backup systemd installer', () => {
     ]);
     expect(fs.statSync(path.join(root, 'state')).mode & 0o777).toBe(0o700);
     expect(fs.statSync(path.join(root, 'restore')).mode & 0o777).toBe(0o700);
+  });
+
+  test('writes units accepted by systemd-analyze', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-systemd-'));
+    const outputDir = path.join(root, 'units');
+    const repoDir = path.join(root, 'repo with spaces');
+    fs.mkdirSync(repoDir);
+    const result = await installSystemdUnits({
+      configPath: config(root),
+      repoDir,
+      nodePath: process.execPath,
+      outputDir,
+      onCalendar: 'daily',
+      randomizedDelaySeconds: 900,
+    });
+    const service = fs.readFileSync(result.servicePath, 'utf8');
+
+    // WorkingDirectory= does not unquote a whole value like ExecStart= does.
+    expect(service).toContain(`WorkingDirectory=${repoDir.replaceAll(' ', '\\x20')}\n`);
+    expect(service).not.toContain(`WorkingDirectory="${repoDir}"`);
+
+    const version = spawnSync('systemd-analyze', ['--version'], { encoding: 'utf8' });
+    if (process.platform === 'linux') {
+      expect(version.status).toBe(0, version.error?.message || version.stderr);
+      const verified = spawnSync(
+        'systemd-analyze',
+        ['verify', result.servicePath, result.timerPath],
+        { encoding: 'utf8' },
+      );
+      expect(verified.status).toBe(0, verified.stderr || verified.stdout);
+    }
   });
 
   async function expectUnitRejected(override) {

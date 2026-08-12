@@ -21,6 +21,18 @@ function unitQuote(value) {
   return `"${String(value).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
 }
 
+function unitPath(value) {
+  if (/\r|\n|\0/.test(value)) fail('systemd paths cannot contain newlines or NUL bytes');
+  return [...Buffer.from(String(value), 'utf8')]
+    .map((byte) => {
+      const char = String.fromCharCode(byte);
+      return /[A-Za-z0-9/._:-]/.test(char)
+        ? char
+        : `\\x${byte.toString(16).padStart(2, '0')}`;
+    })
+    .join('');
+}
+
 export async function buildSystemdUnits({
   configPath,
   repoDir,
@@ -41,7 +53,7 @@ export async function buildSystemdUnits({
   // enough for the full restore run instead of killing it after one stage.
   const timeout = config.commandTimeoutSeconds * MAX_PROCESS_STAGES + 300;
   return {
-    service: `[Unit]\nDescription=YOS shelf off-site backup\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=oneshot\nWorkingDirectory=${unitQuote(repoDir)}\nExecStart=${unitQuote(nodePath)} ${unitQuote(runner)} --config ${unitQuote(configPath)}\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=read-only\nReadWritePaths=${unitQuote(config.stateDir)} ${unitQuote(config.restoreRoot)}\nTimeoutStartSec=${timeout}\n`,
+    service: `[Unit]\nDescription=YOS shelf off-site backup\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=oneshot\nWorkingDirectory=${unitPath(repoDir)}\nExecStart=${unitQuote(nodePath)} ${unitQuote(runner)} --config ${unitQuote(configPath)}\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=read-only\nReadWritePaths=${unitQuote(config.stateDir)} ${unitQuote(config.restoreRoot)}\nTimeoutStartSec=${timeout}\n`,
     timer: `[Unit]\nDescription=Schedule YOS shelf off-site backup\n\n[Timer]\nOnCalendar=${onCalendar}\nPersistent=true\nRandomizedDelaySec=${randomizedDelaySeconds}\nUnit=${SERVICE}\n\n[Install]\nWantedBy=timers.target\n`,
   };
 }
