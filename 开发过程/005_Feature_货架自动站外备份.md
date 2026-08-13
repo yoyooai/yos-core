@@ -47,3 +47,19 @@
 - TD-154 返修改为系统级 unit，并新增真实服务触发、告警写目录预检、新装失败清理、覆盖失败
   恢复旧 unit/启用状态的测试。代码仍在隔离分支，未合并、未打标签、未部署；生产当前的
   手工系统级绕法不能替代本分支的小A独立真机复验。
+- TD-155 真机复验确认 `Type=oneshot` 服务运行中由 systemd 报
+  `ActiveState=activating` 且 `systemctl is-active` 退出 3；旧实现只接受 `active`/退出 0，
+  因而漏过忙态并先停掉旧 timer。返修改读 `systemctl show ... ActiveState`，将 `active`、
+  `activating`、`reloading`、`deactivating` 统一视为忙，并把拒绝检查移到停止 timer 之前。
+- 安装事务现在捕获 SIGINT/SIGTERM，在同步系统命令返回后的事件循环检查点进入既有回滚；
+  测试覆盖两种信号下 unit、timer 启用状态与目录权限恢复，且监听器最终移除。
+- 锁定 Linux 环境 Node 24.18.0 / npm 11.16.0、`umask 0022` 下全量门禁通过：Jest
+  486/486、Node 1556/1556、6 个依赖根 0 漏洞、正式包 486 项、双打包 SHA-256
+  `953103870f1e8cfd76f663c2cb06cffbb37f21440a96ea4e00f2129b0c96bfd2`，
+  `npm run verify` PASS。测试机登录环境默认 `umask 0002` 会让临时配置成为组可写文件，安全校验
+  按设计拒绝；正式复验显式使用 0022，避免把台架权限漂移误算成产品失败。
+- 一次性 Linux 副本完成 7 刀撤销：忙态退回 `is-active` 语义、移除信号监听、放开
+  `--system`、绕过真实 `systemctl start`、绕过告警目录写权限、移除目录恢复、把 timer
+  启用挪到自检之前，七项均使定向测试报红；恢复原文件后 22/22 通过。
+- 本轮未加入真实告警发送自检：写权限预检仍只是必要条件，告警通路连通验证作为后续增强，
+  不冒充 TD-155 已覆盖项。
