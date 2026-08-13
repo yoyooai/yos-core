@@ -18,12 +18,16 @@ const SKILLS_DIR = path.join(HOME, 'yos', '.claude', 'skills');
 const BIN_DIR = path.join(YOS_DIR, 'bin');
 const HTTP_DIR = path.join(YOS_DIR, 'http');
 
-// Read a value from .env file (tolerates quotes and spaces around =)
+// Read a value from .env without crossing line boundaries. Explicit empty
+// values preserve each caller's established default.
 function readEnvValue(key, defaultValue = '') {
   try {
     const content = fs.readFileSync(path.join(YOS_DIR, '.env'), 'utf8');
-    const match = content.match(new RegExp(`^\\s*${key}\\s*=\\s*(.+)$`, 'm'));
-    if (match) return match[1].trim().replace(/^(['"])(.*)\1$/, '$2');
+    const match = content.match(new RegExp(`^[ \\t]*${key}[ \\t]*=[ \\t]*(.*)$`, 'm'));
+    if (match) {
+      const value = match[1].trim().replace(/^(['"])(.*)\1$/, '$2');
+      return value === '' ? defaultValue : value;
+    }
   } catch {}
   return defaultValue;
 }
