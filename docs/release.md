@@ -734,39 +734,53 @@ echo "off-site RUN prefix: $RUN"     # 写进本轮发布记录
 非零退出并同时保留两个失败原因。不得把 webhook 凭据直接写在 `alertCommand` 参数里，
 由告警命令自己从控制机的凭据设施读取。
 
-先手动跑一次，检查 `state.json`、COS 对象数和恢复证据，再生成 unit：
+先手动跑一次，检查 `state.json`、COS 对象数和恢复证据。之后必须使用**系统级**
+unit 安装器；用户级 `systemctl --user` 在普通账号控制机上会为沙箱创建 user namespace，
+使沙箱内的 SSH 系统配置变成 `nobody:nogroup`，timer 看似 active、真正触发时却以 255 失败。
+
+下面的安装命令会写入系统 unit、保持全部沙箱项、以指定的普通账号运行，并在启用 timer
+前**真实执行一次完整备份服务**。`--read-write-path` 可重复填写；告警命令需要写消息桥时，
+必须把对应目录列全。安装器会先用目标账号验证这些目录可写。
 
 ```bash
 # @machine 控制机
 chmod 600 /absolute/private/path/backup.json
 node scripts/shelf-auto-backup.mjs --config /absolute/private/path/backup.json
 
-node scripts/install-shelf-auto-backup.mjs \
+sudo /absolute/node-bin/node scripts/install-shelf-auto-backup.mjs \
+  --system \
+  --user backup-operator \
+  --home /home/backup-operator \
+  --path '/absolute/node-bin:/usr/local/bin:/usr/bin:/bin' \
   --config /absolute/private/path/backup.json \
   --repo /absolute/path/to/yos-core \
-  --node /absolute/path/to/node \
-  --output-dir "$HOME/.config/systemd/user" \
+  --node /absolute/node-bin/node \
+  --output-dir /etc/systemd/system \
+  --read-write-path /absolute/private/path/comm-bridge \
   --on-calendar '*-*-* 03:17:00' \
   --randomized-delay-seconds 1800
 ```
 
-安装器**只写文件，不启用 timer**。独立验收通过后，部署人再执行：
+退出码 0 同时证明：systemd 已读取本次生成的 unit、真实备份服务返回 `Result=success`、
+timer 已启用。任何一项失败都会退出非零；更新已有部署时，安装器会恢复旧 unit 及原先的
+enabled/active 状态，新装失败则移除新 unit。不得绕过失败后手工启用 timer。
+
+安装后读回：
 
 ```bash
 # @machine 控制机
-systemctl --user daemon-reload
-systemctl --user enable --now yos-shelf-backup.timer
-systemctl --user list-timers yos-shelf-backup.timer
+sudo systemctl status yos-shelf-backup.service --no-pager
+sudo systemctl list-timers yos-shelf-backup.timer
 ```
 
 回退自动化部署：
 
 ```bash
 # @machine 控制机
-systemctl --user disable --now yos-shelf-backup.timer
-rm "$HOME/.config/systemd/user/yos-shelf-backup.timer" \
-   "$HOME/.config/systemd/user/yos-shelf-backup.service"
-systemctl --user daemon-reload
+sudo systemctl disable --now yos-shelf-backup.timer
+sudo rm /etc/systemd/system/yos-shelf-backup.timer \
+        /etc/systemd/system/yos-shelf-backup.service
+sudo systemctl daemon-reload
 ```
 
 **保留策略只出清理候选，不自动删除 COS。** `state.json.retentionCandidates` 是待审批

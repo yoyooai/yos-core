@@ -70,11 +70,18 @@ current shelf and all historical backups.
 
 ## Scheduling
 
-`install-shelf-auto-backup.mjs` validates a non-secret JSON config and writes a
-user-level systemd service and timer. The unit uses `Type=oneshot`, a persistent
-timer, randomized delay, and an explicit working directory. It does not run
-`systemctl` itself: deployment and enablement remain an independently reviewed
-production action.
+`install-shelf-auto-backup.mjs` installs a system-level systemd service and timer
+that run as the selected unprivileged operator. System scope is required because
+user-level sandbox namespaces can remap the system SSH configuration ownership,
+causing SSH to fail only when the timer eventually fires. The service retains
+`NoNewPrivileges`, `PrivateTmp`, `ProtectSystem=strict`, and
+`ProtectHome=read-only`; explicit HOME, PATH, and writable paths provide only the
+runtime access the backup and alert commands need.
+
+Installation is fail-closed. Before accepting and enabling the timer, the
+installer starts the real oneshot service and requires `Result=success`. Failure
+restores the previous unit files and timer state, or removes a fresh failed
+installation. Generation without `--system` is rejected by the CLI.
 
 ## Acceptance
 
@@ -86,5 +93,9 @@ production action.
 - Retention candidates are deterministic and no delete operation is issued.
 - Generated units contain no secret values and refuse configs that contain
   credential material.
+- System installation proves the real backup service once before enabling the
+  timer; failed installation restores the previous units and timer state.
+- Additional alert write paths are checked with the selected runtime user before
+  any unit is installed.
 - Removing each critical failure check makes its focused test fail.
 - Full repository verification remains green with updated protected test floors.
