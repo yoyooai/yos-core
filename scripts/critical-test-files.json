@@ -290,7 +290,7 @@
     },
     {
       "path": "test/install-shelf-auto-backup.test.js",
-      "minimumTests": 7
+      "minimumTests": 22
     },
     {
       "path": "docs/plans/2026-08-12-shelf-auto-backup-design.md"
