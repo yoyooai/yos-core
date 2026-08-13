@@ -308,11 +308,11 @@
     },
     {
       "path": "skills/comm-bridge/scripts/__tests__/c4-dispatcher-failure.test.js",
-      "minimumTests": 11
+      "minimumTests": 12
     },
     {
       "path": "skills/comm-bridge/scripts/__tests__/ecosystem-admin-env.test.js",
-      "minimumTests": 1
+      "minimumTests": 2
     },
     {
       "path": "skills/activity-monitor/scripts/__tests__/health-check-message.test.js",
@@ -328,5 +328,5 @@
       "path": "skills/comm-bridge/scripts/c4-dispatcher.js"
     }
   ],
-  "approvedDigest": "efda5ef70edac5238860e08bd1f584225c5364485c18cebec94462fefe5ee64e"
+  "approvedDigest": "598e0f5e7447e1b35eda8c4c78560d07f2b6a6d7de3c3e2503ce9933eb095406"
 }
