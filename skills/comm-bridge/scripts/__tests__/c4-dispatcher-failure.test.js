@@ -91,6 +91,16 @@ describe('conversation delivery exhaustion', () => {
     assert.match(liveLoop[1], /maybeAlertAdministratorOfAgentDown\(\{[\s\S]*?\bpendingCount,/);
   });
 
+  it('arms the alert cooldown after an attempt rather than only after delivery', () => {
+    const source = fs.readFileSync(new URL('../c4-dispatcher.js', import.meta.url), 'utf8');
+    const liveLoop = source.match(/async function processNextMessage\(\) \{([\s\S]*?)const item = claimNextItem\(\);/);
+    assert.ok(liveLoop, 'processNextMessage must remain inspectable before claiming work');
+    const cooldownGuard = liveLoop[1].match(/if \(alert\.attempted\) \{([\s\S]*?)\n\s*\}/);
+    assert.ok(cooldownGuard, 'an attempted alert must arm the cooldown');
+    assert.match(cooldownGuard[1], /lastAgentDownAlertAtMs = alert\.lastAlertAtMs;/);
+    assert.doesNotMatch(liveLoop[1], /if \(alert\.alerted\) \{[\s\S]*?lastAgentDownAlertAtMs/);
+  });
+
   it('records one local threshold warning even when no message is queued', () => {
     assert.equal(dispatcher.shouldLogAgentDownThreshold(29), false);
     assert.equal(dispatcher.shouldLogAgentDownThreshold(30), true);
