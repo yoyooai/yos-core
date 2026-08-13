@@ -43,6 +43,8 @@ describe('conversation delivery exhaustion', () => {
       consecutiveChecks: 30,
       pendingCount: 3
     });
+    assert.equal(first.alerted, true);
+    assert.equal(first.attempted, true);
     assert.equal(first.lastAlertAtMs, 1_000_000);
 
     await dispatcher.maybeAlertAdministratorOfAgentDown({
@@ -85,7 +87,40 @@ describe('conversation delivery exhaustion', () => {
     const liveLoop = source.match(/async function processNextMessage\(\) \{([\s\S]*?)const item = claimNextItem\(\);/);
     assert.ok(liveLoop, 'processNextMessage must remain inspectable before claiming work');
     assert.match(liveLoop[1], /maybeAlertAdministratorOfAgentDown\(\{/);
-    assert.match(liveLoop[1], /pendingCount: getPendingCount\(\)/);
+    assert.match(liveLoop[1], /const pendingCount = getPendingCount\(\);/);
+    assert.match(liveLoop[1], /maybeAlertAdministratorOfAgentDown\(\{[\s\S]*?\bpendingCount,/);
+  });
+
+  it('records one local threshold warning even when no message is queued', () => {
+    assert.equal(dispatcher.shouldLogAgentDownThreshold(29), false);
+    assert.equal(dispatcher.shouldLogAgentDownThreshold(30), true);
+    assert.equal(dispatcher.shouldLogAgentDownThreshold(31), false);
+
+    const source = fs.readFileSync(new URL('../c4-dispatcher.js', import.meta.url), 'utf8');
+    const liveLoop = source.match(/async function processNextMessage\(\) \{([\s\S]*?)const item = claimNextItem\(\);/);
+    assert.ok(liveLoop, 'processNextMessage must remain inspectable before claiming work');
+    const warningGuard = liveLoop[1].match(/if \(shouldLogAgentDownThreshold\(tmuxMissingChecks\)\) \{([\s\S]*?)\n\s*\}/);
+    assert.ok(warningGuard, 'the local threshold warning must have its own guard');
+    assert.match(warningGuard[1], /pending=\$\{pendingCount\}/);
+    assert.doesNotMatch(warningGuard[0], /alert\.(?:alerted|attempted)/);
+  });
+
+  it('does not claim an alert was sent when the administrator target is not configured', async () => {
+    const result = await dispatcher.maybeAlertAdministratorOfAgentDown({
+      agentState: 'offline',
+      consecutiveChecks: 30,
+      pendingCount: 2,
+      lastAlertAtMs: 0,
+      nowMs: 1_000_000,
+      notifyAdmin: async () => ({ sent: false, reason: 'not_configured' })
+    });
+
+    assert.deepEqual(result, {
+      alerted: false,
+      attempted: true,
+      lastAlertAtMs: 1_000_000,
+      reason: 'not_configured'
+    });
   });
 
   it('keeps the dispatcher alive when the independent alert transport fails', async () => {
@@ -99,6 +134,7 @@ describe('conversation delivery exhaustion', () => {
     });
 
     assert.equal(result.alerted, false);
+    assert.equal(result.attempted, true);
     assert.equal(result.lastAlertAtMs, 1_000_000, 'failed alerts still enter cooldown');
   });
 

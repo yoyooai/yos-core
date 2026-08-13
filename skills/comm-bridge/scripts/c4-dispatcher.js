@@ -582,16 +582,25 @@ export async function maybeAlertAdministratorOfAgentDown({
   const thresholdReached = consecutiveChecks >= TMUX_MISSING_WARN_THRESHOLD;
   const cooldownElapsed = lastAlertAtMs === 0 || (nowMs - lastAlertAtMs) >= AGENT_DOWN_ALERT_COOLDOWN_MS;
   if (!unavailable || !thresholdReached || pendingCount <= 0 || !cooldownElapsed) {
-    return { alerted: false, lastAlertAtMs };
+    return { alerted: false, attempted: false, lastAlertAtMs };
   }
 
   try {
-    await notifyAdmin({ agentState, consecutiveChecks, pendingCount });
-    return { alerted: true, lastAlertAtMs: nowMs };
+    const result = await notifyAdmin({ agentState, consecutiveChecks, pendingCount });
+    return {
+      alerted: result?.sent !== false,
+      attempted: true,
+      lastAlertAtMs: nowMs,
+      reason: result?.reason
+    };
   } catch (err) {
     log(`AGENT DOWN ALERT SEND FAILED: ${err.message}`);
-    return { alerted: false, lastAlertAtMs: nowMs };
+    return { alerted: false, attempted: true, lastAlertAtMs: nowMs, reason: 'send_failed' };
   }
+}
+
+export function shouldLogAgentDownThreshold(consecutiveChecks) {
+  return consecutiveChecks === TMUX_MISSING_WARN_THRESHOLD;
 }
 
 export function notifyAdministratorOfDeliveryFailure(payload, {
@@ -746,15 +755,18 @@ async function processNextMessage() {
   const agentState = getAgentState();
   if (agentState.state === 'offline' || agentState.state === 'stopped') {
     tmuxMissingChecks += 1;
+    const pendingCount = getPendingCount();
+    if (shouldLogAgentDownThreshold(tmuxMissingChecks)) {
+      log(`WARNING: Agent status stale/missing for ${tmuxMissingChecks} consecutive checks (pending=${pendingCount})`);
+    }
     const alert = await maybeAlertAdministratorOfAgentDown({
       agentState: agentState.state,
       consecutiveChecks: tmuxMissingChecks,
-      pendingCount: getPendingCount(),
+      pendingCount,
       lastAlertAtMs: lastAgentDownAlertAtMs
     });
-    if (alert.alerted) {
+    if (alert.attempted) {
       lastAgentDownAlertAtMs = alert.lastAlertAtMs;
-      log(`WARNING: Agent status stale/missing for ${tmuxMissingChecks} consecutive checks`);
     }
   } else {
     tmuxMissingChecks = 0;
