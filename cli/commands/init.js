@@ -2316,7 +2316,7 @@ Usage: yos init [options]
 Options:
   -y, --yes                  Force non-interactive mode (even with a TTY)
   -q, --quiet                Minimal output
-  --runtime <name>           Agent runtime: claude (default) or codex
+  --runtime <name>           Agent runtime: codex (default) or claude
   --timezone <tz>            Set timezone (IANA format, e.g., Asia/Shanghai)
   --setup-token <token>      Authenticate with Claude setup token
   --api-key <key>            Authenticate with Anthropic API key
@@ -2346,6 +2346,24 @@ Note: --setup-token and --api-key values are visible in process listings.
   On shared systems, prefer environment variables instead:
     CLAUDE_CODE_OAUTH_TOKEN=... yos init
 `);
+}
+
+export const RUNTIME_CHOICES = Object.freeze([
+  Object.freeze({ label: 'Codex (OpenAI)', value: 'codex' }),
+  Object.freeze({ label: 'Claude Code (Anthropic)', value: 'claude' }),
+]);
+
+export function selectRuntime({
+  requestedRuntime = null,
+  existingRuntime = null,
+  interactiveChoice = null,
+} = {}) {
+  if (requestedRuntime) return requestedRuntime;
+  if (existingRuntime) return existingRuntime;
+  if (interactiveChoice !== null) {
+    return RUNTIME_CHOICES[interactiveChoice - 1]?.value ?? RUNTIME_CHOICES[0].value;
+  }
+  return 'codex';
 }
 
 // ── Main init command ───────────────────────────────────────────
@@ -2498,17 +2516,18 @@ export async function initCommand(args) {
   // Step 4.5: Select agent runtime
   // Resolution: --runtime flag > YOS_RUNTIME env > existing config > interactive prompt
   const existingRuntime = getYosConfig().runtime;
-  let selectedRuntime = opts.runtime || existingRuntime || null;
-  if (!selectedRuntime) {
+  let selectedRuntime = selectRuntime({
+    requestedRuntime: opts.runtime,
+    existingRuntime,
+  });
+  if (!opts.runtime && !existingRuntime) {
     if (!skipConfirm) {
       if (!quiet) console.log('');
       const runtimeIdx = await promptChoice(
         '  Which agent runtime would you like to use?',
-        ['Claude Code (Anthropic)', 'Codex (OpenAI)'],
+        RUNTIME_CHOICES.map(({ label }) => label),
       );
-      selectedRuntime = runtimeIdx === 2 ? 'codex' : 'claude';
-    } else {
-      selectedRuntime = 'claude'; // backward-compatible default for non-interactive mode
+      selectedRuntime = selectRuntime({ interactiveChoice: runtimeIdx });
     }
   }
   if (!quiet && !existingRuntime) {

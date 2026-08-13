@@ -373,8 +373,8 @@ Usage:
   yos runtime <name> --no-validate          Skip switch-time auth probe
 
 Supported runtimes:
-  claude    Claude Code (Anthropic) — default
-  codex     Codex CLI (OpenAI)
+  codex     Codex CLI (OpenAI) — default
+  claude    Claude Code (Anthropic)
 
 Authentication options (if not already authenticated):
   Claude:  --save-apikey <sk-ant-api...>   Anthropic API key
