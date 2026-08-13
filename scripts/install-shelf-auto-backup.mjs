@@ -185,6 +185,10 @@ function activeState(result) {
   return result.status === 0 && result.stdout.trim() === 'active';
 }
 
+function serviceBusyState(result) {
+  return /^(active|activating|reloading|deactivating)$/.test(result.stdout.trim());
+}
+
 async function rollbackSystemInstallation({
   servicePath,
   timerPath,
@@ -227,7 +231,7 @@ async function rollbackSystemInstallation({
  */
 export async function installAndVerifySystemdUnits(
   options,
-  { runCommand = commandResult, systemUnitDir = SYSTEM_UNIT_DIR } = {},
+  { runCommand = commandResult, systemUnitDir = SYSTEM_UNIT_DIR, signalSource = process } = {},
 ) {
   if (!options.systemMode) fail('--system is required for automatic backup installation');
   validateSystemOptions(options);
@@ -246,6 +250,10 @@ export async function installAndVerifySystemdUnits(
   );
   const wasEnabled = enabledState(runCommand('systemctl', ['is-enabled', TIMER]));
   const wasActive = activeState(runCommand('systemctl', ['is-active', TIMER]));
+  const serviceState = runCommand('systemctl', ['show', SERVICE, '-p', 'ActiveState', '--value']);
+  if (serviceBusyState(serviceState)) {
+    fail('automatic backup service is already running; wait for it to finish, then retry installation');
+  }
 
   const uidResult = runCommand('id', ['-u', options.systemUser]);
   const gidResult = runCommand('id', ['-g', options.systemUser]);
@@ -270,30 +278,47 @@ export async function installAndVerifySystemdUnits(
   }
 
   let installed;
+  let interruptedSignal;
+  const onSigint = () => { interruptedSignal ??= 'SIGINT'; };
+  const onSigterm = () => { interruptedSignal ??= 'SIGTERM'; };
+  const throwIfInterrupted = () => {
+    if (interruptedSignal) fail(`automatic backup installation interrupted by ${interruptedSignal}`);
+  };
+  const interruptCheckpoint = async () => {
+    await new Promise((resolve) => setImmediate(resolve));
+    throwIfInterrupted();
+  };
+  signalSource.on('SIGINT', onSigint);
+  signalSource.on('SIGTERM', onSigterm);
   try {
+    await interruptCheckpoint();
     if (wasActive) {
       assertCommandSucceeded(runCommand('systemctl', ['stop', TIMER]), 'stop previous automatic backup timer');
-    }
-    if (activeState(runCommand('systemctl', ['is-active', SERVICE]))) {
-      fail('automatic backup service is already running; wait for it to finish, then retry installation');
+      await interruptCheckpoint();
     }
     installed = await installSystemdUnits(options);
+    await interruptCheckpoint();
     for (const directory of [config.stateDir, config.restoreRoot]) {
       await fsp.chown(directory, uid, gid);
+      await interruptCheckpoint();
     }
     assertCommandSucceeded(runCommand('systemctl', ['daemon-reload']), 'systemd daemon-reload');
+    await interruptCheckpoint();
     assertCommandSucceeded(
       runCommand('systemctl', ['start', SERVICE]),
       'real backup self-test',
     );
+    await interruptCheckpoint();
     const serviceResult = runCommand('systemctl', ['show', SERVICE, '--property=Result', '--value']);
     assertCommandSucceeded(serviceResult, 'read real backup self-test result');
+    await interruptCheckpoint();
     const result = serviceResult.stdout.trim();
     if (result !== 'success') fail(`real backup self-test reported Result=${result || 'unknown'}`);
     assertCommandSucceeded(
       runCommand('systemctl', ['enable', '--now', TIMER]),
       'enable automatic backup timer',
     );
+    await interruptCheckpoint();
     return { ...installed, selfTested: true };
   } catch (error) {
     const rollbackErrors = await rollbackSystemInstallation({
@@ -308,6 +333,9 @@ export async function installAndVerifySystemdUnits(
     });
     const suffix = rollbackErrors.length > 0 ? `; rollback also failed: ${rollbackErrors.join('; ')}` : '';
     fail(`${error.message}${suffix}`);
+  } finally {
+    signalSource.off('SIGINT', onSigint);
+    signalSource.off('SIGTERM', onSigterm);
   }
 }
 

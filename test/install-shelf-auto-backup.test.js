@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { describe, expect, test } from '@jest/globals';
 
 import {
@@ -31,6 +32,97 @@ function config(root) {
 }
 
 describe('shelf automatic backup systemd installer', () => {
+  async function expectBusyServiceRejected(activeState, status) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-running-service-'));
+    const outputDir = path.join(root, 'units');
+    const calls = [];
+    const runCommand = (command, args) => {
+      calls.push([command, ...args]);
+      if (command === 'systemctl' && args[0] === 'show' && args[2] === '-p') {
+        return { status, stdout: `${activeState}\n`, stderr: '' };
+      }
+      if (command === 'systemctl' && args[0] === 'is-enabled') {
+        return { status: 0, stdout: 'enabled\n', stderr: '' };
+      }
+      if (command === 'systemctl' && args[0] === 'is-active' && args[1] === 'yos-shelf-backup.timer') {
+        return { status: 0, stdout: 'active\n', stderr: '' };
+      }
+      if (command === 'systemctl') return { status: 1, stdout: '', stderr: '' };
+      return { status: 0, stdout: `${process.getuid()}\n`, stderr: '' };
+    };
+
+    await expect(installAndVerifySystemdUnits({
+      configPath: config(root),
+      repoDir: process.cwd(),
+      nodePath: process.execPath,
+      outputDir,
+      systemMode: true,
+      systemUser: 'backup-operator',
+      homeDir: '/home/backup-operator',
+      pathEnv: '/usr/bin:/bin',
+    }, { runCommand, systemUnitDir: outputDir })).rejects.toThrow(/backup service is already running/);
+
+    expect(fs.existsSync(outputDir)).toBe(false);
+    expect(calls).toContainEqual([
+      'systemctl', 'show', 'yos-shelf-backup.service', '-p', 'ActiveState', '--value',
+    ]);
+    expect(calls).not.toContainEqual(['systemctl', 'stop', 'yos-shelf-backup.timer']);
+  }
+
+  async function expectSignalRestoresInstallation(signal) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-system-signal-'));
+    const outputDir = path.join(root, 'units');
+    const stateDir = path.join(root, 'state');
+    const restoreDir = path.join(root, 'restore');
+    fs.mkdirSync(outputDir);
+    fs.mkdirSync(stateDir, { mode: 0o750 });
+    fs.mkdirSync(restoreDir, { mode: 0o750 });
+    const servicePath = path.join(outputDir, 'yos-shelf-backup.service');
+    const timerPath = path.join(outputDir, 'yos-shelf-backup.timer');
+    fs.writeFileSync(servicePath, 'old service\n', { mode: 0o640 });
+    fs.writeFileSync(timerPath, 'old timer\n', { mode: 0o640 });
+    const calls = [];
+    const signalSource = new EventEmitter();
+    let daemonReloads = 0;
+    const runCommand = (command, args) => {
+      calls.push([command, ...args]);
+      if (command === 'id' && args[0] === '-u') return { status: 0, stdout: `${process.getuid()}\n`, stderr: '' };
+      if (command === 'id' && args[0] === '-g') return { status: 0, stdout: `${process.getgid()}\n`, stderr: '' };
+      if (command === 'systemctl' && args[0] === 'is-enabled') return { status: 0, stdout: 'enabled\n', stderr: '' };
+      if (command === 'systemctl' && args[0] === 'is-active' && args[1] === 'yos-shelf-backup.timer') {
+        return { status: 0, stdout: 'active\n', stderr: '' };
+      }
+      if (command === 'systemctl' && args[0] === 'show' && args[2] === '-p') {
+        return { status: 3, stdout: 'inactive\n', stderr: '' };
+      }
+      if (command === 'systemctl' && args[0] === 'daemon-reload') {
+        daemonReloads += 1;
+        if (daemonReloads === 1) setImmediate(() => signalSource.emit(signal));
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    };
+
+    await expect(installAndVerifySystemdUnits({
+      configPath: config(root),
+      repoDir: process.cwd(),
+      nodePath: process.execPath,
+      outputDir,
+      systemMode: true,
+      systemUser: 'backup-operator',
+      homeDir: '/home/backup-operator',
+      pathEnv: '/usr/bin:/bin',
+    }, { runCommand, systemUnitDir: outputDir, signalSource })).rejects.toThrow(new RegExp(`interrupted by ${signal}`));
+
+    expect(fs.readFileSync(servicePath, 'utf8')).toBe('old service\n');
+    expect(fs.readFileSync(timerPath, 'utf8')).toBe('old timer\n');
+    expect(fs.statSync(stateDir).mode & 0o777).toBe(0o750);
+    expect(fs.statSync(restoreDir).mode & 0o777).toBe(0o750);
+    expect(calls).toContainEqual(['systemctl', 'disable', '--now', 'yos-shelf-backup.timer']);
+    expect(calls).toContainEqual(['systemctl', 'enable', '--now', 'yos-shelf-backup.timer']);
+    expect(signalSource.listenerCount('SIGINT')).toBe(0);
+    expect(signalSource.listenerCount('SIGTERM')).toBe(0);
+  }
+
   test('builds a persistent oneshot timer without embedding credential values', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-units-'));
     const configPath = config(root);
@@ -176,29 +268,28 @@ describe('shelf automatic backup systemd installer', () => {
     expect(fs.existsSync(outputDir)).toBe(false);
   });
 
-  test('refuses installation while a backup service is already running', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-running-service-'));
-    const outputDir = path.join(root, 'units');
-    const runCommand = (command, args) => {
-      if (command === 'systemctl' && args[0] === 'is-active' && args[1] === 'yos-shelf-backup.service') {
-        return { status: 0, stdout: 'active\n', stderr: '' };
-      }
-      if (command === 'systemctl') return { status: 1, stdout: 'inactive\n', stderr: '' };
-      return { status: 0, stdout: `${process.getuid()}\n`, stderr: '' };
-    };
+  test('refuses installation while a backup service is active', async () => {
+    await expectBusyServiceRejected('active', 0);
+  });
 
-    await expect(installAndVerifySystemdUnits({
-      configPath: config(root),
-      repoDir: process.cwd(),
-      nodePath: process.execPath,
-      outputDir,
-      systemMode: true,
-      systemUser: 'backup-operator',
-      homeDir: '/home/backup-operator',
-      pathEnv: '/usr/bin:/bin',
-    }, { runCommand, systemUnitDir: outputDir })).rejects.toThrow(/backup service is already running/);
+  test('refuses installation while a backup service is activating with exit 3', async () => {
+    await expectBusyServiceRejected('activating', 3);
+  });
 
-    expect(fs.existsSync(outputDir)).toBe(false);
+  test('refuses installation while a backup service is reloading with exit 3', async () => {
+    await expectBusyServiceRejected('reloading', 3);
+  });
+
+  test('refuses installation while a backup service is deactivating with exit 3', async () => {
+    await expectBusyServiceRejected('deactivating', 3);
+  });
+
+  test('SIGINT restores the previous installation and timer state', async () => {
+    await expectSignalRestoresInstallation('SIGINT');
+  });
+
+  test('SIGTERM restores the previous installation and timer state', async () => {
+    await expectSignalRestoresInstallation('SIGTERM');
   });
 
   test('a failed real trigger removes a fresh system installation', async () => {
@@ -280,13 +371,13 @@ describe('shelf automatic backup systemd installer', () => {
     expect(calls.filter((call) => call.join(' ') === 'systemctl enable --now yos-shelf-backup.timer')).toHaveLength(1);
     const stopIndex = calls.findIndex((call) => call.join(' ') === 'systemctl stop yos-shelf-backup.timer');
     const serviceProbeIndex = calls.findIndex((call) =>
-      call.join(' ') === 'systemctl is-active yos-shelf-backup.service');
+      call.join(' ') === 'systemctl show yos-shelf-backup.service -p ActiveState --value');
     const reloadIndex = calls.findIndex((call) => call.join(' ') === 'systemctl daemon-reload');
     const testIndex = calls.findIndex((call) => call.join(' ') === 'systemctl start yos-shelf-backup.service');
     const enableIndex = calls.findIndex((call) => call.join(' ') === 'systemctl enable --now yos-shelf-backup.timer');
     expect(stopIndex).toBeGreaterThan(-1);
     expect(serviceProbeIndex).toBeGreaterThan(-1);
-    expect(stopIndex).toBeLessThan(serviceProbeIndex);
+    expect(serviceProbeIndex).toBeLessThan(stopIndex);
     expect(stopIndex).toBeLessThan(reloadIndex);
     expect(testIndex).toBeLessThan(enableIndex);
   });
