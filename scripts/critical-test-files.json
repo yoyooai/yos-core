@@ -282,7 +282,7 @@
     },
     {
       "path": "test/install-shelf-auto-backup.test.js",
-      "minimumTests": 7
+      "minimumTests": 17
     },
     {
       "path": "docs/plans/2026-08-12-shelf-auto-backup-design.md"
@@ -295,5 +295,5 @@
       "minimumTests": 4
     }
   ],
-  "approvedDigest": "3b1b4775d4bc4e39dd6bd0242d6f793230baaec83207c5965884cc11f380d8ea"
+  "approvedDigest": "577da785730554dcf30feb434b33da22d034544c9fef6fa7dbafa22de2b3c25b"
 }

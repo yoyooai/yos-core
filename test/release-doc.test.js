@@ -445,7 +445,7 @@ describe('the minted credential never becomes a file', () => {
 
   test('control-machine blocks without credential minting need no fake cleanup', () => {
     const timerBlock = extractCommandBlocks(DOC).find((block) =>
-      block.lines.some((line) => line.text.includes('enable --now yos-shelf-backup.timer')),
+      block.lines.some((line) => line.text.includes('install-shelf-auto-backup.mjs')),
     );
     expect(timerBlock?.machine).toBe('控制机');
     expect(timerBlock?.lines.map((line) => line.text).join('\n')).not.toContain('unset CREDS');
