@@ -308,7 +308,7 @@
     },
     {
       "path": "skills/comm-bridge/scripts/__tests__/c4-dispatcher-failure.test.js",
-      "minimumTests": 9
+      "minimumTests": 11
     },
     {
       "path": "skills/comm-bridge/scripts/__tests__/ecosystem-admin-env.test.js",
@@ -328,5 +328,5 @@
       "path": "skills/comm-bridge/scripts/c4-dispatcher.js"
     }
   ],
-  "approvedDigest": "6f8798ead82d2ae09f3f79a3c4ea90c8dc3bcaca98e796175e5801ebecdc180a"
+  "approvedDigest": "efda5ef70edac5238860e08bd1f584225c5364485c18cebec94462fefe5ee64e"
 }
