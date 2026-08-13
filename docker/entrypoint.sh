@@ -61,7 +61,8 @@ if [ -n "${AUTH_TOKEN}" ]; then
   fi
 fi
 
-# Detect runtime — if only Codex credentials are present (no Claude creds), default to codex.
+# Detect runtime from an unambiguous credential family. If both or neither are
+# present, init applies the existing config or the Codex product default.
 # YOS_RUNTIME env var always wins when explicitly set.
 RUNTIME_FLAG=""
 if [ -z "${YOS_RUNTIME:-}" ]; then
@@ -71,6 +72,8 @@ if [ -z "${YOS_RUNTIME:-}" ]; then
   [ -n "${OPENAI_API_KEY:-}" ] || [ -n "${CODEX_API_KEY:-}" ] && HAS_CODEX_AUTH=true
   if [ "${HAS_CODEX_AUTH}" = true ] && [ "${HAS_CLAUDE_AUTH}" = false ]; then
     RUNTIME_FLAG="--runtime codex"
+  elif [ "${HAS_CLAUDE_AUTH}" = true ] && [ "${HAS_CODEX_AUTH}" = false ]; then
+    RUNTIME_FLAG="--runtime claude"
   fi
 fi
 
@@ -163,9 +166,9 @@ if [ -z "${YOS_RUNTIME:-}" ]; then
   YOS_RUNTIME=$(node -e "
     try {
       const c = JSON.parse(require('fs').readFileSync('${YOS_DIR}/.yos/config.json','utf8'));
-      process.stdout.write(c.runtime || 'claude');
-    } catch { process.stdout.write('claude'); }
-  " 2>/dev/null || echo "claude")
+      process.stdout.write(c.runtime || 'codex');
+    } catch { process.stdout.write('codex'); }
+  " 2>/dev/null || echo "codex")
 fi
 
 step 4 "Starting ${YOS_RUNTIME} agent..."
