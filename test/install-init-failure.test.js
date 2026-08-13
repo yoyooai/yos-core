@@ -35,6 +35,10 @@ const TERMINAL_READERS = [
 ];
 
 describe('installer detects a reachable terminal instead of a present device node', () => {
+  test('forwards the explicit administrator target to yos init', () => {
+    expect(script).toMatch(/--admin-channel\|--admin-endpoint/);
+  });
+
   test('nothing tests /dev/tty for mere existence', () => {
     // An existence test passes with no controlling terminal, so the redirect
     // that follows it fails: the consent prompt aborts the install outright and

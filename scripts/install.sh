@@ -52,7 +52,7 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     # Flags that take a value — forward both flag and value to yos init
-    --timezone|--setup-token|--api-key|--codex-api-key|--base-url|--codex-base-url|--domain|--web-password|--runtime)
+    --timezone|--setup-token|--api-key|--codex-api-key|--base-url|--codex-base-url|--domain|--web-password|--runtime|--admin-channel|--admin-endpoint)
       if [ -z "${2:-}" ]; then
         echo "[yos] Error: $1 requires a value" >&2
         exit 1

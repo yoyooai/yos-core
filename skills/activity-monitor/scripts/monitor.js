@@ -146,6 +146,7 @@ import {
   startContextMonitor as startRuntimeContextMonitor,
 } from './adapters/runtime-components.js';
 import { createActivityMonitorTaskScheduler } from './tasks/activity-monitor-tasks.js';
+import { buildHealthCheckContent } from './health-check-message.js';
 import { readTmuxInputState } from '../../comm-bridge/scripts/tmux-input-state.js';
 import { CHECKPOINT_THRESHOLD } from '../../comm-bridge/scripts/c4-config.js';
 // activity-monitor runs as a deployed skill at ~/yos/.claude/skills/activity-monitor/scripts/.
@@ -705,11 +706,7 @@ function writeHealthCheckState(lastCheckAt) {
 }
 
 function enqueueHealthCheck() {
-  const content = [
-    'System health check. Check PM2 services (pm2 jlist), disk space (df -h), and memory (free -m).',
-    'If any issues found, use your judgment to notify whoever is most likely to help — check your memory for a designated owner or ops person, otherwise pick the person you normally work with.',
-    'Log results to ~/yos/logs/health.log.'
-  ].join(' ');
+  const content = buildHealthCheckContent(process.env);
 
   const result = runC4Control([
     'enqueue',

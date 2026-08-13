@@ -887,7 +887,38 @@ export function syncSettingsHooksAfterTemplateDeploy({
   });
 }
 
-export function deployTemplates({ freshInstall = false } = {}) {
+export function recordAdministratorAlertTarget({ adminChannel = '', adminEndpoint = '' } = {}, {
+  envFile = path.join(YOS_DIR, '.env'),
+  writeEntries = writeEnvEntries,
+  readEntries = readEnvFile,
+  warnUser = console.warn,
+} = {}) {
+  const hasExplicitTarget = Boolean(adminChannel && adminEndpoint);
+  writeEntries({
+    YOS_ADMIN_CHANNEL: adminChannel || '',
+    YOS_ADMIN_ENDPOINT: adminEndpoint || '',
+  }, 'YOS administrator alert target', {
+    envFile,
+    replaceEmpty: true,
+    replaceExisting: hasExplicitTarget,
+  });
+
+  const stored = readEntries(envFile);
+  const configured = Boolean(
+    stored.get('YOS_ADMIN_CHANNEL')?.trim()
+    && stored.get('YOS_ADMIN_ENDPOINT')?.trim()
+  );
+  if (!configured) {
+    warnUser('  Warning: administrator alerts are not configured. Set both YOS_ADMIN_CHANNEL and YOS_ADMIN_ENDPOINT before delivery.');
+  }
+  return { configured };
+}
+
+export function deployTemplates({
+  freshInstall = false,
+  adminChannel = '',
+  adminEndpoint = '',
+} = {}) {
   if (!fs.existsSync(TEMPLATES_SRC)) return;
 
   // ecosystem.config.cjs — always update (source of truth for service definitions)
@@ -909,6 +940,7 @@ export function deployTemplates({ freshInstall = false } = {}) {
 
   // Always save current shell PATH to .env (for PM2 services)
   saveSystemPath(envDest);
+  recordAdministratorAlertTarget({ adminChannel, adminEndpoint }, { envFile: envDest });
 
   freshInstall
     ? activateFreshSplitInstructions({ yosDir: YOS_DIR, templatesDir: TEMPLATES_SRC })
@@ -2058,6 +2090,8 @@ export function parseInitFlags(args) {
     https: null,   // null = not specified, true = --https, false = --no-https
     caddy: null,   // null = not specified, true = --caddy, false = --no-caddy
     webPassword: null,
+    adminChannel: null,
+    adminEndpoint: null,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -2085,7 +2119,9 @@ export function parseInitFlags(args) {
       case '--base-url':
       case '--codex-base-url':
       case '--domain':
-      case '--web-password': {
+      case '--web-password':
+      case '--admin-channel':
+      case '--admin-endpoint': {
         const val = args[++i];
         if (!val || val.startsWith('-')) {
           console.error(`${error(`Error: ${arg} requires a value`)}`);
@@ -2100,6 +2136,8 @@ export function parseInitFlags(args) {
         else if (arg === '--codex-base-url') opts.codexBaseUrl = val;
         else if (arg === '--domain') opts.domain = val;
         else if (arg === '--web-password') opts.webPassword = val;
+        else if (arg === '--admin-channel') opts.adminChannel = val;
+        else if (arg === '--admin-endpoint') opts.adminEndpoint = val;
         break;
       }
       case '--https': opts.https = true; break;
@@ -2184,6 +2222,12 @@ export function resolveFromEnv(opts) {
   if (opts.codexBaseUrl === null && process.env.OPENAI_BASE_URL) {
     opts.codexBaseUrl = process.env.OPENAI_BASE_URL;
   }
+  if (opts.adminChannel === null && process.env.YOS_ADMIN_CHANNEL) {
+    opts.adminChannel = process.env.YOS_ADMIN_CHANNEL;
+  }
+  if (opts.adminEndpoint === null && process.env.YOS_ADMIN_ENDPOINT) {
+    opts.adminEndpoint = process.env.YOS_ADMIN_ENDPOINT;
+  }
   // TZ: do NOT pick up ambient TZ from the environment.
   // Docker containers often have TZ=UTC set by default, which would silently
   // overwrite user-configured timezones on re-init. Only --timezone flag applies.
@@ -2191,6 +2235,10 @@ export function resolveFromEnv(opts) {
 }
 
 export function validateInitOptions(opts) {
+  if (Boolean(opts.adminChannel) !== Boolean(opts.adminEndpoint)) {
+    return '--admin-channel and --admin-endpoint must be provided together.';
+  }
+
   // Mutual exclusion: setup-token and api-key
   if (opts.setupToken && opts.apiKey) {
     return '--setup-token and --api-key are mutually exclusive.\n  Run yos init and choose one during setup.';
@@ -2279,6 +2327,8 @@ Options:
   --https / --no-https       Enable/disable HTTPS (default: https when domain set)
   --caddy / --no-caddy       Install/skip Caddy web server (default: install)
   --web-password <password>  Set web console password (default: auto-generate)
+  --admin-channel <channel>  Channel used for administrator alerts
+  --admin-endpoint <id>      Explicit administrator endpoint for alerts
 
 Non-interactive mode:
   Automatically enabled when stdin is not a TTY, or CI=true / NONINTERACTIVE=1
@@ -2287,7 +2337,8 @@ Non-interactive mode:
 
 Environment variables:
   CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, YOS_RUNTIME,
-  OPENAI_API_KEY (or CODEX_API_KEY), YOS_DOMAIN, YOS_PROTOCOL, YOS_WEB_PASSWORD
+  OPENAI_API_KEY (or CODEX_API_KEY), YOS_DOMAIN, YOS_PROTOCOL, YOS_WEB_PASSWORD,
+  YOS_ADMIN_CHANNEL, YOS_ADMIN_ENDPOINT
 
   Resolution: CLI flag > env var > .env/config.json > interactive prompt
 
@@ -2831,7 +2882,10 @@ export async function initCommand(args) {
     ensureNewSessionThresholdDefaults();
 
     if (!quiet) console.log(heading('Deploying templates...'));
-    deployTemplates();
+    deployTemplates({
+      adminChannel: opts.adminChannel,
+      adminEndpoint: opts.adminEndpoint,
+    });
 
     // Migrate WEB_CONSOLE_PASSWORD → YOS_WEB_PASSWORD
     migrateWebConsolePassword();
@@ -2950,7 +3004,11 @@ export async function initCommand(args) {
   seedFreshInstallNewSessionThresholdDefault();
 
   // Step 7: deploy templates and initialize the current instruction layout.
-  deployTemplates({ freshInstall: true });
+  deployTemplates({
+    freshInstall: true,
+    adminChannel: opts.adminChannel,
+    adminEndpoint: opts.adminEndpoint,
+  });
   if (!quiet) console.log(`  ${success('Templates deployed')}`);
 
   // Migrate WEB_CONSOLE_PASSWORD → YOS_WEB_PASSWORD

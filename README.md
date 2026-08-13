@@ -29,6 +29,17 @@ npm install -g .
 yos init
 ```
 
+Customer delivery must record an explicit administrator alert target:
+
+```bash
+yos init --admin-channel <channel> --admin-endpoint <administrator-target>
+```
+
+Both values are required together. Leaving both empty does not block installation,
+but alerts can only be written to local logs and the machine is **not ready for
+customer handoff**. YOS never guesses an alert recipient from conversations,
+memory, or the first contact.
+
 ## Common Commands
 
 ```bash

@@ -19,7 +19,8 @@ import {
 import { validateChannel, validateEndpoint } from './c4-validate.js';
 import {
   AGENT_STATUS_FILE,
-  ACTIVITY_MONITOR_DIR
+  ACTIVITY_MONITOR_DIR,
+  INTAKE_STALE_STATUS_THRESHOLD
 } from './c4-config.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -101,7 +102,7 @@ function parseArgs(args) {
 function readHealthStatusFile() {
   try {
     if (!fs.existsSync(AGENT_STATUS_FILE)) {
-      return { health: 'ok' };
+      return { health: 'ok', fail_open_reason: 'missing_snapshot' };
     }
     let status = null;
     let lastErr = null;
@@ -115,12 +116,22 @@ function readHealthStatusFile() {
     }
     if (!status && lastErr) throw lastErr;
     if (status && typeof status.health === 'string') {
+      const lastCheckMs = Number.isFinite(status.last_check)
+        ? status.last_check * 1000
+        : fs.statSync(AGENT_STATUS_FILE).mtimeMs;
+      if ((Date.now() - lastCheckMs) > INTAKE_STALE_STATUS_THRESHOLD) {
+        return {
+          ...status,
+          health: 'unavailable',
+          unavailable_reason: 'stale_health_snapshot'
+        };
+      }
       return status;
     }
-    return { health: 'ok' };
+    return { health: 'ok', fail_open_reason: 'invalid_snapshot' };
   } catch {
     // Fail-open by design: status read failures do not block intake.
-    return { health: 'ok' };
+    return { health: 'ok', fail_open_reason: 'unreadable_snapshot' };
   }
 }
 
@@ -143,9 +154,18 @@ function buildFallbackMessage(status) {
   return "I've received and queued your message. I'm temporarily unavailable and will continue automatically after recovery.";
 }
 
-function fallbackFileRoute() {
+function fallbackFileRoute({ ipcUnavailable = false } = {}) {
   const status = readHealthStatusFile();
   const health = publicHealth(status?.health);
+  if (ipcUnavailable && !status.fail_open_reason && health === 'ok') {
+    return {
+      recovered: false,
+      health: 'unavailable',
+      reason: 'activity_monitor_ipc_unavailable',
+      userMessage: buildFallbackMessage({ health: 'unavailable' }),
+      fallback: true
+    };
+  }
   if (!status || typeof status.health !== 'string' || health === 'ok') {
     return { recovered: true, health: 'ok', fallback: true };
   }
@@ -209,6 +229,10 @@ function isValidRouteDecision(decision, noReply) {
 }
 
 async function queryRoute(channel, endpoint, noReply) {
+  const fileDecision = fallbackFileRoute();
+  if (!fileDecision.recovered && fileDecision.reason === 'stale_health_snapshot') {
+    return fileDecision;
+  }
   try {
     const decision = await ipcRoute({
       version: 1,
@@ -224,7 +248,7 @@ async function queryRoute(channel, endpoint, noReply) {
     }
     return decision;
   } catch {
-    return fallbackFileRoute();
+    return fallbackFileRoute({ ipcUnavailable: true });
   }
 }
 

@@ -52,7 +52,8 @@ import {
   PROC_STATE_FILE,
   API_ACTIVITY_FILE,
   STALE_STATUS_THRESHOLD,
-  TMUX_MISSING_WARN_THRESHOLD
+  TMUX_MISSING_WARN_THRESHOLD,
+  AGENT_DOWN_ALERT_COOLDOWN_MS
 } from './c4-config.js';
 import {
   findPromptY as sharedFindPromptY,
@@ -63,6 +64,7 @@ import { buildReplyViaSuffix, hasLegacyReplyViaSuffix, truncateForDelivery } fro
 let isShuttingDown = false;
 let pollInterval = POLL_INTERVAL_BASE;
 let tmuxMissingChecks = 0;
+let lastAgentDownAlertAtMs = 0;
 let lastControlCleanupMs = 0;
 
 const AM_SOCKET_PATH = path.join(ACTIVITY_MONITOR_DIR, 'am.sock');
@@ -532,6 +534,66 @@ export function buildDeliveryFailureAlert({ conversationId, channel, endpoint, r
   ].join('\n');
 }
 
+export function buildAgentDownAlert({ agentState, consecutiveChecks, pendingCount }) {
+  return [
+    '[YOS] Agent unavailable while inbound messages are queued',
+    `Agent state: ${agentState}`,
+    `Consecutive unavailable checks: ${consecutiveChecks}`,
+    `Pending inbound messages: ${pendingCount}`,
+    'Messages remain queued for automatic delivery after recovery. User content is omitted from this alert.'
+  ].join('\n');
+}
+
+export function notifyAdministratorOfAgentDown(payload, {
+  env = process.env,
+  runSend = spawnSync
+} = {}) {
+  const channel = env.YOS_ADMIN_CHANNEL?.trim();
+  const endpoint = env.YOS_ADMIN_ENDPOINT?.trim();
+  if (!channel || !endpoint) {
+    log('ALERT NOT SENT: agent unavailable with queued messages; configure YOS_ADMIN_CHANNEL and YOS_ADMIN_ENDPOINT');
+    return { sent: false, reason: 'not_configured' };
+  }
+
+  const result = runSend('node', [path.join(__dirname, 'c4-send.js'), channel, endpoint], {
+    input: buildAgentDownAlert(payload),
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe']
+  });
+  if (result.status !== 0) {
+    const detail = String(result.stderr || result.stdout || `exit ${result.status}`).trim();
+    log(`AGENT DOWN ALERT SEND FAILED: ${detail}`);
+    return { sent: false, reason: 'send_failed', detail };
+  }
+
+  log(`Administrator alerted: agent ${payload.agentState} with ${payload.pendingCount} queued message(s)`);
+  return { sent: true };
+}
+
+export async function maybeAlertAdministratorOfAgentDown({
+  agentState,
+  consecutiveChecks,
+  pendingCount,
+  lastAlertAtMs,
+  nowMs = Date.now(),
+  notifyAdmin = notifyAdministratorOfAgentDown
+}) {
+  const unavailable = agentState === 'offline' || agentState === 'stopped';
+  const thresholdReached = consecutiveChecks >= TMUX_MISSING_WARN_THRESHOLD;
+  const cooldownElapsed = lastAlertAtMs === 0 || (nowMs - lastAlertAtMs) >= AGENT_DOWN_ALERT_COOLDOWN_MS;
+  if (!unavailable || !thresholdReached || pendingCount <= 0 || !cooldownElapsed) {
+    return { alerted: false, lastAlertAtMs };
+  }
+
+  try {
+    await notifyAdmin({ agentState, consecutiveChecks, pendingCount });
+    return { alerted: true, lastAlertAtMs: nowMs };
+  } catch (err) {
+    log(`AGENT DOWN ALERT SEND FAILED: ${err.message}`);
+    return { alerted: false, lastAlertAtMs: nowMs };
+  }
+}
+
 export function notifyAdministratorOfDeliveryFailure(payload, {
   env = process.env,
   runSend = spawnSync
@@ -684,8 +746,15 @@ async function processNextMessage() {
   const agentState = getAgentState();
   if (agentState.state === 'offline' || agentState.state === 'stopped') {
     tmuxMissingChecks += 1;
-    if (tmuxMissingChecks === TMUX_MISSING_WARN_THRESHOLD) {
-      log(`WARNING: Agent status stale/missing for ${TMUX_MISSING_WARN_THRESHOLD} consecutive checks`);
+    const alert = await maybeAlertAdministratorOfAgentDown({
+      agentState: agentState.state,
+      consecutiveChecks: tmuxMissingChecks,
+      pendingCount: getPendingCount(),
+      lastAlertAtMs: lastAgentDownAlertAtMs
+    });
+    if (alert.alerted) {
+      lastAgentDownAlertAtMs = alert.lastAlertAtMs;
+      log(`WARNING: Agent status stale/missing for ${tmuxMissingChecks} consecutive checks`);
     }
   } else {
     tmuxMissingChecks = 0;

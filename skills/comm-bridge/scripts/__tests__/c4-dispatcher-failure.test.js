@@ -26,6 +26,82 @@ after(() => {
 });
 
 describe('conversation delivery exhaustion', () => {
+  it('alerts independently when the agent stays offline with queued messages', async () => {
+    const alerts = [];
+    const first = await dispatcher.maybeAlertAdministratorOfAgentDown({
+      agentState: 'offline',
+      consecutiveChecks: 30,
+      pendingCount: 3,
+      lastAlertAtMs: 0,
+      nowMs: 1_000_000,
+      notifyAdmin: async (payload) => { alerts.push(payload); }
+    });
+
+    assert.equal(alerts.length, 1);
+    assert.deepEqual(alerts[0], {
+      agentState: 'offline',
+      consecutiveChecks: 30,
+      pendingCount: 3
+    });
+    assert.equal(first.lastAlertAtMs, 1_000_000);
+
+    await dispatcher.maybeAlertAdministratorOfAgentDown({
+      agentState: 'offline',
+      consecutiveChecks: 31,
+      pendingCount: 3,
+      lastAlertAtMs: first.lastAlertAtMs,
+      nowMs: 1_000_001,
+      notifyAdmin: async (payload) => { alerts.push(payload); }
+    });
+    assert.equal(alerts.length, 1, 'cooldown must prevent alert floods');
+
+    await dispatcher.maybeAlertAdministratorOfAgentDown({
+      agentState: 'offline',
+      consecutiveChecks: 31,
+      pendingCount: 3,
+      lastAlertAtMs: 0,
+      nowMs: 2_000_000,
+      notifyAdmin: async (payload) => { alerts.push(payload); }
+    });
+    assert.equal(alerts.length, 2, 'checks beyond the threshold must still alert');
+  });
+
+  it('does not alert for an empty queue or a live agent', async () => {
+    let calls = 0;
+    const notifyAdmin = async () => { calls += 1; };
+    await dispatcher.maybeAlertAdministratorOfAgentDown({
+      agentState: 'offline', consecutiveChecks: 30, pendingCount: 0,
+      lastAlertAtMs: 0, nowMs: 1_000_000, notifyAdmin
+    });
+    await dispatcher.maybeAlertAdministratorOfAgentDown({
+      agentState: 'idle', consecutiveChecks: 30, pendingCount: 2,
+      lastAlertAtMs: 0, nowMs: 1_000_000, notifyAdmin
+    });
+    assert.equal(calls, 0);
+  });
+
+  it('the live dispatcher loop checks queued messages through the independent alert', () => {
+    const source = fs.readFileSync(new URL('../c4-dispatcher.js', import.meta.url), 'utf8');
+    const liveLoop = source.match(/async function processNextMessage\(\) \{([\s\S]*?)const item = claimNextItem\(\);/);
+    assert.ok(liveLoop, 'processNextMessage must remain inspectable before claiming work');
+    assert.match(liveLoop[1], /maybeAlertAdministratorOfAgentDown\(\{/);
+    assert.match(liveLoop[1], /pendingCount: getPendingCount\(\)/);
+  });
+
+  it('keeps the dispatcher alive when the independent alert transport fails', async () => {
+    const result = await dispatcher.maybeAlertAdministratorOfAgentDown({
+      agentState: 'stopped',
+      consecutiveChecks: 30,
+      pendingCount: 2,
+      lastAlertAtMs: 0,
+      nowMs: 1_000_000,
+      notifyAdmin: async () => { throw new Error('channel unavailable'); }
+    });
+
+    assert.equal(result.alerted, false);
+    assert.equal(result.lastAlertAtMs, 1_000_000, 'failed alerts still enter cooldown');
+  });
+
   it('marks the message failed and alerts the administrator without user content', async () => {
     const record = db.insertConversation(
       'in',
@@ -72,6 +148,18 @@ describe('conversation delivery exhaustion', () => {
     assert.match(message, /wechat/);
     assert.match(message, /user-7/);
     assert.match(message, /2/);
+    assert.doesNotMatch(message, /customer secret body/);
+  });
+
+  it('builds a content-free agent-down alert', () => {
+    const message = dispatcher.buildAgentDownAlert({
+      agentState: 'offline',
+      consecutiveChecks: 30,
+      pendingCount: 4
+    });
+    assert.match(message, /offline/);
+    assert.match(message, /30/);
+    assert.match(message, /4/);
     assert.doesNotMatch(message, /customer secret body/);
   });
 

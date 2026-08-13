@@ -61,4 +61,6 @@ export const CHECKPOINT_THRESHOLD = 15;
 export const SESSION_INIT_RECENT_COUNT = 6;  // max conversations returned by session-init when above threshold
 
 export const STALE_STATUS_THRESHOLD = 5000; // ms
+export const INTAKE_STALE_STATUS_THRESHOLD = 60_000; // ms
 export const TMUX_MISSING_WARN_THRESHOLD = 30;
+export const AGENT_DOWN_ALERT_COOLDOWN_MS = 10 * 60 * 1000;

@@ -293,7 +293,40 @@
     {
       "path": "cli/lib/__tests__/install-outcome.test.js",
       "minimumTests": 4
+    },
+    {
+      "path": "test/install-init-failure.test.js",
+      "minimumTests": 5
+    },
+    {
+      "path": "cli/lib/__tests__/admin-alert-config.test.js",
+      "minimumTests": 7
+    },
+    {
+      "path": "skills/comm-bridge/scripts/__tests__/c4-receive.test.js",
+      "minimumTests": 36
+    },
+    {
+      "path": "skills/comm-bridge/scripts/__tests__/c4-dispatcher-failure.test.js",
+      "minimumTests": 9
+    },
+    {
+      "path": "skills/comm-bridge/scripts/__tests__/ecosystem-admin-env.test.js",
+      "minimumTests": 1
+    },
+    {
+      "path": "skills/activity-monitor/scripts/__tests__/health-check-message.test.js",
+      "minimumTests": 3
+    },
+    {
+      "path": "skills/activity-monitor/scripts/health-check-message.js"
+    },
+    {
+      "path": "skills/comm-bridge/scripts/c4-receive.js"
+    },
+    {
+      "path": "skills/comm-bridge/scripts/c4-dispatcher.js"
     }
   ],
-  "approvedDigest": "3b1b4775d4bc4e39dd6bd0242d6f793230baaec83207c5965884cc11f380d8ea"
+  "approvedDigest": "6f8798ead82d2ae09f3f79a3c4ea90c8dc3bcaca98e796175e5801ebecdc180a"
 }

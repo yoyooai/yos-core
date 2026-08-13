@@ -283,6 +283,8 @@ module.exports = {
         NODE_ENV: 'production',
         CLAUDE_BYPASS_PERMISSIONS,
         CODEX_BYPASS_PERMISSIONS,
+        YOS_ADMIN_CHANNEL,
+        YOS_ADMIN_ENDPOINT,
         ...(YOS_PACKAGE_ROOT ? { YOS_PACKAGE_ROOT } : {}),
       },
       autorestart: true,

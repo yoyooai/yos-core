@@ -424,6 +424,56 @@ describe('c4-receive validation', () => {
 // health gating (--json)
 // ---------------------------------------------------------------------------
 describe('c4-receive health gating', () => {
+  it('warns for a stale healthy snapshot while keeping the inbound message pending', () => {
+    withTmpDir(({ tmpDir, env }) => {
+      const statusFile = path.join(tmpDir, 'activity-monitor', 'agent-status.json');
+      fs.writeFileSync(statusFile, JSON.stringify({
+        health: 'ok',
+        last_check: Math.floor(Date.now() / 1000) - 120
+      }));
+      createChannelSendScript(tmpDir, 'test-chan');
+
+      const r = cliRaw([
+        '--channel', 'test-chan',
+        '--endpoint', 'ep-stale',
+        '--json',
+        '--content', 'keep this until recovery'
+      ], env);
+
+      assert.equal(r.status, 0);
+      assert.equal(parseJsonStdout(r.stdout).action, 'queued');
+      const db = openDb(tmpDir);
+      const inbound = db.prepare("SELECT status, content FROM conversations WHERE direction = 'in'").get();
+      db.close();
+      assert.deepEqual(inbound, { status: 'pending', content: 'keep this until recovery' });
+
+      const sent = JSON.parse(fs.readFileSync(path.join(tmpDir, 'test-chan-send.json'), 'utf8'));
+      assert.match(sent.args[1], /temporarily unavailable/i);
+    });
+  });
+
+  it('uses the status file mtime when last_check is absent', () => {
+    withTmpDir(({ tmpDir, env }) => {
+      const statusFile = path.join(tmpDir, 'activity-monitor', 'agent-status.json');
+      fs.writeFileSync(statusFile, JSON.stringify({ health: 'ok' }));
+      const old = new Date(Date.now() - 120_000);
+      fs.utimesSync(statusFile, old, old);
+      createChannelSendScript(tmpDir, 'test-chan');
+
+      const r = cliRaw([
+        '--channel', 'test-chan',
+        '--endpoint', 'ep-mtime-stale',
+        '--json',
+        '--content', 'keep this too'
+      ], env);
+
+      assert.equal(r.status, 0);
+      assert.equal(parseJsonStdout(r.stdout).action, 'queued');
+      const sent = JSON.parse(fs.readFileSync(path.join(tmpDir, 'test-chan-send.json'), 'utf8'));
+      assert.match(sent.args[1], /temporarily unavailable/i);
+    });
+  });
+
   it('durably queues unhealthy messages for automatic recovery delivery', () => {
     withTmpDir(({ tmpDir, env }) => {
       fs.writeFileSync(path.join(tmpDir, 'activity-monitor', 'agent-status.json'), JSON.stringify({ health: 'down' }));
@@ -665,6 +715,50 @@ describe('c4-receive health gating', () => {
 });
 
 describe('c4-receive MessageRouter IPC route', () => {
+  it('treats IPC failure as unavailable when a real health snapshot exists', () => {
+    withTmpDir(({ tmpDir, env }) => {
+      fs.writeFileSync(path.join(tmpDir, 'activity-monitor', 'agent-status.json'), JSON.stringify({
+        health: 'ok',
+        last_check: Math.floor(Date.now() / 1000)
+      }));
+      createChannelSendScript(tmpDir, 'test-chan');
+
+      const r = cliRaw([
+        '--channel', 'test-chan', '--endpoint', 'ep-ipc-down',
+        '--json', '--content', 'queue on monitor failure'
+      ], env);
+      assert.equal(r.status, 0);
+      assert.equal(parseJsonStdout(r.stdout).action, 'queued');
+      const sent = JSON.parse(fs.readFileSync(path.join(tmpDir, 'test-chan-send.json'), 'utf8'));
+      assert.match(sent.args[1], /temporarily unavailable/i);
+    });
+  });
+
+  it('does not let an IPC healthy response bypass a stale status snapshot', async () => {
+    await withTmpDirAsync(async ({ tmpDir, env }) => {
+      fs.writeFileSync(path.join(tmpDir, 'activity-monitor', 'agent-status.json'), JSON.stringify({
+        health: 'ok',
+        last_check: Math.floor(Date.now() / 1000) - 120
+      }));
+      createChannelSendScript(tmpDir, 'test-chan');
+      await withRouteServer(tmpDir, (request) => ({
+        version: 1,
+        requestId: request.requestId,
+        recovered: true,
+        health: 'ok'
+      }), async () => {
+        const r = await cliRawAsync([
+          '--channel', 'test-chan', '--endpoint', 'ep-stale-ipc',
+          '--json', '--content', 'must remain queued'
+        ], env);
+        assert.equal(r.status, 0);
+        assert.equal(parseJsonStdout(r.stdout).action, 'queued');
+        const sent = JSON.parse(fs.readFileSync(path.join(tmpDir, 'test-chan-send.json'), 'utf8'));
+        assert.match(sent.args[1], /temporarily unavailable/i);
+      });
+    });
+  });
+
   it('queues pending when router returns recovered=true', async () => {
     await withTmpDirAsync(async ({ tmpDir, env }) => {
       createChannelSendScript(tmpDir, 'test-chan');
@@ -795,11 +889,16 @@ describe('c4-receive MessageRouter IPC route', () => {
 // ---------------------------------------------------------------------------
 describe('c4-receive fail-open', () => {
   it('passes when status file is missing', () => {
-    withTmpDir(({ env }) => {
-      const r = cliRaw(['--no-reply', '--json', '--content', 'no status file'], env);
+    withTmpDir(({ tmpDir, env }) => {
+      createChannelSendScript(tmpDir, 'test-chan');
+      const r = cliRaw([
+        '--channel', 'test-chan', '--endpoint', 'ep-missing',
+        '--json', '--content', 'no status file'
+      ], env);
       assert.equal(r.status, 0);
       const out = parseJsonStdout(r.stdout);
       assert.equal(out.ok, true);
+      assert.equal(fs.existsSync(path.join(tmpDir, 'test-chan-send.json')), false);
     });
   });
 
