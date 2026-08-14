@@ -361,7 +361,35 @@
     },
     {
       "path": "skills/comm-bridge/scripts/c4-dispatcher.js"
+    },
+    {
+      "path": "cli/lib/runtime/__tests__/tmux-helpers.test.js",
+      "minimumTests": 19
+    },
+    {
+      "path": "skills/activity-monitor/scripts/__tests__/health-engine.test.js",
+      "minimumTests": 101
+    },
+    {
+      "path": "skills/activity-monitor/scripts/__tests__/monitor-orchestrator.test.js",
+      "minimumTests": 23
+    },
+    {
+      "path": "skills/activity-monitor/scripts/__tests__/status-writer.test.js",
+      "minimumTests": 6
+    },
+    {
+      "path": "cli/lib/runtime/tmux-helpers.js"
+    },
+    {
+      "path": "skills/activity-monitor/scripts/health-engine.js"
+    },
+    {
+      "path": "skills/activity-monitor/scripts/monitor-orchestrator.js"
+    },
+    {
+      "path": "skills/activity-monitor/scripts/status-writer.js"
     }
   ],
-  "approvedDigest": "b6d16c73aa16e32388e1d9bca97b466f73231fc4e01575effc7aa56ca2c8fb4b"
+  "approvedDigest": "03013f6db66d2109218d3042bd0d75c46b3b44116f1e9534201ee38e3dae3449"
 }
