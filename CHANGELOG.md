@@ -4,6 +4,39 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
+## [0.1.17] - 2026-08-14
+
+### Changed
+
+- Make Codex the default runtime for a fresh installation. The product default
+  had already moved to Codex, but non-interactive init, the interactive picker,
+  the help text and the Docker entry point all still defaulted to Claude — so a
+  machine delivered with our standard credentials came up on a runtime those
+  credentials do not admit, and answered nothing. Explicit flags, environment
+  variables and existing configuration keep their precedence, in that order;
+  Docker now picks the runtime when exactly one credential family is present and
+  refuses to guess when both are. No existing installation's runtime is changed.
+
+### Fixed
+
+- Stop a delivered machine from going silent when its agent is unreachable. A
+  stale health snapshot now answers the user in the same second ("temporarily
+  unavailable") instead of dropping the message; a machine that stays down with
+  a backlog raises a separate alert to the administrator — carrying no user
+  content — and the queued messages are delivered once the agent recovers.
+  Installation now records the alert target explicitly rather than letting the
+  health check infer a recipient, and an install that never configured a target
+  says so instead of reporting an alert it did not send.
+- Keep an empty value on its own line when reading `.env`. A key with no value
+  swallowed the following line, so a machine with no alert target configured ran
+  with a target parsed out of unrelated text — a state that could not be
+  reproduced by reading the configuration file.
+- Count test cases that follow a regular-expression literal. The gate that keeps
+  each protected file from losing coverage mis-parsed a `/` after a closing
+  brace as the start of a regular expression and skipped the rest of the file,
+  so its floor could sit below the real number of declared tests and deleting a
+  test would not turn the gate red.
+
 ## [0.1.16] - 2026-08-13
 
 ### Fixed
