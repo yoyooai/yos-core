@@ -9,6 +9,7 @@ import { COMPONENTS_FILE, CONFIG_DIR } from './config.js';
 import { loadRegistry } from './registry.js';
 import { fetchInstallVersion } from './github.js';
 import { inspectLocalSource, resolveLocalPath } from './download.js';
+import { isMirroredRepo, resolveDistBase } from './dist-origin.js';
 
 /**
  * Load installed components from components.json
@@ -127,6 +128,7 @@ export async function resolveTarget(nameOrUrl, { branch = null } = {}) {
       // with its own version line.
       subdir: registry[target].path || null,
       tagPrefix: registry[target].tagPrefix || null,
+      fromRegistry: true,
     });
   }
 
@@ -163,6 +165,7 @@ function resolveGitHubTarget({
   isThirdParty = true,
   subdir = null,
   tagPrefix = null,
+  fromRegistry = false,
 }) {
   const tag = branch
     ? { version: null, fetchError: null }
@@ -188,12 +191,41 @@ function resolveGitHubTarget({
       ...(subdir ? { path: subdir } : {}),
       ...(tagPrefix ? { tagPrefix } : {}),
     } : null,
-    sourceLabel: subdir
-      ? `https://github.com/${repo} (${subdir})`
-      : `https://github.com/${repo}`,
+    ...describeRemoteSource({ repo, subdir, isThirdParty, fromRegistry }),
+    installTarget,
+  };
+}
+
+/**
+ * Describe where a component package will be fetched and where its source lives.
+ * Registry resolution is the important boundary: an explicitly supplied GitHub
+ * repository remains a GitHub install even when its owner is mirrored.
+ */
+export function describeRemoteSource({
+  repo,
+  subdir = null,
+  isThirdParty = true,
+  fromRegistry = false,
+}, env = process.env) {
+  const repository = subdir
+    ? `https://github.com/${repo} (${subdir})`
+    : `https://github.com/${repo}`;
+  const dist = resolveDistBase(env);
+  const usesDistribution = fromRegistry && !isThirdParty && dist.enabled && isMirroredRepo(repo, env);
+
+  if (usesDistribution) {
+    return {
+      sourceLabel: dist.base,
+      sourceHeading: 'Package source:',
+      sourceReplyLabel: 'Package source',
+      sourceRepositoryLabel: repository,
+    };
+  }
+  return {
+    sourceLabel: repository,
     sourceHeading: 'Repository:',
     sourceReplyLabel: 'Repo',
-    installTarget,
+    sourceRepositoryLabel: null,
   };
 }
 
