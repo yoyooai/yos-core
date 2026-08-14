@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { showStatus, showLogs, startServices, stopServices, restartServices } from './commands/service.js';
 import { formatFailure } from './lib/format-failure.js';
+import { assertCommandDirectory } from './lib/install-directory.js';
 
 // Ensure ~/.local/bin is in PATH (Claude Code installs there)
 const localBin = path.join(os.homedir(), '.local', 'bin');
@@ -71,6 +72,7 @@ async function main() {
   }
 
   if (commands[command]) {
+    assertCommandDirectory(command);
     await commands[command](args.slice(1));
   } else {
     console.error(`Unknown command: ${command}`);
