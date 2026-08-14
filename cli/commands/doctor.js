@@ -57,6 +57,23 @@ const API_ORIGIN = API_ENDPOINT.origin;
 const VERSION_CHECK_CONCURRENCY = 3;
 const CLAUDE_FIX_TIMEOUT = 300000; // 5 minutes
 
+function healthIdentity(stdout) {
+  try {
+    const parsed = JSON.parse(String(stdout || ''));
+    const identity = parsed?.identity;
+    if (!identity || typeof identity !== 'object') return null;
+    const app = String(identity.app ?? '');
+    const host = String(identity.host ?? '');
+    const mode = String(identity.mode ?? '');
+    if (!(app === '(unknown)' || /^…[A-Za-z0-9_-]{1,6}$/.test(app))) return null;
+    if (!/^[A-Za-z0-9._-]{1,80}$/.test(host)) return null;
+    if (!['websocket', 'webhook'].includes(mode)) return null;
+    return { app, host, mode };
+  } catch {
+    return null;
+  }
+}
+
 export function evaluateCapabilityHealth(catalog, {
   runHealth = (check) => spawnSync(process.execPath, [check.path], {
     encoding: 'utf8', timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'],
@@ -70,8 +87,15 @@ export function evaluateCapabilityHealth(catalog, {
     } catch {
       result = { status: 1 };
     }
+    const identity = result?.status === 0 ? healthIdentity(result.stdout) : null;
     checks.push(result?.status === 0
-      ? { providerId: check.providerId, capabilityId: check.capabilityId, status: 'pass', errorCode: null }
+      ? {
+          providerId: check.providerId,
+          capabilityId: check.capabilityId,
+          status: 'pass',
+          errorCode: null,
+          ...(identity ? { identity } : {}),
+        }
       : { providerId: check.providerId, capabilityId: check.capabilityId, status: 'degraded', errorCode: 'capability_health_failed' });
   }
   return {
@@ -590,8 +614,11 @@ function displayServiceGroup(diag, jsonGroup) {
 function displayCapabilityGroup(capabilities) {
   const checks = [];
   for (const check of capabilities.checks ?? []) {
+    const identity = check.identity
+      ? ` — app=${check.identity.app} host=${check.identity.host} mode=${check.identity.mode}`
+      : '';
     checks.push(check.status === 'pass'
-      ? `${check.providerId}: ${green('healthy')}`
+      ? `${check.providerId}: ${green('healthy')}${identity}`
       : `${check.providerId}: ${yellow('degraded')} (${check.errorCode})`);
   }
   if ((capabilities.undeclaredProviders ?? 0) > 0) {
