@@ -15,9 +15,29 @@ const JEST_IGNORE_PROPERTY = /\btestPathIgnorePatterns\s*:/g;
 const JEST_IGNORE_JSON_PROPERTY = /"testPathIgnorePatterns"\s*:/g;
 const JEST_IGNORE_CLI = /--testPathIgnorePatterns\b/g;
 const ACTIVE_TEST = /\b(?:it|test)\s*\(/g;
+const REGEX_PREFIX_KEYWORDS = new Set([
+  'await', 'case', 'delete', 'do', 'else', 'in', 'instanceof', 'new',
+  'of', 'return', 'throw', 'typeof', 'void', 'yield',
+]);
 
 function lineNumberAt(source, index) {
   return source.slice(0, index).split('\n').length;
+}
+
+// A slash starts a regex only where JavaScript can start a new expression.
+// After identifiers, values, or closing delimiters it remains division. This
+// focused lexer avoids pulling a parser into the release gate while covering
+// the regex literals used by the protected tests.
+function startsRegexLiteral(sanitizedPrefix) {
+  const prefix = sanitizedPrefix.trimEnd();
+  if (!prefix) return true;
+  if (prefix.endsWith('++') || prefix.endsWith('--')) return false;
+
+  const previous = prefix.at(-1);
+  if (/[([{=,:;!?&|+\-*%^~<>]/.test(previous)) return true;
+
+  const keyword = prefix.match(/([A-Za-z_$][\w$]*)$/)?.[1];
+  return REGEX_PREFIX_KEYWORDS.has(keyword);
 }
 
 function stripCommentsAndStrings(source) {
@@ -56,10 +76,49 @@ function stripCommentsAndStrings(source) {
           result += source[index] === '\n' ? '\n' : ' ';
         }
       } else if (char === quote) {
-        result += ' ';
+        result += 'x';
         mode = 'code';
       } else {
         result += char === '\n' ? '\n' : ' ';
+      }
+      continue;
+    }
+    if (mode === 'regex') {
+      if (char === '\\') {
+        result += ' ';
+        if (index + 1 < source.length) {
+          index += 1;
+          result += source[index] === '\n' ? '\n' : ' ';
+        }
+      } else if (char === '[') {
+        result += ' ';
+        mode = 'regex-class';
+      } else if (char === '/') {
+        result += 'x';
+        mode = 'code';
+      } else if (char === '\n') {
+        result += '\n';
+        mode = 'code';
+      } else {
+        result += ' ';
+      }
+      continue;
+    }
+    if (mode === 'regex-class') {
+      if (char === '\\') {
+        result += ' ';
+        if (index + 1 < source.length) {
+          index += 1;
+          result += source[index] === '\n' ? '\n' : ' ';
+        }
+      } else if (char === ']') {
+        result += ' ';
+        mode = 'regex';
+      } else if (char === '\n') {
+        result += '\n';
+        mode = 'code';
+      } else {
+        result += ' ';
       }
       continue;
     }
@@ -71,6 +130,9 @@ function stripCommentsAndStrings(source) {
       result += '  ';
       index += 1;
       mode = 'block-comment';
+    } else if (char === '/' && startsRegexLiteral(result)) {
+      result += ' ';
+      mode = 'regex';
     } else if (char === '"' || char === "'" || char === '`') {
       quote = char;
       result += ' ';

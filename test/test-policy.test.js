@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { describe, expect, test } from '@jest/globals';
 
 import {
+  countActiveTests,
   findDisabledTests,
   loadApprovedSkipAllowlist,
   listTrackedFiles,
@@ -37,6 +38,18 @@ function makeRepository() {
 }
 
 describe('test policy', () => {
+  test('counts active tests around division and quoted regular-expression classes', () => {
+    const source = [
+      "test('before', () => {});",
+      'const quotient = total / divisor;',
+      String.raw`const pattern = /x ['\"\\/]claude['\"]?/;`,
+      "test('after-regex', () => pattern.exec('x'));",
+      "test('after-division', () => quotient);",
+    ].join('\n');
+
+    expect(countActiveTests(source)).toBe(3);
+  });
+
   test('finds every disabled or focused test declaration with file and line', () => {
     const source = [
       "it.skip('one', () => {});",

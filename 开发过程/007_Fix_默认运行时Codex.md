@@ -27,3 +27,10 @@ YOS 的产品默认运行时已经确定为 Codex，但非交互式初始化、�
 - 新增真实接线守卫，要求 `initCommand` 必须通过 `selectRuntime()` 解析最终运行时；把接线改回旧的 `opts.runtime || existingRuntime || 'claude'` 后，定向测试精确报红。
 - 旧的 `test/integration/runtime/scenarios` 脚手架当前没有被 `test:node` 或 `verify` 调用。本轮不把整套旧 harness 接回门禁，避免引入与默认运行时无关的环境依赖；改由现行 Node 测试直接读取 `post-init-runtime-status.env`，钉住 Codex 预期值。
 - Node 测试底线从 1590 抬到 1592；源码调用计数器实测识别 7 个活跃 `test` 调用，因此关键测试文件下限从 6 抬到 7。
+
+## 守门收口（TD-162）
+
+- `stripCommentsAndStrings()` 增加正则字面量与字符类状态，字符类里的引号、转义和斜杠不再误触发字符串或正则结束。
+- `/` 的判定采用表达式位置启发式：开头、运算符、分隔符及 `return` 等前缀关键字之后视为正则；标识符、值、闭合定界符及自增/自减之后视为除法。没有引入完整 JavaScript parser，保持发布门禁零新增依赖。
+- 对 61 个带 `minimumTests` 的文件重新计数。解析器修复本身只使 `default-runtime.test.js` 7→8、`half-finished-install-recovery.test.js` 11→27；后者按工单保持历史 floor=1。本轮新增计数器测试使 `test-policy.test.js` 自身 8→9。
+- Jest 执行底线 472→473，默认运行时关键文件下限 7→8；删除默认运行时任意测试由关键文件层拦截，删除计数器回归测试由执行数基线拦截。

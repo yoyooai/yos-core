@@ -153,7 +153,7 @@
     },
     {
       "path": "cli/lib/__tests__/default-runtime.test.js",
-      "minimumTests": 7
+      "minimumTests": 8
     },
     {
       "path": "cli/lib/__tests__/docker-default-runtime.test.js",
@@ -336,5 +336,5 @@
       "path": "skills/comm-bridge/scripts/c4-dispatcher.js"
     }
   ],
-  "approvedDigest": "344231596b2e0d50900e965e262a24a2387bbc3f2b336852b1e1490c7c9d9344"
+  "approvedDigest": "c70d7fd5c8025c0d6f4ab11312c50373278a580c5bab5aba0219a44c082fb37c"
 }
