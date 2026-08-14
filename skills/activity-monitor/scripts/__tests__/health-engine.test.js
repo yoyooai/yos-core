@@ -9,6 +9,7 @@ function createMockDeps() {
     readHeartbeatPending: [],
     clearHeartbeatPending: 0,
     killTmuxSession: 0,
+    notifyCustomer: 0,
     log: []
   };
 
@@ -17,7 +18,11 @@ function createMockDeps() {
     getHeartbeatStatus: (id) => { calls.getHeartbeatStatus.push(id); return deps._heartbeatStatus || 'pending'; },
     readHeartbeatPending: () => { calls.readHeartbeatPending.push(true); return deps._pending || null; },
     clearHeartbeatPending: () => { calls.clearHeartbeatPending++; },
-    killTmuxSession: () => { calls.killTmuxSession++; },
+    killTmuxSession: () => {
+      calls.killTmuxSession++;
+      return { observed: 3, graceful: 2, forced: 1, remaining: 0 };
+    },
+    notifyCustomer: () => { calls.notifyCustomer++; },
     log: (msg) => { calls.log.push(msg); },
     // Test helpers
     _pending: null,
@@ -28,6 +33,63 @@ function createMockDeps() {
 }
 
 describe('HealthEngine', () => {
+  describe('self-heal telemetry', () => {
+    it('records every forced recovery without notifying the customer', () => {
+      const { deps, calls } = createMockDeps();
+      const engine = new HealthEngine(deps, { now: () => 10_000_000 });
+
+      engine.triggerRecovery('recovery_timeout');
+
+      assert.equal(engine.selfHealCount, 1);
+      assert.equal(engine.selfHealLastAt, 10_000);
+      assert.equal(engine.selfHealLastReason, 'recovery_timeout');
+      assert.deepEqual(engine.selfHealLastCleanup, {
+        observed: 3,
+        graceful: 2,
+        forced: 1,
+        remaining: 0,
+      });
+      assert.equal(calls.notifyCustomer, 0);
+      assert.ok(calls.log.some(message => message.includes('SELF-HEAL performed')));
+    });
+
+    it('latches attention after three recoveries within four hours', () => {
+      const { deps } = createMockDeps();
+      let nowMs = 20_000_000;
+      const engine = new HealthEngine(deps, { now: () => nowMs });
+
+      engine.triggerRecovery('recovery_timeout');
+      nowMs += 60_000;
+      engine.triggerRecovery('recovery_timeout');
+      nowMs += 60_000;
+      engine.triggerRecovery('recovery_timeout');
+
+      assert.equal(engine.selfHealRecentCount, 3);
+      assert.equal(engine.selfHealAttentionRequired, true);
+      assert.equal(engine.selfHealAttentionSince, 20_120);
+    });
+
+    it('restores cumulative self-heal state after monitor restart', () => {
+      const { deps } = createMockDeps();
+      const engine = new HealthEngine(deps, {
+        now: () => 30_000_000,
+        initialSelfHeal: {
+          count: 7,
+          lastAt: 29_000,
+          lastReason: 'recovery_timeout',
+          lastCleanup: { observed: 2, graceful: 2, forced: 0, remaining: 0 },
+          recentEvents: [29_000],
+          attentionRequired: true,
+          attentionSince: 28_000,
+        },
+      });
+
+      assert.equal(engine.selfHealCount, 7);
+      assert.equal(engine.selfHealLastAt, 29_000);
+      assert.equal(engine.selfHealAttentionRequired, true);
+    });
+  });
+
   describe('maintenance lifecycle', () => {
     it('keeps HeartbeatEngine as a compatibility alias', () => {
       assert.equal(HeartbeatEngine, HealthEngine);
@@ -609,6 +671,8 @@ describe('HealthEngine', () => {
       assert.equal(engine.health, 'unavailable');
       assert.equal(engine.healthReason, 'auth_recovered_restart');
       assert.equal(calls.killTmuxSession, 1);
+      assert.equal(engine.selfHealCount, 1);
+      assert.equal(engine.selfHealLastReason, 'auth_recovered_restart');
       assert.deepStrictEqual(calls.enqueueHeartbeat, []);
     });
 
@@ -723,6 +787,8 @@ describe('HealthEngine', () => {
       assert.equal(engine.health, 'unavailable');
       assert.equal(engine.healthReason, 'sticky_context_restart');
       assert.equal(calls.killTmuxSession, 1);
+      assert.equal(engine.selfHealCount, 1);
+      assert.equal(engine.selfHealLastReason, 'sticky_context_restart');
     });
 
     it('resets OK-path counters after a clean delivery check', async () => {

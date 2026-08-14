@@ -31,6 +31,8 @@
 const USER_MESSAGE_CHECK_DELAY_MS = 5000;
 const CONSECUTIVE_HITS_THRESHOLD = 2;
 const STICKY_ERROR_MIN_INTERVAL_MS = 30000;
+const SELF_HEAL_WINDOW_SECONDS = 4 * 60 * 60;
+const SELF_HEAL_ATTENTION_THRESHOLD = 3;
 
 function isUnavailableRecoveryState(health) {
   return health === 'unavailable' || health === 'recovering';
@@ -118,6 +120,21 @@ export class HealthEngine {
     this.rateLimitConsecutiveHits = 0;
     this.stickyErrorConsecutiveHits = 0;
     this.lastStickyErrorHitAt = 0;
+
+    const initialSelfHeal = options.initialSelfHeal ?? {};
+    const initialNow = Math.floor(this.now() / 1000);
+    this.selfHealCount = Number(initialSelfHeal.count) || 0;
+    this.selfHealLastAt = Number(initialSelfHeal.lastAt) || 0;
+    this.selfHealLastReason = initialSelfHeal.lastReason || '';
+    this.selfHealLastCleanup = initialSelfHeal.lastCleanup ?? null;
+    this.selfHealRecentEvents = Array.isArray(initialSelfHeal.recentEvents)
+      ? initialSelfHeal.recentEvents.filter(timestamp => (
+        Number.isFinite(timestamp) && timestamp >= initialNow - SELF_HEAL_WINDOW_SECONDS
+      ))
+      : [];
+    this.selfHealRecentCount = this.selfHealRecentEvents.length;
+    this.selfHealAttentionRequired = initialSelfHeal.attentionRequired === true;
+    this.selfHealAttentionSince = Number(initialSelfHeal.attentionSince) || 0;
   }
 
   get health() {
@@ -423,7 +440,7 @@ export class HealthEngine {
       return;
     }
 
-    const now = Math.floor(Date.now() / 1000);
+    const now = Math.floor(this.now() / 1000);
 
     if (this.healthState === 'ok') {
       this.setHealth('unavailable', reason);
@@ -433,7 +450,7 @@ export class HealthEngine {
     this.restartFailureCount += 1;
     this.lastRecoveryAt = now;
     this.deps.log(`Heartbeat recovery attempt ${this.restartFailureCount} (${reason}), next backoff ${this.getBackoffDelay()}s`);
-    this.deps.killTmuxSession();
+    this._performSelfHeal(reason, now);
 
     // Legacy DOWN is still accepted when restored from persisted state, but new
     // AM v3 recovery paths stay in public unavailable and expose duration via reason.
@@ -441,6 +458,44 @@ export class HealthEngine {
     if (this.recoveringStartedAt > 0 && failureDuration >= this.downDegradeThreshold) {
       this.setHealth('unavailable', `continuous_failure_for_${failureDuration}s`);
     }
+  }
+
+  _performSelfHeal(reason, now = Math.floor(this.now() / 1000)) {
+    const cleanup = this.deps.killTmuxSession() ?? {
+      observed: 0,
+      graceful: 0,
+      forced: 0,
+      remaining: 0,
+    };
+    this._recordSelfHeal(reason, cleanup, now);
+    return cleanup;
+  }
+
+  _recordSelfHeal(reason, cleanup, now) {
+    this.selfHealCount += 1;
+    this.selfHealLastAt = now;
+    this.selfHealLastReason = reason;
+    this.selfHealLastCleanup = {
+      observed: Number(cleanup.observed) || 0,
+      graceful: Number(cleanup.graceful) || 0,
+      forced: Number(cleanup.forced) || 0,
+      remaining: Number(cleanup.remaining) || 0,
+    };
+    this.selfHealRecentEvents = this.selfHealRecentEvents
+      .filter(timestamp => timestamp >= now - SELF_HEAL_WINDOW_SECONDS)
+      .concat(now)
+      .slice(-SELF_HEAL_ATTENTION_THRESHOLD);
+    this.selfHealRecentCount = this.selfHealRecentEvents.length;
+    if (!this.selfHealAttentionRequired && this.selfHealRecentCount >= SELF_HEAL_ATTENTION_THRESHOLD) {
+      this.selfHealAttentionRequired = true;
+      this.selfHealAttentionSince = now;
+    }
+
+    const result = this.selfHealLastCleanup;
+    this.deps.log(
+      `SELF-HEAL performed reason=${reason} observed=${result.observed} ` +
+      `graceful=${result.graceful} forced=${result.forced} remaining=${result.remaining}`
+    );
   }
 
   onHeartbeatFailure(pending, status) {
@@ -545,7 +600,7 @@ export class HealthEngine {
         this.lastStickyErrorHitAt = 0;
         this.deps.log(`sticky error 2x: ${stickyError.pattern || 'unknown'}, killing session`);
         this.setHealth('unavailable', 'sticky_context_restart');
-        this.deps.killTmuxSession();
+        this._performSelfHeal('sticky_context_restart');
       }
       return;
     }
@@ -574,13 +629,13 @@ export class HealthEngine {
     if (this.healthState === 'auth_failed') {
       const authResult = await this._checkAuth();
       if (authResult.status === 'success') {
-        const now = Math.floor(Date.now() / 1000);
+        const now = Math.floor(this.now() / 1000);
         this.deps.log('Auth probe recovered; restarting session before marking healthy');
         this.restartFailureCount = 0;
         this.lastRecoveryAt = now;
         this.recoveringStartedAt = now;
         this.setHealth('unavailable', 'auth_recovered_restart');
-        this.deps.killTmuxSession();
+        this._performSelfHeal('auth_recovered_restart', now);
         return { recovered: false, health: 'unavailable', restartTriggered: true };
       }
       const reason = authResult.reason || 'auth_still_failed';

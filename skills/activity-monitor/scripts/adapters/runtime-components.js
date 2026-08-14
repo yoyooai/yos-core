@@ -47,6 +47,15 @@ export function createHealthEngine(activeAdapter, initialStatus, {
   }, {
     initialHealth: initialStatus.health,
     initialReason: initialStatus.unavailable_reason || '',
+    initialSelfHeal: {
+      count: initialStatus.self_heal_count,
+      lastAt: initialStatus.self_heal_last_at,
+      lastReason: initialStatus.self_heal_last_reason,
+      lastCleanup: initialStatus.self_heal_last_cleanup,
+      recentEvents: initialStatus.self_heal_recent_events,
+      attentionRequired: initialStatus.self_heal_attention_required,
+      attentionSince: initialStatus.self_heal_attention_since,
+    },
     rateLimitDefaultCooldown,
     userMessageRecoveryCooldown,
   });

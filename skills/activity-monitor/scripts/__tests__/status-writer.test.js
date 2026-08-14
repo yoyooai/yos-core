@@ -54,6 +54,38 @@ describe('status-writer', () => {
     });
   });
 
+  it('writes persistent self-heal telemetry into every status snapshot', () => {
+    const payload = buildStatusPayload({
+      statusObj: { state: 'offline' },
+      healthEngine: {
+        health: 'unavailable',
+        healthReason: 'recovery_timeout',
+        selfHealCount: 4,
+        selfHealLastAt: 1234,
+        selfHealLastReason: 'recovery_timeout',
+        selfHealLastCleanup: { observed: 2, graceful: 1, forced: 1, remaining: 0 },
+        selfHealRecentEvents: [1200, 1234],
+        selfHealRecentCount: 2,
+        selfHealAttentionRequired: true,
+        selfHealAttentionSince: 1200,
+      },
+    });
+
+    assert.deepEqual(payload, {
+      state: 'offline',
+      unavailable_reason: 'recovery_timeout',
+      self_heal_count: 4,
+      self_heal_last_at: 1234,
+      self_heal_last_reason: 'recovery_timeout',
+      self_heal_last_cleanup: { observed: 2, graceful: 1, forced: 1, remaining: 0 },
+      self_heal_recent_events: [1200, 1234],
+      self_heal_recent_count: 2,
+      self_heal_attention_required: true,
+      self_heal_attention_since: 1200,
+      health: 'unavailable',
+    });
+  });
+
   it('normalizes legacy internal health states before writing public status', () => {
     assert.equal(publicHealth('recovering'), 'unavailable');
     assert.equal(publicHealth('down'), 'unavailable');

@@ -44,6 +44,16 @@ export function buildStatusPayload({ statusObj, healthEngine }) {
   if (health === 'unavailable' && healthEngine.unavailableSince) {
     extra.unavailable_since = healthEngine.unavailableSince;
   }
+  if (healthEngine.selfHealCount > 0) {
+    extra.self_heal_count = healthEngine.selfHealCount;
+    extra.self_heal_last_at = healthEngine.selfHealLastAt;
+    extra.self_heal_last_reason = healthEngine.selfHealLastReason;
+    extra.self_heal_last_cleanup = healthEngine.selfHealLastCleanup;
+    extra.self_heal_recent_events = healthEngine.selfHealRecentEvents;
+    extra.self_heal_recent_count = healthEngine.selfHealRecentCount;
+    extra.self_heal_attention_required = healthEngine.selfHealAttentionRequired;
+    extra.self_heal_attention_since = healthEngine.selfHealAttentionSince;
+  }
   return { ...statusObj, ...extra, health };
 }
 
