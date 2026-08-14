@@ -29,7 +29,7 @@ import { YOS_DIR } from '../config.js';
 import {
   tmuxHasSession,
   tmuxGetPanePid,
-  tmuxKillSession,
+  stopTmuxSessionProcessTree,
   tmuxPasteBuffer,
   tmuxDeleteBuffer,
   tmuxNewSession,
@@ -180,7 +180,7 @@ export class ClaudeAdapter extends RuntimeAdapter {
    * Synchronous — HeartbeatEngine calls this without await.
    */
   stop() {
-    tmuxKillSession(SESSION);
+    return stopTmuxSessionProcessTree(SESSION);
   }
 
   /**

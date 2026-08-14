@@ -29,7 +29,7 @@ import { resolveCodexBaseUrl } from '../api-endpoint.js';
 import {
   tmuxHasSession,
   tmuxGetPanePid,
-  tmuxKillSession,
+  stopTmuxSessionProcessTree,
   tmuxPasteBuffer,
   tmuxDeleteBuffer,
   tmuxCapturePaneText,
@@ -161,7 +161,7 @@ export class CodexAdapter extends RuntimeAdapter {
    * Synchronous — HeartbeatEngine calls this without await.
    */
   stop() {
-    tmuxKillSession(SESSION);
+    return stopTmuxSessionProcessTree(SESSION);
   }
 
   /**
