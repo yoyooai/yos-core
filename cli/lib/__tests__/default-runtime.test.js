@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { afterEach, describe, test } from 'node:test';
 
 import {
@@ -55,5 +56,26 @@ describe('default runtime selection', () => {
     assert.doesNotMatch(output, /claude \(default\)/);
     assert.match(output, /Codex CLI \(OpenAI\) — default/);
     assert.doesNotMatch(output, /Claude Code \(Anthropic\) — default/);
+  });
+
+  test('initCommand resolves the installed runtime through selectRuntime', () => {
+    const source = fs.readFileSync(new URL('../../commands/init.js', import.meta.url), 'utf8');
+    assert.match(
+      source,
+      /let selectedRuntime = selectRuntime\(\{\s*requestedRuntime: opts\.runtime,\s*existingRuntime,\s*\}\);/s,
+    );
+    assert.doesNotMatch(
+      source,
+      /let selectedRuntime = opts\.runtime \|\| existingRuntime \|\| ['"]claude['"]/,
+    );
+  });
+
+  test('keeps the post-init runtime-status scenario aligned with the Codex default', () => {
+    const scenario = fs.readFileSync(
+      new URL('../../../test/integration/runtime/scenarios/post-init-runtime-status.env', import.meta.url),
+      'utf8',
+    );
+    assert.match(scenario, /^EXPECT_STDOUT=Current runtime: Codex \(OpenAI\)$/m);
+    assert.doesNotMatch(scenario, /^EXPECT_STDOUT=Current runtime: Claude Code \(Anthropic\)$/m);
   });
 });
