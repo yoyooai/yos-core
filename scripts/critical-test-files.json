@@ -93,7 +93,34 @@
     },
     {
       "path": "cli/lib/__tests__/doctor-capabilities.test.js",
-      "minimumTests": 3
+      "minimumTests": 4
+    },
+    {
+      "path": "cli/lib/__tests__/component-source-display.test.js",
+      "minimumTests": 4
+    },
+    {
+      "path": "cli/lib/__tests__/install-directory-identity.test.js",
+      "minimumTests": 4
+    },
+    {
+      "path": "cli/lib/components.js"
+    },
+    {
+      "path": "cli/lib/__tests__/subdir-components.test.js",
+      "minimumTests": 2
+    },
+    {
+      "path": "cli/commands/add.js"
+    },
+    {
+      "path": "cli/lib/install-directory.js"
+    },
+    {
+      "path": "cli/yos.js"
+    },
+    {
+      "path": "cli/commands/doctor.js"
     },
     {
       "path": "cli/lib/__tests__/registry.test.js",
@@ -336,5 +363,5 @@
       "path": "skills/comm-bridge/scripts/c4-dispatcher.js"
     }
   ],
-  "approvedDigest": "c70d7fd5c8025c0d6f4ab11312c50373278a580c5bab5aba0219a44c082fb37c"
+  "approvedDigest": "b6d16c73aa16e32388e1d9bca97b466f73231fc4e01575effc7aa56ca2c8fb4b"
 }
