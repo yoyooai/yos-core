@@ -364,7 +364,11 @@
     },
     {
       "path": "cli/lib/runtime/__tests__/tmux-helpers.test.js",
-      "minimumTests": 19
+      "minimumTests": 21
+    },
+    {
+      "path": "skills/activity-monitor/scripts/__tests__/runtime-components.test.js",
+      "minimumTests": 1
     },
     {
       "path": "skills/activity-monitor/scripts/__tests__/health-engine.test.js",
@@ -382,6 +386,15 @@
       "path": "cli/lib/runtime/tmux-helpers.js"
     },
     {
+      "path": "cli/lib/runtime/codex.js"
+    },
+    {
+      "path": "cli/lib/runtime/claude.js"
+    },
+    {
+      "path": "skills/activity-monitor/scripts/adapters/runtime-components.js"
+    },
+    {
       "path": "skills/activity-monitor/scripts/health-engine.js"
     },
     {
@@ -391,5 +404,5 @@
       "path": "skills/activity-monitor/scripts/status-writer.js"
     }
   ],
-  "approvedDigest": "03013f6db66d2109218d3042bd0d75c46b3b44116f1e9534201ee38e3dae3449"
+  "approvedDigest": "2de426d75590cc649d053fcd0f9d2517ec453e4daf4db3373706c3a1cabf8681"
 }
