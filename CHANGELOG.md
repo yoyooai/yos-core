@@ -4,6 +4,48 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
+## [0.1.18] - 2026-08-15
+
+### Fixed
+
+- Make a frozen agent session recoverable instead of quietly wedged. Self-heal
+  used to kill the tmux session and hope; a session whose process tree had
+  stopped responding left its children alive, so the "recovered" machine came
+  back with the old processes still holding the runtime. Recovery now walks the
+  exact process tree and reaps it, and both runtime adapters route their stop
+  path through that reaper rather than a bare session kill.
+- Stop a forced rebuild from leaving no trace. Every forced rebuild now writes a
+  local log line and increments a snapshot counter that survives a watchdog
+  restart; three rebuilds inside four hours latch a "needs human attention"
+  flag. Previously the counter reset to zero on every restart, so the escalation
+  could be erased by a single restart with nobody the wiser. An offline snapshot
+  keeps the real last-activity time and its source instead of the moment the
+  snapshot was taken.
+- Show where an official component actually came from. The component listing
+  reported the source repository even when the package had been installed from
+  the distribution shelf, so the answer to "where did this come from" did not
+  match reality.
+- Refuse to treat an unrelated directory as a YOS installation. Ordinary
+  commands run from an arbitrary directory could latch onto it as the install
+  root; they now decline, while `yos init` continues to handle both first
+  installation and recovery.
+
+### Added
+
+- Report the local connection identity in `yos doctor` for the Feishu channel,
+  so a delivered machine can be told apart from any other instance signed in
+  with the same application credentials.
+
+### Changed
+
+- Ship the shelf auto-backup installer in system mode only. The installer used
+  to generate a user-level systemd unit, which on a machine whose user manager
+  sandboxes `/etc` produces a timer that stays green while the backup never
+  runs. Concurrent installs are now rejected against the real unit state, the
+  previous timer is not stopped before a rejection, and an interrupted install
+  rolls back on either signal. (Merged 2026-08-14; reaches customers with this
+  release.)
+
 ## [0.1.17] - 2026-08-14
 
 ### Changed
