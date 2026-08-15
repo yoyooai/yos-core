@@ -52,6 +52,7 @@ describe('MonitorOrchestrator', () => {
         cooldown_until: 1234,
         rate_limit_reset: '12:30',
         runtime_launch_at: 5678,
+        ...overrides.initialStatus,
       }),
       createHealthEngine: (activeAdapter, initialStatus) => {
         calls.push(['createHealthEngine', activeAdapter, initialStatus.health]);
@@ -131,6 +132,8 @@ describe('MonitorOrchestrator', () => {
       watchdogState,
       procSampler,
       runtimeLaunchAtMs: 5678,
+      lastObservedActivity: 0,
+      lastObservedSource: null,
       engine,
       guardian,
       usageMonitor,
@@ -155,6 +158,45 @@ describe('MonitorOrchestrator', () => {
       'scheduleStaleRuntimeCleanup',
     ]);
     assert.equal(calls.find(([name]) => name === 'startMessageRouterServer')[1], engine);
+  });
+
+  it('preserves the last real activity timestamp while the runtime is offline', () => {
+    const { orchestrator } = createHarness({
+      initialStatus: {
+        health: 'ok',
+        last_activity: 400,
+        source: 'tmux_activity',
+      },
+      taskScheduler: { tick: () => {} },
+    });
+    orchestrator.start();
+    let written;
+
+    orchestrator.handleNotRunningRuntime({
+      guardianResult: {
+        state: 'offline',
+        notRunningSeconds: 7,
+        message: 'session missing',
+      },
+      currentTime: 456,
+      currentTimeHuman: '2026-08-14 12:08:00',
+      lastState: 'busy',
+      buildNotRunningStatus: payload => ({
+        state: payload.state,
+        last_activity: payload.lastActivity,
+        inactive_seconds: payload.inactiveSeconds,
+        source: payload.source,
+      }),
+      writeStatusFile: status => { written = status; },
+      clearWatchdogState: () => {},
+    });
+
+    assert.deepEqual(written, {
+      state: 'offline',
+      last_activity: 400,
+      inactive_seconds: 56,
+      source: 'tmux_activity',
+    });
   });
 
   it('coordinates runtime liveness tick and restart signaling', async () => {
@@ -250,6 +292,9 @@ describe('MonitorOrchestrator', () => {
           message: 'tmux missing',
         },
         runtimeLaunchAtMsValue: 5678,
+        lastActivity: 111,
+        inactiveSeconds: 12,
+        source: 'guardian_liveness',
       }],
       ['writeStatusFile', { status: 'not-running', state: 'offline' }],
       ['log', 'State: OFFLINE (tmux session not found)'],
@@ -1126,7 +1171,7 @@ describe('MonitorOrchestrator', () => {
     ]);
   });
 
-  it('stops runtime and resets ProcSampler when process is frozen', () => {
+  it('routes frozen-process recovery through the observable self-heal path', () => {
     const calls = [];
     const adapter = {
       runtimeId: 'claude',
@@ -1149,6 +1194,11 @@ describe('MonitorOrchestrator', () => {
     const { orchestrator } = createHarness({
       adapter,
       procSampler,
+      engine: {
+        health: 'ok',
+        start: () => calls.push(['engine.start']),
+        triggerRecovery: reason => calls.push(['engine.triggerRecovery', reason]),
+      },
       initialHealth: 'ok',
       log: (message) => calls.push(['log', message]),
     });
@@ -1164,7 +1214,7 @@ describe('MonitorOrchestrator', () => {
       ['procSampler.isFrozen'],
       ['procSampler.getState'],
       ['log', 'Guardian: Process frozen (0 ctx_switch delta for 60s while active_tools > 0), killing session'],
-      ['adapter.stop'],
+      ['engine.triggerRecovery', 'frozen_process'],
       ['procSampler.reset'],
     ]);
   });

@@ -93,7 +93,34 @@
     },
     {
       "path": "cli/lib/__tests__/doctor-capabilities.test.js",
-      "minimumTests": 3
+      "minimumTests": 4
+    },
+    {
+      "path": "cli/lib/__tests__/component-source-display.test.js",
+      "minimumTests": 4
+    },
+    {
+      "path": "cli/lib/__tests__/install-directory-identity.test.js",
+      "minimumTests": 4
+    },
+    {
+      "path": "cli/lib/components.js"
+    },
+    {
+      "path": "cli/lib/__tests__/subdir-components.test.js",
+      "minimumTests": 2
+    },
+    {
+      "path": "cli/commands/add.js"
+    },
+    {
+      "path": "cli/lib/install-directory.js"
+    },
+    {
+      "path": "cli/yos.js"
+    },
+    {
+      "path": "cli/commands/doctor.js"
     },
     {
       "path": "cli/lib/__tests__/registry.test.js",
@@ -334,7 +361,48 @@
     },
     {
       "path": "skills/comm-bridge/scripts/c4-dispatcher.js"
+    },
+    {
+      "path": "cli/lib/runtime/__tests__/tmux-helpers.test.js",
+      "minimumTests": 21
+    },
+    {
+      "path": "skills/activity-monitor/scripts/__tests__/runtime-components.test.js",
+      "minimumTests": 1
+    },
+    {
+      "path": "skills/activity-monitor/scripts/__tests__/health-engine.test.js",
+      "minimumTests": 101
+    },
+    {
+      "path": "skills/activity-monitor/scripts/__tests__/monitor-orchestrator.test.js",
+      "minimumTests": 23
+    },
+    {
+      "path": "skills/activity-monitor/scripts/__tests__/status-writer.test.js",
+      "minimumTests": 6
+    },
+    {
+      "path": "cli/lib/runtime/tmux-helpers.js"
+    },
+    {
+      "path": "cli/lib/runtime/codex.js"
+    },
+    {
+      "path": "cli/lib/runtime/claude.js"
+    },
+    {
+      "path": "skills/activity-monitor/scripts/adapters/runtime-components.js"
+    },
+    {
+      "path": "skills/activity-monitor/scripts/health-engine.js"
+    },
+    {
+      "path": "skills/activity-monitor/scripts/monitor-orchestrator.js"
+    },
+    {
+      "path": "skills/activity-monitor/scripts/status-writer.js"
     }
   ],
-  "approvedDigest": "46d7ff8a88f35d99af91a6fb20b213ca9976b1a49f3caf64ff8af400d975ace3"
+  "approvedDigest": "82c3c4e421a33c94d24a3b1a55e7fdeb8b4cf6627b91c5d046c07b296f038cc7"
 }

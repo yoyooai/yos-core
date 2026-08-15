@@ -44,6 +44,31 @@ describe('doctor capability health group', () => {
     assert.deepEqual(result.checks, []);
   });
 
+  it('surfaces only the bounded instance identity returned by a provider health check', () => {
+    const result = doctorModule.evaluateCapabilityHealth({
+      healthChecks: [{ providerId: 'channel.feishu', capabilityId: 'communication.message', path: '/fixture/health.js' }],
+      providers: [],
+    }, {
+      runHealth() {
+        return {
+          status: 0,
+          stdout: JSON.stringify({
+            status: 'ok',
+            identity: { app: '…abcdef', host: 'yos-nova', mode: 'websocket' },
+            secret: 'must-not-escape',
+          }),
+        };
+      },
+    });
+
+    assert.deepEqual(result.checks[0].identity, {
+      app: '…abcdef',
+      host: 'yos-nova',
+      mode: 'websocket',
+    });
+    assert.doesNotMatch(JSON.stringify(result), /must-not-escape/);
+  });
+
   it('adds one Capabilities group without hiding unrelated diagnostics', () => {
     assert.equal(typeof doctorModule.buildDiagnosticJson, 'function');
     const diagnostic = doctorModule.buildDiagnosticJson({

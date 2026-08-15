@@ -88,6 +88,8 @@ export class MonitorOrchestrator {
       usageMonitor,
       taskScheduler,
       contextMonitor,
+      lastObservedActivity: Number(initialStatus.last_activity) || 0,
+      lastObservedSource: initialStatus.source || null,
     };
     return this.components;
   }
@@ -129,6 +131,12 @@ export class MonitorOrchestrator {
 
     const { adapter, engine, taskScheduler, toolPipeline } = this.components;
     const state = guardianResult.state;
+    const lastActivity = this.components.lastObservedActivity || Math.max(
+      0,
+      currentTime - (Number(guardianResult.notRunningSeconds) || 0)
+    );
+    const inactiveSeconds = Math.max(0, currentTime - lastActivity);
+    const source = this.components.lastObservedSource || 'guardian_liveness';
 
     writeStatusFile(buildNotRunningStatus({
       state,
@@ -136,6 +144,9 @@ export class MonitorOrchestrator {
       currentTimeHuman,
       guardianResult,
       runtimeLaunchAtMsValue: this.components.runtimeLaunchAtMs,
+      lastActivity,
+      inactiveSeconds,
+      source,
     }));
 
     if (state === 'stopped' && adapter.runtimeId === 'claude') {
@@ -506,14 +517,14 @@ export class MonitorOrchestrator {
       throw new Error('MonitorOrchestrator.start() must be called before handleProcSampler()');
     }
 
-    const { adapter, procSampler } = this.components;
+    const { engine, procSampler } = this.components;
     procSampler.tick(currentTime, { isActive: confirmedActive });
     if (!procSampler.isFrozen()) {
       return { frozen: false };
     }
 
     this.deps.log(`Guardian: Process frozen (0 ctx_switch delta for ${procSampler.getState().frozenCount}s while active_tools > 0), killing session`);
-    adapter.stop();
+    engine.triggerRecovery('frozen_process');
     procSampler.reset();
     // Guardian will detect offline on next tick and call startAgent().
     return { frozen: true, lastState: 'frozen' };
@@ -603,6 +614,8 @@ export class MonitorOrchestrator {
     }
 
     const { engine, taskScheduler } = this.components;
+    this.components.lastObservedActivity = activity;
+    this.components.lastObservedSource = source;
     const inactiveSeconds = currentTime - activity;
     const state = (activeTools > 0 || inactiveSeconds < idleThreshold) ? 'busy' : 'idle';
 

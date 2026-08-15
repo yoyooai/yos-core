@@ -413,6 +413,9 @@ function buildNotRunningStatus({
   currentTimeHuman,
   guardianResult,
   runtimeLaunchAtMsValue,
+  lastActivity,
+  inactiveSeconds,
+  source,
 }) {
   return {
     state,
@@ -423,6 +426,9 @@ function buildNotRunningStatus({
     not_running_seconds: guardianResult.notRunningSeconds,
     message: guardianResult.message,
     runtime_launch_at: runtimeLaunchAtMsValue,
+    last_activity: lastActivity,
+    inactive_seconds: inactiveSeconds,
+    source,
   };
 }
 

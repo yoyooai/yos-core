@@ -151,8 +151,11 @@ describe('registry entries for components inside a repository', () => {
     assert.equal(resolved.source.tagPrefix, 'feishu');
     // Registered components are ours; the third-party warning would misinform.
     assert.equal(resolved.isThirdParty, false);
-    // Two components share one repo, so the label has to say which is which.
-    assert.match(resolved.sourceLabel, /channels\/001_feishu/);
+    assert.equal(resolved.sourceLabel, 'https://yoyooai.com/dist');
+    // Two components share one repo, so the source-repository label has to say
+    // which component the mirrored bytes came from.
+    assert.match(resolved.sourceRepositoryLabel, /github\.com\/yoyooai\/yos-components/);
+    assert.match(resolved.sourceRepositoryLabel, /channels\/001_feishu/);
   });
 
   it('leaves whole-repository components without a path', async () => {

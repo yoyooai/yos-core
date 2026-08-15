@@ -178,6 +178,7 @@ export async function addComponent(args) {
       if (regInfo.description) reply += `\n${regInfo.description}`;
       reply += `\nType: ${regInfo.type || 'unknown'}`;
       reply += `\n${resolved.sourceReplyLabel}: ${resolved.sourceLabel}`;
+      if (resolved.sourceRepositoryLabel) reply += `\nSource repository: ${resolved.sourceRepositoryLabel}`;
       if (resolved.isThirdParty) reply += '\nWarning: Third-party component';
       if (resolved.isPrerelease) reply += `\nNote: prerelease — ${resolved.version} is the newest version published; no stable release exists yet`;
       if (fetchFailed) {
@@ -201,6 +202,9 @@ export async function addComponent(args) {
       const versionInfo = branch ? ` (branch: ${bold(branch)})` : (resolved.version ? `@${bold(resolved.version)}` : '');
       console.log(`\n${heading('Component:')} ${bold(resolved.name)}${versionInfo}`);
       console.log(`${heading(resolved.sourceHeading)} ${dim(resolved.sourceLabel)}`);
+      if (resolved.sourceRepositoryLabel) {
+        console.log(`${heading('Source repository:')} ${dim(resolved.sourceRepositoryLabel)}`);
+      }
       if (resolved.isThirdParty) {
         console.log(warn('Third-party component — not verified by YOS team.'));
       }
@@ -231,6 +235,9 @@ export async function addComponent(args) {
     const versionInfo = branch ? ` (branch: ${bold(branch)})` : (resolved.version ? `@${bold(resolved.version)}` : '');
     console.log(`\n${heading('Component:')} ${bold(resolved.name)}${versionInfo}`);
     console.log(`${heading(resolved.sourceHeading)} ${dim(resolved.sourceLabel)}`);
+    if (resolved.sourceRepositoryLabel) {
+      console.log(`${heading('Source repository:')} ${dim(resolved.sourceRepositoryLabel)}`);
+    }
 
     if (resolved.isThirdParty) {
       console.log(warn('Third-party component — not verified by YOS team.'));

@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, it, mock } from 'node:test';
 import { execFileSync } from 'node:child_process';
 
@@ -16,6 +20,48 @@ import {
   hasChildProcess,
   isTimeoutError,
 } from '../tmux-helpers.js';
+import * as tmuxHelpers from '../tmux-helpers.js';
+
+function runAdapterStopInIsolation({ modulePath, exportName }) {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-adapter-stop-'));
+  const binDir = path.join(fixtureRoot, 'bin');
+  const callsFile = path.join(fixtureRoot, 'tmux-calls.log');
+  const runnerFile = path.join(fixtureRoot, 'runner.mjs');
+  fs.mkdirSync(binDir);
+
+  fs.writeFileSync(path.join(binDir, 'tmux'), `#!/bin/sh
+printf '%s\\n' "$*" >> "$YOS_TEST_TMUX_CALLS"
+if [ "$1" = "list-panes" ]; then
+  printf '2147483001\\n'
+fi
+exit 0
+`, { mode: 0o755 });
+  fs.writeFileSync(path.join(binDir, 'ps'), `#!/bin/sh
+printf '2147483001 1 S sh\\n2147483002 2147483001 T runtime\\n'
+`, { mode: 0o755 });
+  fs.writeFileSync(runnerFile, `
+const { ${exportName} } = await import(${JSON.stringify(pathToFileURL(modulePath).href)});
+const result = new ${exportName}().stop();
+process.stdout.write(JSON.stringify(result));
+`);
+
+  try {
+    const stdout = execFileSync(process.execPath, [runnerFile], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: `${binDir}${path.delimiter}${process.env.PATH || ''}`,
+        YOS_TEST_TMUX_CALLS: callsFile,
+      },
+    });
+    return {
+      result: JSON.parse(stdout),
+      calls: fs.readFileSync(callsFile, 'utf8'),
+    };
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+}
 
 // These tests verify the contract: each function must never throw,
 // and must return the correct fallback on timeout or exit errors.
@@ -133,5 +179,132 @@ describe('isTimeoutError classifier', () => {
 
   it('returns false for generic errors', () => {
     assert.equal(isTimeoutError(new Error('ENOENT')), false);
+  });
+});
+
+describe('tmux runtime process-tree cleanup', () => {
+  it('CodexAdapter.stop delegates to process-tree cleanup', () => {
+    const evidence = runAdapterStopInIsolation({
+      modulePath: path.resolve(import.meta.dirname, '..', 'codex.js'),
+      exportName: 'CodexAdapter',
+    });
+
+    assert.deepEqual(evidence.result, {
+      observed: 2,
+      graceful: 2,
+      forced: 0,
+      remaining: 0,
+    });
+    assert.match(evidence.calls, /list-panes -t codex-main/);
+    assert.match(evidence.calls, /kill-session -t codex-main/);
+  });
+
+  it('ClaudeAdapter.stop delegates to process-tree cleanup', () => {
+    const evidence = runAdapterStopInIsolation({
+      modulePath: path.resolve(import.meta.dirname, '..', 'claude.js'),
+      exportName: 'ClaudeAdapter',
+    });
+
+    assert.deepEqual(evidence.result, {
+      observed: 2,
+      graceful: 2,
+      forced: 0,
+      remaining: 0,
+    });
+    assert.match(evidence.calls, /list-panes -t claude-main/);
+    assert.match(evidence.calls, /kill-session -t claude-main/);
+  });
+
+  it('resumes frozen descendants, terminates them, and force-kills only survivors', () => {
+    assert.equal(typeof tmuxHelpers.stopTmuxSessionProcessTree, 'function');
+
+    const alive = new Set([100, 101, 102, 999]);
+    const signals = [];
+    const execFileSyncImpl = (command, args) => {
+      if (command === 'tmux' && args[0] === 'list-panes') return '100\n';
+      if (command === 'ps') {
+        return [
+          '100 50 S bash',
+          '101 100 T codex',
+          '102 101 T node',
+          '999 1 S unrelated',
+        ].join('\n');
+      }
+      if (command === 'tmux' && args[0] === 'kill-session') {
+        alive.delete(100);
+        return '';
+      }
+      throw new Error(`unexpected command: ${command} ${args.join(' ')}`);
+    };
+    const signalProcess = (pid, signal) => {
+      if (signal === 0) {
+        if (!alive.has(pid)) {
+          const err = new Error('no such process');
+          err.code = 'ESRCH';
+          throw err;
+        }
+        return;
+      }
+      signals.push([pid, signal]);
+      if (signal === 'SIGTERM' && pid === 102) alive.delete(pid);
+      if (signal === 'SIGKILL') alive.delete(pid);
+    };
+    const waitForExit = (pids) => pids.filter(pid => alive.has(pid));
+
+    const result = tmuxHelpers.stopTmuxSessionProcessTree('codex-main', {
+      execFileSyncImpl,
+      signalProcess,
+      waitForExit,
+    });
+
+    assert.deepEqual(result, {
+      observed: 3,
+      graceful: 2,
+      forced: 1,
+      remaining: 0,
+    });
+    assert.deepEqual(signals, [
+      [101, 'SIGCONT'],
+      [102, 'SIGCONT'],
+      [101, 'SIGTERM'],
+      [102, 'SIGTERM'],
+      [101, 'SIGKILL'],
+    ]);
+    assert.equal(alive.has(999), true, 'unrelated processes must not be signalled');
+  });
+
+  it('removes a real SIGSTOP-frozen child from an isolated tmux session', (t) => {
+    try {
+      execFileSync('tmux', ['-V'], { stdio: 'ignore' });
+    } catch {
+      t.skip('tmux is not installed');
+      return;
+    }
+
+    const session = `yos-wo088-${process.pid}`;
+    const pidFile = path.join(os.tmpdir(), `${session}.pid`);
+    try {
+      const fixture = `sleep 300 & child=$!; kill -STOP "$child"; printf %s "$child" > "${pidFile}"; wait`;
+      execFileSync('tmux', ['new-session', '-d', '-s', session, 'sh', '-c', fixture]);
+      const deadline = Date.now() + 3000;
+      while (!fs.existsSync(pidFile) && Date.now() < deadline) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+      }
+      assert.equal(fs.existsSync(pidFile), true, 'fixture child pid was not written');
+      const childPid = Number(fs.readFileSync(pidFile, 'utf8'));
+      const before = execFileSync('ps', ['-p', String(childPid), '-o', 'stat='], {
+        encoding: 'utf8',
+      }).trim();
+      assert.match(before, /^T/);
+
+      const result = tmuxHelpers.stopTmuxSessionProcessTree(session);
+
+      assert.equal(result.remaining, 0);
+      assert.equal(tmuxHasSession(session), false);
+      assert.throws(() => process.kill(childPid, 0), /ESRCH|no such process/i);
+    } finally {
+      try { execFileSync('tmux', ['kill-session', '-t', session], { stdio: 'ignore' }); } catch {}
+      try { fs.unlinkSync(pidFile); } catch {}
+    }
   });
 });
