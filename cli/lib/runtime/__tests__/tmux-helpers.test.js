@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, it, mock } from 'node:test';
 import { execFileSync } from 'node:child_process';
 
@@ -20,6 +21,47 @@ import {
   isTimeoutError,
 } from '../tmux-helpers.js';
 import * as tmuxHelpers from '../tmux-helpers.js';
+
+function runAdapterStopInIsolation({ modulePath, exportName }) {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-adapter-stop-'));
+  const binDir = path.join(fixtureRoot, 'bin');
+  const callsFile = path.join(fixtureRoot, 'tmux-calls.log');
+  const runnerFile = path.join(fixtureRoot, 'runner.mjs');
+  fs.mkdirSync(binDir);
+
+  fs.writeFileSync(path.join(binDir, 'tmux'), `#!/bin/sh
+printf '%s\\n' "$*" >> "$YOS_TEST_TMUX_CALLS"
+if [ "$1" = "list-panes" ]; then
+  printf '2147483001\\n'
+fi
+exit 0
+`, { mode: 0o755 });
+  fs.writeFileSync(path.join(binDir, 'ps'), `#!/bin/sh
+printf '2147483001 1 S sh\\n2147483002 2147483001 T runtime\\n'
+`, { mode: 0o755 });
+  fs.writeFileSync(runnerFile, `
+const { ${exportName} } = await import(${JSON.stringify(pathToFileURL(modulePath).href)});
+const result = new ${exportName}().stop();
+process.stdout.write(JSON.stringify(result));
+`);
+
+  try {
+    const stdout = execFileSync(process.execPath, [runnerFile], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: `${binDir}${path.delimiter}${process.env.PATH || ''}`,
+        YOS_TEST_TMUX_CALLS: callsFile,
+      },
+    });
+    return {
+      result: JSON.parse(stdout),
+      calls: fs.readFileSync(callsFile, 'utf8'),
+    };
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+}
 
 // These tests verify the contract: each function must never throw,
 // and must return the correct fallback on timeout or exit errors.
@@ -141,6 +183,38 @@ describe('isTimeoutError classifier', () => {
 });
 
 describe('tmux runtime process-tree cleanup', () => {
+  it('CodexAdapter.stop delegates to process-tree cleanup', () => {
+    const evidence = runAdapterStopInIsolation({
+      modulePath: path.resolve(import.meta.dirname, '..', 'codex.js'),
+      exportName: 'CodexAdapter',
+    });
+
+    assert.deepEqual(evidence.result, {
+      observed: 2,
+      graceful: 2,
+      forced: 0,
+      remaining: 0,
+    });
+    assert.match(evidence.calls, /list-panes -t codex-main/);
+    assert.match(evidence.calls, /kill-session -t codex-main/);
+  });
+
+  it('ClaudeAdapter.stop delegates to process-tree cleanup', () => {
+    const evidence = runAdapterStopInIsolation({
+      modulePath: path.resolve(import.meta.dirname, '..', 'claude.js'),
+      exportName: 'ClaudeAdapter',
+    });
+
+    assert.deepEqual(evidence.result, {
+      observed: 2,
+      graceful: 2,
+      forced: 0,
+      remaining: 0,
+    });
+    assert.match(evidence.calls, /list-panes -t claude-main/);
+    assert.match(evidence.calls, /kill-session -t claude-main/);
+  });
+
   it('resumes frozen descendants, terminates them, and force-kills only survivors', () => {
     assert.equal(typeof tmuxHelpers.stopTmuxSessionProcessTree, 'function');
 
