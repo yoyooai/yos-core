@@ -354,8 +354,15 @@ describe('Codex launch — new session', () => {
     const spec = readLaunchSpec();
     assert.ok(spec, 'spec should be written');
     // Since #681 the only launch arg is the kick prompt that triggers the
-    // SessionStart hook — never the retired text bootstrap payload.
-    assert.deepEqual(spec.args, ['hello']);
+    // SessionStart hook — never the retired text bootstrap payload. That
+    // prompt is a stateless internal lifecycle sentinel, never a human-looking
+    // greeting an agent could answer as if a person had spoken.
+    assert.equal(spec.args.length, 1);
+    // Exact-string lock, not a prefix: a mutated sentence must fail here too.
+    assert.equal(spec.args[0],
+      'System startup trigger, not a user message. Continue with startup context.');
+    assert.doesNotMatch(spec.args[0], /\bhello\b/i);
+    assert.doesNotMatch(spec.args[0], /welcome back/i);
     assert.ok(!JSON.stringify(spec).includes('session-start-inject.js'));
   });
 });
@@ -383,5 +390,23 @@ describe('Codex launch — existing session', () => {
     assert.ok(sent.includes('codex'), 'sent command should reference codex');
     assert.ok(!sent.includes('_p=$(cat'), 'existing-session command should not load bootstrap prompt');
     assert.ok(!sent.includes('session-start-inject.js'), 'existing-session command should not run text bootstrap');
+  });
+
+  it('kicks the restarted session with the sentinel, quoted safely', async () => {
+    tmuxSessionExists = true;
+    let sent = '';
+    const adapter = makeAdapter(CodexAdapter);
+    adapter.sendMessage = async (text) => { sent = text; };
+
+    await adapter.launch({ bypassPermissions: false });
+
+    // This branch interpolates the prompt into a double-quoted shell string,
+    // so it is the one that breaks if the sentinel ever grows a quote or a
+    // dollar sign — assert the rendered command, not just the constant.
+    assert.ok(
+      sent.includes('"System startup trigger, not a user message. Continue with startup context."'),
+      `restart command should carry the quoted sentinel, got: ${sent}`
+    );
+    assert.doesNotMatch(sent, /codex[^\n]*"hello"/i);
   });
 });

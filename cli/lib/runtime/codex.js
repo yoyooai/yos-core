@@ -41,6 +41,7 @@ import {
 import { buildCleanEnv, buildCompatEnv, loadRuntimeEnvManifest, writeLaunchSpec } from './tmux-env.js';
 import { classifyCodexLoginStatus } from '../auth-parsers.js';
 import { ensureCodexHooksTrusted } from '../codex-hooks.js';
+import { buildKickPrompt } from './kick-prompt.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -243,7 +244,10 @@ export class CodexAdapter extends RuntimeAdapter {
     const exitLogFile = path.join(monitorDir, 'codex-exit.log');
     const exitLogSnippet = `_ec=$?; echo "[$(date -Iseconds)] exit_code=$_ec" >> "${exitLogFile}"`;
 
-    const kickPrompt = 'hello';
+    // Internal lifecycle sentinel — stateless, covers both first start and
+    // resume; sentinel form so the kick is never mistaken for a human turn.
+    // See kick-prompt.js.
+    const kickPrompt = buildKickPrompt();
 
     if (tmuxHasSession(SESSION)) {
       // Existing tmux session — start a fresh Codex process with kick prompt
