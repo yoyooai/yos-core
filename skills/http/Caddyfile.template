@@ -3,6 +3,8 @@
 # Replace {DOMAIN} and {YOS_DIR} with actual values
 
 {DOMAIN} {
+    header >X-Robots-Tag "noindex, nofollow"
+
     root * {YOS_DIR}/http/public
 
     file_server {
