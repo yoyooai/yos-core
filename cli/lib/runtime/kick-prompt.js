@@ -16,8 +16,13 @@
 // The prompt is interpolated into a double-quoted shell string in one launch
 // branch, so its text must stay free of `"`, `$`, backslash, and backtick.
 
+// "from any channel" is ours, not upstream's, and it is the whole point on a
+// YOS machine: every inbound message arrives through C4 carrying its own reply
+// route, so an agent that mistakes the kick for a user turn does not merely
+// answer nothing — it answers *somebody*, down whichever route was last in
+// context. Naming the channels closes the exact door the failure walks through.
 const KICK_PROMPT =
-  'System startup trigger, not a user message. Continue with startup context.';
+  'YOS startup signal, not a user message from any channel. Continue with startup context.';
 
 export function buildKickPrompt() {
   return KICK_PROMPT;

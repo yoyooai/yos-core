@@ -10,7 +10,7 @@ import { buildKickPrompt } from '../kick-prompt.js';
 describe('kick prompt', () => {
   it('announces itself as a system signal rather than a human turn', () => {
     const prompt = buildKickPrompt();
-    assert.match(prompt, /system startup trigger/i);
+    assert.match(prompt, /startup signal/i);
     assert.match(prompt, /not a user message/i);
   });
 

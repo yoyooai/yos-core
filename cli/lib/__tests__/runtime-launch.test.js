@@ -360,7 +360,7 @@ describe('Codex launch — new session', () => {
     assert.equal(spec.args.length, 1);
     // Exact-string lock, not a prefix: a mutated sentence must fail here too.
     assert.equal(spec.args[0],
-      'System startup trigger, not a user message. Continue with startup context.');
+      'YOS startup signal, not a user message from any channel. Continue with startup context.');
     assert.doesNotMatch(spec.args[0], /\bhello\b/i);
     assert.doesNotMatch(spec.args[0], /welcome back/i);
     assert.ok(!JSON.stringify(spec).includes('session-start-inject.js'));
@@ -404,7 +404,7 @@ describe('Codex launch — existing session', () => {
     // so it is the one that breaks if the sentinel ever grows a quote or a
     // dollar sign — assert the rendered command, not just the constant.
     assert.ok(
-      sent.includes('"System startup trigger, not a user message. Continue with startup context."'),
+      sent.includes(`"YOS startup signal, not a user message from any channel. Continue with startup context."`),
       `restart command should carry the quoted sentinel, got: ${sent}`
     );
     assert.doesNotMatch(sent, /codex[^\n]*"hello"/i);
