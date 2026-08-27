@@ -2,7 +2,33 @@
 
 All notable changes to YOS are recorded here from the point at which the independent YOS product baseline was established.
 
-## Unreleased
+## [0.1.19] - 2026-08-27
+
+### Changed
+
+- Move the shelf off the portal and onto its own hostname. The shelf lived at
+  `/dist` inside the portal site's document root, on the portal's machine, so
+  when the portal was replaced the shelf went with it — "the shelf is gone" and
+  "the portal is gone" were one event, not two, and every deployed machine lost
+  its upgrade path as a side effect of a change nobody thought touched releases.
+  `DEFAULT_DIST_BASE` now points at `https://dist.yoyooai.com`, a host that
+  serves nothing but the shelf. The old URL keeps working: `yoyooai.com/dist/*`
+  answers 301, and every fetch path in the tree runs `curl -fsSL`, so deployed
+  machines follow it without being touched — verified end to end with
+  `verify-public-shelf.mjs --full` passing 1087/1087 against both the new host
+  and the old redirecting one. The default is deliberately duplicated in
+  `upgrade-check.js`, which runs detached from the installed package;
+  `dist-origin-parity.test.js` holds the two in agreement and that guard was
+  mutation-checked rather than taken on faith. (TD-266)
+- Say what `detectRateLimit()` in the Codex probe actually knows. It returned
+  `{detected:false}` under a comment asserting Codex CLI has no per-plan usage
+  limits — an assertion that is wrong: ChatGPT-account sign-in carries rolling
+  5-hour and weekly quotas, and API-key billing returns 429 on exhausted credit
+  or org RPM/TPM ceilings. Behaviour is unchanged, because implementing
+  detection needs a captured sample of real limit text and guessed patterns are
+  worse than none; it is now marked `NOT IMPLEMENTED` so the next reader knows
+  the check was skipped rather than passed. Recorded as deferred, not resolved.
+  (TD-269)
 
 ### Fixed
 
@@ -36,6 +62,70 @@ All notable changes to YOS are recorded here from the point at which the indepen
   emit a Caddyfile (`yos init`, the http skill's setup script, and the shipped
   template); a parity test now asserts the directive in all three, so fixing one
   and forgetting the others fails red. (TD-171)
+- Close the twelfth clock that rendered UTC as if it were local time. The guard
+  left behind by the timezone fix searched for one literal spelling,
+  `toISOString().replace('T', ' ')`; `memory-status.js` writes the same mistake
+  with a `.slice(0, 16)` in between and walked straight past it, so `yos memory
+  status` reported every file's modified time eight hours early under a label
+  that looks local. A guard that recognises only one spelling of a mistake is
+  not a guard — it now matches any chain between `toISOString()` and the
+  `replace`. Verified on a real run, not only in the test. (TD-270)
+- Judge a frozen agent by the clock, and stop calling a lost baseline frozen.
+  `ProcSampler` decides whether the agent is alive or wedged and the guardian
+  acts on that answer — a wrong "frozen" restarts a healthy agent, a wrong
+  "alive" leaves a stuck one stuck — and it had no tests at all. (TD-269)
+- Stop a half-written pending file from restarting a healthy agent. Both
+  heartbeat probes read the pending record with a bare `JSON.parse`, which
+  rejects unparseable bytes but waves through every parseable shape: `{}` was
+  enough to become a heartbeat nobody sent, with `created_at` falling back to 0
+  so the computed age was the whole Unix epoch and instantly past the 600s
+  ceiling, while `control_id` was undefined so C4 could never answer `done` —
+  an immediate `stale_pending` and a kill-restart of an agent that was never
+  asked anything. The reader now returns a record only when the engine can both
+  query it and age it; anything else reads as "nothing in flight", costing one
+  heartbeat interval instead of a restart. The two divergent copies are gone:
+  read, write and clear now live in `cli/lib/heartbeat/pending-state.js`, and
+  the writer refuses to persist a record the reader would reject. (TD-269)
+- Never let a session that cannot be measured look roomy. The context monitor is
+  the only thing that decides a session must hand over before it runs out of
+  room, so its failure mode is silence — no handoff, no log line, and a session
+  that grows until the runtime hits its own wall. Three ways it went quiet are
+  fixed: a failed handoff armed the five-minute cooldown anyway, so the one
+  moment the handoff mattered most was the moment the monitor stopped asking; a
+  reading of `NaN` was treated as a ratio, and since every comparison against
+  `NaN` is false the monitor "decided" not to rotate, every thirty seconds,
+  forever; and being unable to read usage at all was indistinguishable from a
+  healthy idle machine — it now says so after ten consecutive unreadable checks,
+  with the reason attached and a line when it recovers. Also removes a dead
+  import that made deliberately unused wiring look live. (TD-269)
+- Degrade one pipeline instead of the whole tick, and say "unknown" when it is.
+  Everything `ToolPipeline` reads is written by hook processes we do not
+  control, and a single bad read threw straight out of `tick()`: no status file
+  write, no tool watchdog, no task scheduler dispatch. Repeated every tick, that
+  leaves `agent-status.json` with a "Last check" that never advances — which
+  reads as "this machine died hours ago" about a machine that is fine. Each
+  stage is now contained on its own. Separately, when the foreground session
+  could not be identified the snapshot published `active: false`, which is "I
+  cannot tell" wearing the costume of "definitely idle" — and downstream reset
+  the frozen counter on it, so during any such window a genuinely hung agent
+  could not be detected as hung. Snapshots now carry `activity_known`. Failed
+  writes and declined log rotation are no longer mute, reporting at 4x backoff.
+  (TD-269)
+- Stop an upgrade analysis that was never complete from looking complete. This
+  is the last thing a user reads before typing `y` on an operation that
+  overwrites files they have edited, so the failure that matters is not a wrong
+  verdict — it is a screen of green that was never a review of everything. Only
+  the first ten changed files were ever sent, and the returned object dropped
+  even the count of the rest; files were truncated at 500 lines before being
+  sent, so a local change at line 900 was not in the evidence yet the file could
+  still come back `safe`; and the verdicts were never reconciled against the
+  files asked about, so a quietly omitted file produced no line at all. Every
+  requested file now gets exactly one line, unresolved ones are marked
+  `[NOT ASSESSED]`, truncated files are downgraded to warning, unexamined files
+  are named on screen, and `safe` is a conclusion drawn here rather than a field
+  the model asserts. When the evaluator cannot be reached at all, the result
+  carries `available: false` with a reason instead of collapsing to
+  "(Upgrade analysis skipped)", which reads as reassurance. (TD-269)
 
 ## [0.1.18] - 2026-08-15
 
