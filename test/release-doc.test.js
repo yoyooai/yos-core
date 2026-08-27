@@ -30,6 +30,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test } from '@jest/globals';
 
 import {
+
   assignmentsIn,
   checkVariableClosure,
   extractCommandBlocks,
@@ -39,6 +40,37 @@ import {
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DOC = fs.readFileSync(path.join(ROOT, 'docs', 'release.md'), 'utf8');
+
+/**
+ * The off-site block is found by what it contains, not by where it sits.
+ *
+ * This used to be `.find((b) => b.machine === '控制机')` — the FIRST control-machine
+ * block in the document. That is a claim about document order, and document order is
+ * not what these tests are about: on 2026-08-27 the build step moved from the shelf
+ * machine to the control machine, a new control block appeared above this one, and
+ * two tests started running the wrong block. They failed loudly (the fillIn guard
+ * caught it), which is the system working — but the selector was still describing
+ * position when it meant identity.
+ *
+ * It now selects the control block that mints a credential for a `rollback/` run,
+ * and asserts there is exactly one. Two such blocks, or none, fails red rather than
+ * silently picking whichever came first.
+ */
+function rollbackOffsiteControlBlock() {
+  const candidates = extractCommandBlocks(DOC).filter((b) => {
+    if (b.machine !== '控制机') return false;
+    const text = b.lines.map((l) => l.text).join('\n');
+    return text.includes('cos-sts-token.mjs') && text.includes('RUN="rollback/');
+  });
+  if (candidates.length !== 1) {
+    throw new Error(
+      `expected exactly 1 control-machine block minting a rollback/ credential, found ${candidates.length} — ` +
+        'docs/release.md changed and this test is no longer running what it claims to run',
+    );
+  }
+  return candidates[0];
+}
+
 
 const md5 = (buf) => crypto.createHash('md5').update(buf).digest('hex');
 const xmlEscape = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -310,7 +342,7 @@ describe('the off-site backup step, executed out of the document', () => {
       JSON.stringify({ pass: true, buildId: 'bid-old', indexSha256: 'sha-old' }),
     );
 
-    const controlBlock = extractCommandBlocks(DOC).find((b) => b.machine === '控制机');
+    const controlBlock = rollbackOffsiteControlBlock();
     const lifted = fillIn(
       controlBlock.lines.map((l) => l.text).join('\n'),
       [
@@ -366,7 +398,7 @@ describe('the off-site backup step, executed out of the document', () => {
     fs.writeFileSync(path.join(metadir, 'shelf.json'), '{"pass":true}');
     const credsFile = path.join(tmpDir('creds-'), 'cos-creds.sh');
 
-    const controlBlock = extractCommandBlocks(DOC).find((b) => b.machine === '控制机');
+    const controlBlock = rollbackOffsiteControlBlock();
     const lifted = fillIn(
       controlBlock.lines.map((l) => l.text).join('\n'),
       [
