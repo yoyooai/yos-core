@@ -118,10 +118,28 @@ export function createCodexProbe({
     },
 
     /**
-     * Codex CLI (OpenAI) does not have Anthropic-style per-plan usage limits.
-     * Always returns not-detected.
+     * NOT IMPLEMENTED — this returns "no rate limit" because we have never
+     * captured what a real Codex rate-limit looks like, NOT because Codex has
+     * no rate limits. Do not read the `false` as a verified fact.
      *
-     * @returns {{ detected: false }}
+     * Codex CLI does hit limits: ChatGPT-account sign-in has rolling 5-hour and
+     * weekly plan quotas; API-key billing returns HTTP 429 on exhausted credit
+     * or org RPM/TPM ceilings. We currently run API-key billing, where credit
+     * exhaustion surfaces first in the billing watch, so implementing this was
+     * deliberately deferred (see tech-debt TD-269) — not resolved.
+     *
+     * Consequence while unimplemented: on a real limit, HealthEngine cannot
+     * enter `rate_limited` and instead treats the runtime as dead — reporting
+     * `unavailable` (pointing diagnosis at network/process instead of quota)
+     * and kill-restarting on backoff, which cannot fix a quota and discards
+     * the live session's context.
+     *
+     * To implement: capture the actual limit text from a live Codex pane and
+     * add patterns the way claude-probe.js RATE_LIMIT_PATTERNS does. Do not
+     * guess the wording — wrong patterns are worse than none, because they
+     * make a healthy agent look quota-blocked.
+     *
+     * @returns {{ detected: false }} always — see above
      */
     detectRateLimit() {
       return { detected: false };
