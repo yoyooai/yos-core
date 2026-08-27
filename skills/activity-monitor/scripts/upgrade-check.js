@@ -46,7 +46,7 @@ const GITHUB_REPO_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_
 // Distribution mirror. This script runs from ~/yos/.claude/skills, detached
 // from the installed package, so the default is repeated here rather than
 // imported; test/dist-origin-parity.test.js fails if the two ever disagree.
-const DEFAULT_DIST_BASE = 'https://yoyooai.com/dist';
+const DEFAULT_DIST_BASE = 'https://dist.yoyooai.com';
 const DEFAULT_DIST_OWNERS = 'yoyooai';
 const DIST_BASE = String(process.env.YOS_DIST_BASE ?? DEFAULT_DIST_BASE).trim().replace(/\/+$/, '');
 const DIST_OWNERS = String(process.env.YOS_DIST_OWNERS ?? DEFAULT_DIST_OWNERS)

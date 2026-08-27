@@ -108,7 +108,7 @@ git ls-remote origin 'refs/tags/v<x.y.z>*'
 node scripts/build-dist.mjs --output <构建目录> \
   --production \
   --tags 50 \
-  --base-url https://yoyooai.com/dist \
+  --base-url https://dist.yoyooai.com \
   --repo yoyooai/yos-core=. \
   --repo yoyooai/yos-components=../yos-components \
   --vendor-cache <vendor 缓存目录>
@@ -117,7 +117,7 @@ node scripts/build-dist.mjs --output <构建目录> \
 - `--production` —— 生产模式，与 `--test-only` 互斥，写错会 `conflict`。
 - `--tags 50` —— 保留数写明，不靠默认值。见上面第 3 条硬性质：
   这个数字小了会让 provider 消失、让公开过的钉版本安装地址变 404。
-- `--base-url https://yoyooai.com/dist` —— 货架里生成的地址以此为前缀，
+- `--base-url https://dist.yoyooai.com` —— 货架里生成的地址以此为前缀，
   写错客户就取不到货。
 - **不要在生产构建里用 `--skip-vendor`。** 隔离验收可以跳过 vendor，
   生产出货跳过就等于把第三方件的取货口丢回公网。
@@ -457,7 +457,7 @@ readlink -f /srv/yos-dist               # 核验指向
 ```bash
 # @machine 发布机
 node scripts/verify-public-shelf.mjs \
-  --base-url https://yoyooai.com/dist \
+  --base-url https://dist.yoyooai.com \
   --signoff \
   --full \
   --expect-build-id <验收报告里的 buildId> \

@@ -19,7 +19,7 @@ describe('distribution origin', () => {
     // The whole point of this module: out of the box, nothing resolves to a
     // GitHub host. If this assertion ever has to change, customers in China
     // are back to a coin flip.
-    assert.equal(DEFAULT_DIST_BASE, 'https://yoyooai.com/dist');
+    assert.equal(DEFAULT_DIST_BASE, 'https://dist.yoyooai.com');
     assert.ok(!/github/i.test(DEFAULT_DIST_BASE));
     assert.deepEqual(resolveDistBase({}), { enabled: true, base: DEFAULT_DIST_BASE });
   });
@@ -28,35 +28,35 @@ describe('distribution origin', () => {
     const env = {};
     assert.equal(
       distMirrorUrl('tags', { repo: 'yoyooai/yos-core' }, env),
-      'https://yoyooai.com/dist/yoyooai/yos-core/tags.json',
+      'https://dist.yoyooai.com/yoyooai/yos-core/tags.json',
     );
     assert.equal(
       distMirrorUrl('latest-release', { repo: 'yoyooai/yos-core' }, env),
-      'https://yoyooai.com/dist/yoyooai/yos-core/releases/latest.json',
+      'https://dist.yoyooai.com/yoyooai/yos-core/releases/latest.json',
     );
     assert.equal(
       distMirrorUrl('raw', { repo: 'yoyooai/yos-core', filePath: 'registry.json' }, env),
-      'https://yoyooai.com/dist/yoyooai/yos-core/raw/main/registry.json',
+      'https://dist.yoyooai.com/yoyooai/yos-core/raw/main/registry.json',
     );
     assert.equal(
       distMirrorUrl('tarball', { repo: 'yoyooai/yos-components', ref: 'feishu-v0.1.0', refType: 'tag' }, env),
-      'https://yoyooai.com/dist/yoyooai/yos-components/tarball/tags/feishu-v0.1.0.tar.gz',
+      'https://dist.yoyooai.com/yoyooai/yos-components/tarball/tags/feishu-v0.1.0.tar.gz',
     );
     assert.equal(
       distMirrorUrl('tarball', { repo: 'yoyooai/yos-core', ref: 'main', refType: 'branch' }, env),
-      'https://yoyooai.com/dist/yoyooai/yos-core/tarball/heads/main.tar.gz',
+      'https://dist.yoyooai.com/yoyooai/yos-core/tarball/heads/main.tar.gz',
     );
     assert.equal(
       distVendorUrl('caddy/v2.10.2/caddy_2.10.2_linux_amd64.tar.gz', env),
-      'https://yoyooai.com/dist/vendor/caddy/v2.10.2/caddy_2.10.2_linux_amd64.tar.gz',
+      'https://dist.yoyooai.com/vendor/caddy/v2.10.2/caddy_2.10.2_linux_amd64.tar.gz',
     );
-    assert.equal(resolveVendorBase(env), 'https://yoyooai.com/dist/vendor');
+    assert.equal(resolveVendorBase(env), 'https://dist.yoyooai.com/vendor');
   });
 
   it('keeps the package path free of the tag\'s v prefix so it matches npm pack output', () => {
     assert.equal(
       distMirrorUrl('package', { repo: 'yoyooai/yos-core', version: 'v0.1.0-alpha.3' }, {}),
-      'https://yoyooai.com/dist/yoyooai/yos-core/package/yos-0.1.0-alpha.3.tgz',
+      'https://dist.yoyooai.com/yoyooai/yos-core/package/yos-0.1.0-alpha.3.tgz',
     );
   });
 

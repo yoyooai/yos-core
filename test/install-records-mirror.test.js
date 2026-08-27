@@ -25,7 +25,7 @@ import { describe, expect, test } from '@jest/globals';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const INSTALL_SH = path.join(ROOT, 'scripts', 'install.sh');
 const script = fs.readFileSync(INSTALL_SH, 'utf8');
-const DEFAULT_DIST_BASE = 'https://yoyooai.com/dist';
+const DEFAULT_DIST_BASE = 'https://dist.yoyooai.com';
 
 /** The real `record_dist_base` definition, lifted out of `_main`. */
 function extractRecorder() {
@@ -110,12 +110,12 @@ describe('the recorder is actually wired in', () => {
   test('the default lives in one variable, shared by the default and the comparison', () => {
     // Two spellings of the same URL is how "not the default" starts being true
     // for a value that is the default.
-    expect(script).toMatch(/^DEFAULT_DIST_BASE="https:\/\/yoyooai\.com\/dist"$/m);
+    expect(script).toMatch(/^DEFAULT_DIST_BASE="https:\/\/dist\.yoyooai\.com"$/m);
     expect(script).toMatch(/^YOS_DIST_BASE="\$\{YOS_DIST_BASE-\$DEFAULT_DIST_BASE\}"$/m);
-    const literals = script.match(/https:\/\/yoyooai\.com\/dist/g) ?? [];
+    const literals = script.match(/https:\/\/dist\.yoyooai\.com/g) ?? [];
     // The URL may still appear in comments and repair hints; what must not
     // happen is a second *assignment* of it.
-    const assignments = script.match(/^[A-Z_]+="https:\/\/yoyooai\.com\/dist"$/gm) ?? [];
+    const assignments = script.match(/^[A-Z_]+="https:\/\/dist\.yoyooai\.com"$/gm) ?? [];
     expect(assignments).toHaveLength(1);
     expect(literals.length).toBeGreaterThan(0);
   });

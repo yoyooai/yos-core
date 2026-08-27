@@ -90,7 +90,7 @@ YOS_RELEASE_REPO="${YOS_RELEASE_REPO:-yoyooai/yos-core}"
 # the source of record and is still tried as a fallback.
 # Keep the default in sync with cli/lib/dist-origin.js — one dash, so that an
 # explicitly empty value disables the mirror instead of restoring the default.
-DEFAULT_DIST_BASE="https://yoyooai.com/dist"
+DEFAULT_DIST_BASE="https://dist.yoyooai.com"
 YOS_DIST_BASE="${YOS_DIST_BASE-$DEFAULT_DIST_BASE}"
 
 # Node.js is pinned and SHA-256 verified rather than installed through nvm:
@@ -142,7 +142,7 @@ validate_dist_base() {
 }
 
 if [ -n "$YOS_DIST_BASE" ] && ! validate_dist_base "$YOS_DIST_BASE"; then
-  fail "YOS_DIST_BASE must be a credential-free HTTPS URL without query parameters or fragments. Repair: export YOS_DIST_BASE=https://yoyooai.com/dist && retry."
+  fail "YOS_DIST_BASE must be a credential-free HTTPS URL without query parameters or fragments. Repair: export YOS_DIST_BASE=https://dist.yoyooai.com && retry."
 fi
 
 # Print the mirror URL for a path, or fail (status 1) when no mirror is set.

@@ -151,7 +151,7 @@ describe('registry entries for components inside a repository', () => {
     assert.equal(resolved.source.tagPrefix, 'feishu');
     // Registered components are ours; the third-party warning would misinform.
     assert.equal(resolved.isThirdParty, false);
-    assert.equal(resolved.sourceLabel, 'https://yoyooai.com/dist');
+    assert.equal(resolved.sourceLabel, 'https://dist.yoyooai.com');
     // Two components share one repo, so the source-repository label has to say
     // which component the mirrored bytes came from.
     assert.match(resolved.sourceRepositoryLabel, /github\.com\/yoyooai\/yos-components/);

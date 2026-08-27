@@ -25,7 +25,7 @@ describe('component source display', () => {
       fromRegistry: true,
     }, {});
 
-    assert.equal(source.sourceLabel, 'https://yoyooai.com/dist');
+    assert.equal(source.sourceLabel, 'https://dist.yoyooai.com');
     assert.match(source.sourceRepositoryLabel, /github\.com\/yoyooai\/yos-components/);
   });
 

@@ -51,7 +51,7 @@ describe('self-upgrade installs native dependencies from our mirror', () => {
     assert.ok(install, 'the preflight never ran npm install for the skill dependencies');
     assert.equal(
       install.env?.npm_config_better_sqlite3_binary_host,
-      'https://yoyooai.com/dist/vendor/better-sqlite3',
+      'https://dist.yoyooai.com/vendor/better-sqlite3',
       'the preflight npm install would go to GitHub for the prebuilt binary',
     );
   });

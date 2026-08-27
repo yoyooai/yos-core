@@ -10,7 +10,7 @@ describe('npm install environment for native dependencies', () => {
     const env = npmInstallEnv({});
     assert.equal(
       env.npm_config_better_sqlite3_binary_host,
-      'https://yoyooai.com/dist/vendor/better-sqlite3',
+      'https://dist.yoyooai.com/vendor/better-sqlite3',
     );
     assert.ok(!/github/i.test(env.npm_config_better_sqlite3_binary_host));
   });
@@ -22,7 +22,7 @@ describe('npm install environment for native dependencies', () => {
       // prebuild-install derives the variable name from the package name; a
       // mismatch here silently does nothing at all.
       assert.equal(envVar, `npm_config_${name.replace(/[^a-zA-Z0-9]/g, '_')}_binary_host`);
-      assert.equal(env[envVar], `https://yoyooai.com/dist/vendor/${name}`);
+      assert.equal(env[envVar], `https://dist.yoyooai.com/vendor/${name}`);
     }
   });
 

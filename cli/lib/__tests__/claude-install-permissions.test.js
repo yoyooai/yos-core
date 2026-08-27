@@ -4,7 +4,7 @@
  * install did not: `installClaude()` called a bare single-registry helper, so
  * on a machine with a system-installed Node the default command
  *
- *     curl -fsSL https://yoyooai.com/dist/install.sh | bash
+ *     curl -fsSL https://dist.yoyooai.com/install.sh | bash
  *
  * died at exit 1 — one step after `install.sh` had elevated past that very
  * directory to put `yos` there. Measured in a clean container: the identical
