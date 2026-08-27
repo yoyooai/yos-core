@@ -1,4 +1,7 @@
 import { describe, test, expect } from '@jest/globals';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { isLocalAddress } from '../cli/commands/init.js';
 import { applyCaddyRoutes, generateManualRouteSnippet, generateRouteBlocks } from '../cli/lib/caddy.js';
 
@@ -172,5 +175,62 @@ describe('applyCaddyRoutes', () => {
     });
 
     expect(result).toEqual({ success: true, action: 'skipped' });
+  });
+});
+
+// TD-171 / upstream #744: every Caddyfile we generate must carry X-Robots-Tag.
+// The agent's own HTTP surface (file share, web console, health) is never
+// meant to be indexed — and there are three independent generation sources,
+// so a fix applied to only one of them silently leaves the other two open.
+// These tests exist so that removing the directive from ANY source fails red.
+describe('X-Robots-Tag parity across all Caddyfile generation sources', () => {
+  const NOINDEX_DIRECTIVE = '    header >X-Robots-Tag "noindex, nofollow"';
+  const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+  // Pull out every backtick template literal so we can assert on the one that
+  // actually renders a Caddyfile, rather than grepping the whole file.
+  function extractTemplateLiterals(source) {
+    const literals = [];
+    let i = 0;
+    while (i < source.length) {
+      if (source[i] === '`') {
+        const start = i + 1;
+        i++;
+        while (i < source.length) {
+          if (source[i] === '\\') { i += 2; continue; }
+          if (source[i] === '`') break;
+          i++;
+        }
+        literals.push(source.slice(start, i));
+        i++;
+      } else {
+        i++;
+      }
+    }
+    return literals;
+  }
+
+  function caddyLiteralOf(relPath) {
+    const src = fs.readFileSync(path.join(ROOT, relPath), 'utf8');
+    const hits = extractTemplateLiterals(src).filter(l => l.includes('YOS Caddyfile'));
+    expect(hits.length).toBeGreaterThan(0);
+    return hits[0];
+  }
+
+  test('cli/commands/init.js embeds X-Robots-Tag in its Caddyfile template literal', () => {
+    expect(caddyLiteralOf('cli/commands/init.js')).toContain(NOINDEX_DIRECTIVE);
+  });
+
+  test('skills/http/scripts/setup-caddy.js embeds X-Robots-Tag in its Caddyfile template literal', () => {
+    expect(caddyLiteralOf(path.join('skills', 'http', 'scripts', 'setup-caddy.js')))
+      .toContain(NOINDEX_DIRECTIVE);
+  });
+
+  test('skills/http/Caddyfile.template contains X-Robots-Tag as a directive, not a comment', () => {
+    const template = fs.readFileSync(
+      path.join(ROOT, 'skills', 'http', 'Caddyfile.template'), 'utf8'
+    );
+    const directives = template.split('\n').filter(l => !l.trim().startsWith('#'));
+    expect(directives.some(l => l.includes('header >X-Robots-Tag "noindex, nofollow"'))).toBe(true);
   });
 });

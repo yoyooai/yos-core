@@ -4,6 +4,26 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ## Unreleased
 
+### Fixed
+
+- Stop the Codex kick from reading as a person talking. A freshly launched
+  Codex agent used to receive the bare word `hello` as its first message; its
+  only job is to fire the SessionStart hook, but as a greeting it invited the
+  agent to answer — and on a YOS machine every inbound message carries its own
+  C4 reply route, so answering means answering *somebody*, down whichever route
+  happened to be in context. The kick now states what it is: a YOS startup
+  signal, not a user message from any channel. Pinned by tests covering the
+  wording, a length ceiling, statelessness, shell-safety, and the rendered
+  command on both the new-session and restart paths.
+- Keep the agent's own web surface out of search engines. Every Caddyfile YOS
+  generates now sends `X-Robots-Tag: noindex, nofollow`. That surface is the
+  file share, the web console and the health endpoint on a customer's machine —
+  none of it is meant to be indexed, but any machine given a domain was
+  publishing it to crawlers by default. There are three independent places that
+  emit a Caddyfile (`yos init`, the http skill's setup script, and the shipped
+  template); a parity test now asserts the directive in all three, so fixing one
+  and forgetting the others fails red. (TD-171)
+
 ## [0.1.18] - 2026-08-15
 
 ### Fixed
