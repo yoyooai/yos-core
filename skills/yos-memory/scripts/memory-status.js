@@ -7,6 +7,10 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { MEMORY_DIR, BUDGETS, WARN_THRESHOLDS, walkFiles } from './shared.js';
+// Skills sit side by side under ~/yos/.claude/skills/ once deployed, which is
+// why a cross-skill import resolves here (the same way activity-monitor's
+// context-monitor.js reaches comm-bridge's c4-config.js).
+import { formatLocalTimestamp } from '../../comm-bridge/scripts/local-time.js';
 
 export function formatBytes(bytes) {
   if (bytes < 1024) {
@@ -55,7 +59,7 @@ function main() {
       warnCount += 1;
     }
 
-    const modified = info.modifiedAt.toISOString().slice(0, 16).replace('T', ' ');
+    const modified = formatLocalTimestamp(info.modifiedAt).slice(0, 16);
     lines.push(`${name}: ${formatBytes(info.sizeBytes)} / ${formatBytes(budget)} (${pct}%) [${status}] updated ${modified}`);
   }
 
