@@ -219,13 +219,20 @@ export class MonitorOrchestrator {
     const activeTools = apiActivity?.active_tools ?? 0;
     const thinking = apiActivity?.active === true || activeTools > 0;
     const hookFresh = apiUpdatedSec > 0 && (currentTime - apiUpdatedSec) < 60;
+    // The pipeline says false when it could not identify the foreground session
+    // or degraded on the way to reading it. Older snapshots have no such field;
+    // absent means the pipeline predates it, and its zeros were observations.
+    const activityKnown = apiActivity?.activity_known !== false;
 
     return {
       apiUpdatedSec,
       activeTools,
       thinking,
       hookFresh,
-      confirmedActive: activeTools > 0 && hookFresh,
+      activityKnown,
+      // "Confirmed" has to mean observed. A reading the pipeline itself will
+      // not vouch for cannot confirm anything.
+      confirmedActive: activityKnown && activeTools > 0 && hookFresh,
     };
   }
 

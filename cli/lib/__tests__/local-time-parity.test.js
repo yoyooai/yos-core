@@ -61,11 +61,19 @@ describe('local-time copies stay in parity with cli/lib/local-time.js', () => {
   }
 
   it('no shipped code formats a human timestamp as UTC any more', () => {
-    // The exact pattern this whole change removes. If it reappears anywhere in
-    // shipped code, it is another clock that lies to whoever reads it.
+    // The shape this whole change removes: an ISO string with its `T` swapped
+    // for a space, which reads exactly like a local timestamp and never is one.
+    //
+    // This started as a search for one literal string. It missed
+    // skills/yos-memory/scripts/memory-status.js, which did the same thing with
+    // a `.slice(0, 16)` in between and went on printing UTC under a local-
+    // looking label for another day. A guard that only recognises one spelling
+    // of a mistake is not a guard, so this matches any chain between the two.
     const result = spawnSync(
       'git',
-      ['grep', '-n', "toISOString().replace('T', ' ')", '--', 'cli', 'skills'],
+      // Scope stays cli + skills: that is the shipped code a customer reads
+      // timestamps from. scripts/e2e fabricates status files to drive tests.
+      ['grep', '-nE', "toISOString\\(\\)[^;\\n]*\\.replace\\(\\s*['\"]T['\"]", '--', 'cli', 'skills'],
       { cwd: REPO_ROOT, encoding: 'utf8' }
     );
     const offenders = (result.stdout || '')

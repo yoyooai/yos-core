@@ -479,6 +479,7 @@ describe('MonitorOrchestrator', () => {
       activeTools: 2,
       thinking: true,
       hookFresh: true,
+      activityKnown: true,
       confirmedActive: true,
     });
 
@@ -494,6 +495,26 @@ describe('MonitorOrchestrator', () => {
       activeTools: 0,
       thinking: true,
       hookFresh: false,
+      activityKnown: true,
+      confirmedActive: false,
+    });
+
+    // A snapshot the tool pipeline will not vouch for cannot confirm activity,
+    // even when every other field looks convincing.
+    assert.deepEqual(orchestrator.summarizeApiActivity({
+      currentTime: 100,
+      apiActivity: {
+        activity_known: false,
+        active: true,
+        active_tools: 2,
+        updated_at: 90_500,
+      },
+    }), {
+      apiUpdatedSec: 90,
+      activeTools: 2,
+      thinking: true,
+      hookFresh: true,
+      activityKnown: false,
       confirmedActive: false,
     });
   });

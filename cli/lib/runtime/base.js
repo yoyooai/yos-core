@@ -105,11 +105,11 @@ export class RuntimeAdapter {
 
   /**
    * Returns a ContextMonitor instance for this runtime.
-   * Implemented in Phase 5.
    *
+   * @param {object} [opts] - Forwarded to the monitor (e.g. `log`)
    * @returns {object|null}
    */
-  getContextMonitor() {
+  getContextMonitor(_opts = {}) {
     return null;
   }
 

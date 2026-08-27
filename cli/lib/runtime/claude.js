@@ -21,7 +21,6 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 import { RuntimeAdapter } from './base.js';
 import { assertInstructionReady, buildInstructionFile } from './instruction-builder.js';
-import { ClaudeContextMonitor } from './claude-context-monitor.js';
 import { createClaudeProbe } from '../heartbeat/claude-probe.js';
 import { approveCustomApiKey } from '../claude-credentials.js';
 import { writePrivateFileSync } from '../private-files.js';
@@ -370,7 +369,7 @@ export class ClaudeAdapter extends RuntimeAdapter {
    *
    * @returns {null}
    */
-  getContextMonitor() {
+  getContextMonitor(_opts = {}) {
     return null;
   }
 }

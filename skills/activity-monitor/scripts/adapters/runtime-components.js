@@ -95,7 +95,10 @@ export function startContextMonitor(activeAdapter, {
 }) {
   // Start context monitor if the adapter provides one (Codex polling-based monitor).
   // Claude uses the statusLine hook instead — no adapter-provided monitor.
-  const monitor = activeAdapter.getContextMonitor?.() ?? null;
+  // `log` goes in so the monitor can report going blind; both handlers report
+  // back whether the work actually happened, because the monitor only arms its
+  // cooldown on success and a silent five minutes is what we are avoiding.
+  const monitor = activeAdapter.getContextMonitor?.({ log }) ?? null;
   if (!monitor) return null;
 
   monitor.startPolling({
@@ -103,7 +106,7 @@ export function startContextMonitor(activeAdapter, {
     onExceed: async ({ used, ceiling, ratio }) => {
       const pct = Math.round(ratio * 100);
       log(`Context at ${pct}% (${used}/${ceiling}), requesting new-session handoff`);
-      enqueueContextRotationHandoff({ ratio, used, ceiling });
+      return enqueueContextRotationHandoff({ ratio, used, ceiling });
     },
     onEarlyThreshold: async ({ used, ceiling, ratio }) => {
       const pct = Math.round(ratio * 100);
@@ -111,12 +114,12 @@ export function startContextMonitor(activeAdapter, {
       // Cooldown: prevent re-inject while sync is still running
       const now = Math.floor(Date.now() / 1000);
       if ((now - getLastMemorySyncTriggerAt()) < memorySyncCooldownSeconds) {
-        return;
+        return true; // a sync is already in flight — nothing owed
       }
       const unsummarizedCount = getUnsummarizedCount();
       if (unsummarizedCount <= checkpointThreshold) {
         log(`Early memory sync skipped at ${pct}%: unsummarized=${unsummarizedCount} <= ${checkpointThreshold}`);
-        return;
+        return true; // deliberately not syncing — hold the cooldown
       }
       log(`Context at ${pct}% (approaching ${thresholdPct}% threshold), triggering early memory sync (unsummarized=${unsummarizedCount})`);
       try {
@@ -127,8 +130,10 @@ export function startContextMonitor(activeAdapter, {
         ], { encoding: 'utf8', stdio: 'pipe', timeout: 10_000 });
         setLastMemorySyncTriggerAt(now);
         log(`Early memory sync enqueued at ${pct}%`);
+        return true;
       } catch (err) {
         log(`Failed to enqueue early memory sync: ${err.message}`);
+        return false; // never enqueued — do not spend the cooldown on it
       }
     },
   });

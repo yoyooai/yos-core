@@ -30,11 +30,11 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { detectApiErrorText } from './api-error-patterns.js';
 import { tmuxCapturePaneText } from '../runtime/tmux-helpers.js';
+import { readPendingRecord, writePendingRecord, clearPendingRecord } from './pending-state.js';
 
 const YOS_DIR = process.env.YOS_DIR || path.join(os.homedir(), 'yos');
 const C4_CONTROL = path.join(YOS_DIR, '.claude/skills/comm-bridge/scripts/c4-control.js');
@@ -86,7 +86,7 @@ export function createCodexProbe({
         if (!match) return false;
 
         const controlId = parseInt(match[1], 10);
-        return _writePending(pendingFile, {
+        return writePendingRecord(pendingFile, {
           control_id: controlId,
           phase,
           created_at: Math.floor(Date.now() / 1000),
@@ -118,10 +118,28 @@ export function createCodexProbe({
     },
 
     /**
-     * Codex CLI (OpenAI) does not have Anthropic-style per-plan usage limits.
-     * Always returns not-detected.
+     * NOT IMPLEMENTED — this returns "no rate limit" because we have never
+     * captured what a real Codex rate-limit looks like, NOT because Codex has
+     * no rate limits. Do not read the `false` as a verified fact.
      *
-     * @returns {{ detected: false }}
+     * Codex CLI does hit limits: ChatGPT-account sign-in has rolling 5-hour and
+     * weekly plan quotas; API-key billing returns HTTP 429 on exhausted credit
+     * or org RPM/TPM ceilings. We currently run API-key billing, where credit
+     * exhaustion surfaces first in the billing watch, so implementing this was
+     * deliberately deferred (see tech-debt TD-269) — not resolved.
+     *
+     * Consequence while unimplemented: on a real limit, HealthEngine cannot
+     * enter `rate_limited` and instead treats the runtime as dead — reporting
+     * `unavailable` (pointing diagnosis at network/process instead of quota)
+     * and kill-restarting on backoff, which cannot fix a quota and discards
+     * the live session's context.
+     *
+     * To implement: capture the actual limit text from a live Codex pane and
+     * add patterns the way claude-probe.js RATE_LIMIT_PATTERNS does. Do not
+     * guess the wording — wrong patterns are worse than none, because they
+     * make a healthy agent look quota-blocked.
+     *
+     * @returns {{ detected: false }} always — see above
      */
     detectRateLimit() {
       return { detected: false };
@@ -160,22 +178,19 @@ export function createCodexProbe({
     // ── Pending state management ─────────────────────────────────────────────
 
     /**
-     * Read pending heartbeat state from disk.
-     * @returns {{ control_id: number, phase: string, created_at: number } | null}
+     * Read pending heartbeat state from disk. Returns null unless the record is
+     * one HealthEngine can both query and age — see pending-state.js.
+     * @returns {{ control_id: number, phase?: string, created_at: number } | null}
      */
     readHeartbeatPending() {
-      try {
-        return JSON.parse(fs.readFileSync(pendingFile, 'utf8'));
-      } catch {
-        return null;
-      }
+      return readPendingRecord(pendingFile);
     },
 
     /**
      * Clear the pending heartbeat state file.
      */
     clearHeartbeatPending() {
-      try { fs.unlinkSync(pendingFile); } catch { /* already gone */ }
+      clearPendingRecord(pendingFile);
     },
   };
 }
@@ -185,16 +200,4 @@ function _getAckDeadline(phase, { ackDeadline, recoveryAckDeadline }) {
   return ackDeadline;
 }
 
-// ── Private helpers ──────────────────────────────────────────────────────────
-
-function _writePending(file, data) {
-  try {
-    const tmp = `${file}.tmp.${process.pid}`;
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-    fs.renameSync(tmp, file);
-    return true;
-  } catch {
-    return false;
-  }
-}
 

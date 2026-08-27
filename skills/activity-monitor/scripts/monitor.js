@@ -476,6 +476,10 @@ function buildRunningStatus({
     source,
     runtime_launch_at: runtimeLaunchAtMsValue,
     ...getActiveToolDetails(apiActivity),
+    // Whether active_tools above was observed or merely assumed. Absent-or-true
+    // means observed; false means the tool pipeline could not tell, and a zero
+    // here should not be read as "the agent is doing nothing".
+    activity_known: apiActivity?.activity_known !== false,
     active_tool_session_id: apiActivity?.sessionId || null,
     watchdog_episode_key: watchdogState?.episode_key || null,
     watchdog_phase: watchdogStatus.watchdog_phase,
