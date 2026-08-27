@@ -8,6 +8,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { formatLocalTimestamp } from './local-time.js';
 
 const YOS_DIR = process.env.YOS_DIR || path.join(os.homedir(), 'yos');
 const DIAG_DIR = path.join(YOS_DIR, 'activity-monitor');
@@ -51,7 +52,7 @@ export function logHookTiming(hookName, durationMs) {
   try {
     ensureDir();
     const filePath = path.join(DIAG_DIR, 'hook-timing.log');
-    const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const ts = formatLocalTimestamp();
     fs.appendFileSync(filePath, `[${ts}] hook=${hookName} duration=${durationMs}ms\n`);
     rotateIfNeeded(filePath);
   } catch {
@@ -70,7 +71,7 @@ export function logDeliveryFailure(itemType, itemId, reason, extra = {}) {
   try {
     ensureDir();
     const filePath = path.join(DIAG_DIR, 'delivery-failures.log');
-    const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const ts = formatLocalTimestamp();
     const extraStr = Object.keys(extra).length > 0
       ? ' ' + Object.entries(extra).map(([k, v]) => `${k}=${v}`).join(' ')
       : '';
@@ -92,7 +93,7 @@ export function saveTmuxCapture(capture, context) {
   try {
     ensureDir();
     const filePath = path.join(DIAG_DIR, 'tmux-captures.log');
-    const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const ts = formatLocalTimestamp();
     const separator = '\u2500'.repeat(60);
     const truncated = capture.length > MAX_CAPTURE_LENGTH
       ? `[...truncated ${capture.length - MAX_CAPTURE_LENGTH} bytes]\n` + capture.slice(-MAX_CAPTURE_LENGTH)

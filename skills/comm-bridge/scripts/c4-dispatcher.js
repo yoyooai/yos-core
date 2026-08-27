@@ -8,6 +8,7 @@ import { execFileSync, spawnSync } from 'child_process';
 import { readFileSync, existsSync, statSync } from 'fs';
 import net from 'net';
 import path from 'path';
+import { formatLocalTimestamp } from './local-time.js';
 import { fileURLToPath } from 'url';
 import { logDeliveryFailure, saveTmuxCapture } from './c4-diagnostic.js';
 import {
@@ -72,7 +73,7 @@ const NOTIFY_DELIVERED_TIMEOUT_MS = 5000;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function log(message) {
-  const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  const timestamp = formatLocalTimestamp();
   console.log(`[${timestamp}] ${message}`);
 }
 

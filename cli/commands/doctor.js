@@ -10,6 +10,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { formatLocalTimestamp } from '../lib/local-time.js';
 import dns from 'node:dns/promises';
 import { YOS_DIR, CONFIG_DIR, SKILLS_DIR, COMPONENTS_FILE } from '../lib/config.js';
 import { readRecordedConsolePort } from '../lib/web-console-port.js';
@@ -117,7 +118,7 @@ function logToFile(message) {
       fs.mkdirSync(LOG_DIR, { recursive: true });
       _logDirReady = true;
     }
-    const ts = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+    const ts = formatLocalTimestamp();
     fs.appendFileSync(LOG_FILE, `[${ts}] ${message}\n`);
   } catch {}
 }
