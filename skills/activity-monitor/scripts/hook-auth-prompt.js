@@ -18,6 +18,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { execFileSync } from 'child_process';
+import { formatLocalTimestamp } from './local-time.js';
 
 const YOS_DIR = path.join(os.homedir(), 'yos');
 const LOG_FILE = path.join(YOS_DIR, 'activity-monitor', 'hook-timing.log');
@@ -48,7 +49,7 @@ async function main() {
 
   const tool = hookData.tool_name || '(unknown)';
   const inputKeys = hookData.tool_input ? Object.keys(hookData.tool_input).join(',') : '';
-  const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  const ts = formatLocalTimestamp();
   const line = `[${ts}] hook=auth-prompt event=PermissionRequest tool=${tool} input_keys=[${inputKeys}]\n`;
 
   try {

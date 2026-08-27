@@ -11,13 +11,14 @@
 import { execSync, execFileSync } from 'child_process';
 import path from 'path';
 import os from 'os';
+import { formatLocalTimestamp } from './local-time.js';
 
 const YOS_DIR = process.env.YOS_DIR || path.join(os.homedir(), 'yos');
 const C4_CONTROL = path.join(YOS_DIR, '.claude/skills/comm-bridge/scripts/c4-control.js');
 const MAX_EXIT_WAIT = 120; // Wait up to 120 seconds for Claude to exit
 
 function ts() {
-  return new Date().toISOString().replace('T', ' ').substring(0, 19);
+  return formatLocalTimestamp();
 }
 
 function log(msg) {

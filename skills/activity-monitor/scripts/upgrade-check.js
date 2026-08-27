@@ -10,6 +10,7 @@ import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { formatLocalTimestamp } from './local-time.js';
 
 const YOS_DIR = process.env.YOS_DIR || path.join(os.homedir(), 'yos');
 const MONITOR_DIR = path.join(YOS_DIR, 'activity-monitor');
@@ -69,7 +70,7 @@ function resolveCommBridgeScript(fileName) {
 const C4_CONTROL_PATH = resolveCommBridgeScript('c4-control.js');
 
 function log(message) {
-  const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  const timestamp = formatLocalTimestamp();
   const line = `[${timestamp}] ${message}\n`;
   try {
     fs.appendFileSync(LOG_FILE, line);

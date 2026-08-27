@@ -6,6 +6,19 @@ All notable changes to YOS are recorded here from the point at which the indepen
 
 ### Fixed
 
+- Give PM2 services the timezone the machine was installed with. `yos init
+  --timezone` sets the host zone and records `TZ` in `.env`, but the services
+  were started without it, so Node formatted their timestamps in UTC while the
+  machine itself read local time. On an Asia/Shanghai install that put
+  `yos status` and `activity.log` eight hours behind, unlabelled — which reads
+  as "this agent has been dead since this morning" when it answered a minute
+  ago. Found on a real machine, after it had already misled us once. `TZ` is
+  now passed to every managed process: the four core services, Caddy, and
+  component services on both the shipped-ecosystem and SKILL.md paths. It is
+  spread in rather than assigned, because Node treats `TZ=''` as UTC and
+  injecting an empty value would move an unconfigured machine to UTC — the
+  opposite of the fix; absent stays absent and the process inherits the host.
+  (TD-270)
 - Stop the Codex kick from reading as a person talking. A freshly launched
   Codex agent used to receive the bare word `hello` as its first message; its
   only job is to fire the SessionStart hook, but as a greeting it invited the

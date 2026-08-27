@@ -50,6 +50,20 @@ const CODEX_BYPASS_PERMISSIONS = readEnvValue('CODEX_BYPASS_PERMISSIONS', 'true'
 const YOS_ADMIN_CHANNEL = readEnvValue('YOS_ADMIN_CHANNEL');
 const YOS_ADMIN_ENDPOINT = readEnvValue('YOS_ADMIN_ENDPOINT');
 
+// Timezone for every managed process.
+//
+// `yos init --timezone` sets the host zone and records TZ in .env, but PM2
+// services were started without it, so Node formatted their timestamps in UTC
+// while the machine read local time. On an Asia/Shanghai box that put
+// `yos status` and activity.log 8 hours behind — with no zone label, so the
+// error was invisible and read as "this agent has been dead for hours".
+//
+// Spread in as `...TZ_ENV` rather than assigned: Node treats TZ='' as UTC, so
+// injecting an empty value would *move* an unconfigured machine to UTC — the
+// opposite of the fix. Absent stays absent, and the process inherits the host.
+const TZ = readEnvValue('TZ');
+const TZ_ENV = TZ ? { TZ } : {};
+
 // Resolve the yos package root so deployed skills can import CLI modules.
 // activity-monitor.js imports from cli/lib/runtime/, which is part of the
 // yos npm package — not the skill's deployed directory.
@@ -189,7 +203,7 @@ function loadComponentServices() {
                 continue;
               }
               // Copy app to avoid mutating the require() cached object
-              const safeApp = applyRestartFloor({ ...app, env: { ...app.env, PATH: ENHANCED_PATH } });
+              const safeApp = applyRestartFloor({ ...app, env: { ...app.env, PATH: ENHANCED_PATH, ...TZ_ENV } });
               usedNames.add(safeApp.name);
               apps.push(safeApp);
             }
@@ -217,6 +231,7 @@ function loadComponentServices() {
           env: {
             PATH: ENHANCED_PATH,
             NODE_ENV: 'production',
+            ...TZ_ENV,
           },
           autorestart: true,
           error_file: path.join(dataDir, 'logs', 'error.log'),
@@ -242,7 +257,8 @@ module.exports = {
       cwd: YOS_DIR,
       env: {
         PATH: ENHANCED_PATH,
-        NODE_ENV: 'production'
+        NODE_ENV: 'production',
+        ...TZ_ENV
       },
       autorestart: true,
       max_restarts: 10,
@@ -258,7 +274,8 @@ module.exports = {
         // The port was never passed here, so the service used its own default
         // while `yos init` could have recorded a different one after finding
         // 3456 taken. Read the recorded value; the default still matches.
-        WEB_CONSOLE_PORT: readEnvValue('WEB_CONSOLE_PORT', '3456')
+        WEB_CONSOLE_PORT: readEnvValue('WEB_CONSOLE_PORT', '3456'),
+        ...TZ_ENV
       },
       autorestart: true,
       max_restarts: 10,
@@ -272,7 +289,8 @@ module.exports = {
         PATH: ENHANCED_PATH,
         NODE_ENV: 'production',
         YOS_ADMIN_CHANNEL,
-        YOS_ADMIN_ENDPOINT
+        YOS_ADMIN_ENDPOINT,
+        ...TZ_ENV
       },
       autorestart: true,
       max_restarts: 10,
@@ -290,6 +308,7 @@ module.exports = {
         YOS_ADMIN_CHANNEL,
         YOS_ADMIN_ENDPOINT,
         ...(YOS_PACKAGE_ROOT ? { YOS_PACKAGE_ROOT } : {}),
+        ...TZ_ENV,
       },
       autorestart: true,
       max_restarts: 10,
@@ -305,6 +324,7 @@ module.exports = {
           env: {
             PATH: ENHANCED_PATH,
             HOME: HOME,
+            ...TZ_ENV,
           },
           autorestart: true,
           max_restarts: 10,

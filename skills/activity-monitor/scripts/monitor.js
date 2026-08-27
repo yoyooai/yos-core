@@ -130,6 +130,7 @@ import { execSync, execFileSync, spawn } from 'child_process';
 import fs from 'fs';
 import net from 'net';
 import path from 'path';
+import { formatLocalTimestamp } from './local-time.js';
 import os from 'os';
 import { fileURLToPath } from 'url';
 import { MessageRouter } from './message-router.js';
@@ -327,7 +328,7 @@ function getLocalDate() {
 }
 
 function log(message) {
-  const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  const timestamp = formatLocalTimestamp();
   const line = `[${timestamp}] ${message}`;
   if (!fs.existsSync(MONITOR_DIR)) {
     fs.mkdirSync(MONITOR_DIR, { recursive: true });
@@ -704,7 +705,7 @@ function writeHealthCheckState(lastCheckAt) {
     }
     fs.writeFileSync(HEALTH_CHECK_STATE_FILE, JSON.stringify({
       last_check_at: lastCheckAt,
-      last_check_human: new Date(lastCheckAt * 1000).toISOString().replace('T', ' ').substring(0, 19)
+      last_check_human: formatLocalTimestamp(lastCheckAt * 1000)
     }, null, 2));
   } catch (err) {
     log(`Health check: failed to write state (${err.message})`);
@@ -984,7 +985,7 @@ function createGuardian(activeAdapter, activeToolPipeline, initialRuntimeLaunchA
 
 async function monitorLoop() {
   const currentTime = Math.floor(Date.now() / 1000);
-  const currentTimeHuman = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  const currentTimeHuman = formatLocalTimestamp();
 
   const tickState = await orchestrator.handleMonitorTick({
     currentTime,
