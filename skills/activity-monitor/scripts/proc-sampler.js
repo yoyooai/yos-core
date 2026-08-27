@@ -22,12 +22,25 @@ import { execSync } from 'child_process';
 
 const SAMPLE_INTERVAL = 10;   // seconds between samples
 const FROZEN_THRESHOLD = 60;  // seconds of zero delta → frozen
+const DEFAULT_STALE_AFTER = 30;  // seconds; floor for the freshness cutoff
 
 const PROC_STATE_FILE = path.join(
   process.env.YOS_DIR || path.join(os.homedir(), 'yos'),
   'activity-monitor',
   'proc-state.json'
 );
+
+/**
+ * How old a proc-state sample may be before it counts as unknown.
+ * Derived from the writer's sampling interval: a 60s interval cannot possibly
+ * produce state younger than 60s, so a fixed cutoff would discard every sample.
+ * @param {number} [sampleInterval]
+ */
+function staleAfterSeconds(sampleInterval) {
+  const interval = Number(sampleInterval);
+  if (!Number.isFinite(interval) || interval <= 0) return DEFAULT_STALE_AFTER;
+  return Math.max(DEFAULT_STALE_AFTER, interval * 3);
+}
 
 export class ProcSampler {
   /**
@@ -36,8 +49,19 @@ export class ProcSampler {
    * @param {function} opts.log        logging function
    * @param {number}  [opts.sampleInterval]  seconds between samples (default 10)
    * @param {number}  [opts.frozenThreshold] seconds of zero-delta to declare frozen (default 60)
+   * @param {string}  [opts.platform]        override process.platform (tests)
+   * @param {object}  [opts.fsImpl]          override the fs module (tests)
+   * @param {function} [opts.execSyncImpl]   override execSync (tests)
+   * @param {string}  [opts.stateFile]       override the proc-state path (tests)
+   * @param {function} [opts.findPid]        override PID discovery (tests)
+   * @param {function} [opts.sampleCtxSwitches] override the counter read (tests)
+   * @param {function} [opts.writeState]     override the state write (tests)
    */
-  constructor({ sessionName, log, sampleInterval, frozenThreshold } = {}) {
+  constructor({
+    sessionName, log, sampleInterval, frozenThreshold,
+    platform, fsImpl, execSyncImpl, stateFile,
+    findPid, sampleCtxSwitches, writeState
+  } = {}) {
     this._sessionName = sessionName;
     this._log = log || (() => {});
     this._sampleInterval = sampleInterval || SAMPLE_INTERVAL;
@@ -46,10 +70,18 @@ export class ProcSampler {
     this._lastPid = null;
     this._lastCtxTotal = null;
     this._lastSampleAt = 0;
-    this._frozenCount = 0;        // consecutive seconds of zero delta
+    this._lastSampleTime = null;  // epoch seconds of the previous accepted sample
+    this._frozenCount = 0;        // seconds of zero delta, measured in real time
     this._alive = null;           // true/false/null
     this._lastDelta = null;
-    this._platform = process.platform;
+    this._platform = platform || process.platform;
+
+    this._fs = fsImpl || fs;
+    this._execSync = execSyncImpl || execSync;
+    this._stateFile = stateFile || PROC_STATE_FILE;
+    this._findPidImpl = findPid || null;
+    this._sampleCtxSwitchesImpl = sampleCtxSwitches || null;
+    this._writeStateImpl = writeState || null;
   }
 
   /** Update session name (e.g. on runtime switch). Resets state. */
@@ -65,6 +97,7 @@ export class ProcSampler {
     this._lastPid = null;
     this._lastCtxTotal = null;
     this._lastSampleAt = 0;
+    this._lastSampleTime = null;
     this._frozenCount = 0;
     this._alive = null;
     this._lastDelta = null;
@@ -79,7 +112,15 @@ export class ProcSampler {
    */
   tick(currentTime, opts = {}) {
     if ((currentTime - this._lastSampleAt) < this._sampleInterval) return;
+    // Charge frozen time by the clock, not by the nominal interval. The monitor
+    // loop is exactly what slows down when the machine is in trouble, so a
+    // sample can land far later than sampleInterval; billing a flat interval
+    // there understates how long the agent has been wedged and delays rescue.
+    const elapsed = this._lastSampleTime === null
+      ? this._sampleInterval
+      : Math.max(0, currentTime - this._lastSampleTime);
     this._lastSampleAt = currentTime;
+    this._lastSampleTime = currentTime;
 
     const pid = this._findRuntimePid();
     if (pid === null) {
@@ -120,6 +161,18 @@ export class ProcSampler {
     this._lastCtxTotal = ctxTotal;
     this._lastDelta = delta;
 
+    if (delta < 0) {
+      // Context-switch counters only climb for a given process, so a smaller
+      // reading means we are no longer looking at the same process (PID reuse,
+      // a re-exec, a bad read). The honest answer is "unknown" — counting it
+      // toward frozen would restart a perfectly healthy agent.
+      this._log(`ProcSampler: counter went backwards (${delta}), treating as a new baseline`);
+      this._frozenCount = 0;
+      this._alive = null;
+      this._writeProcState();
+      return;
+    }
+
     if (delta > 0) {
       this._frozenCount = 0;
       this._alive = true;
@@ -127,7 +180,7 @@ export class ProcSampler {
       // Only accumulate frozen count when agent is expected to be working
       // (active_tools > 0). An idle agent waiting for input naturally has
       // zero context switches — that's normal, not frozen.
-      this._frozenCount += this._sampleInterval;
+      this._frozenCount += elapsed;
       this._alive = this._frozenCount < this._frozenThreshold;
     } else {
       // Idle — zero delta is expected, don't accumulate frozen count
@@ -157,6 +210,7 @@ export class ProcSampler {
       frozenCount: this._frozenCount,
       lastDelta: this._lastDelta,
       lastSampleAt: this._lastSampleAt,
+      sampleInterval: this._sampleInterval,
       platform: this._platform,
     };
   }
@@ -168,6 +222,8 @@ export class ProcSampler {
    * @returns {number|null}
    */
   _findRuntimePid() {
+    if (this._findPidImpl) return this._findPidImpl();
+    const execSync = this._execSync;
     try {
       const panePid = execSync(
         `tmux list-panes -t "${this._sessionName}" -F '#{pane_pid}' 2>/dev/null`,
@@ -195,6 +251,7 @@ export class ProcSampler {
    * @returns {number|null}
    */
   _sampleCtxSwitches(pid) {
+    if (this._sampleCtxSwitchesImpl) return this._sampleCtxSwitchesImpl(pid);
     if (this._platform === 'linux') {
       return this._sampleLinux(pid);
     }
@@ -208,7 +265,7 @@ export class ProcSampler {
   /** Linux: read /proc/<pid>/status for context switches */
   _sampleLinux(pid) {
     try {
-      const status = fs.readFileSync(`/proc/${pid}/status`, 'utf8');
+      const status = this._fs.readFileSync(`/proc/${pid}/status`, 'utf8');
       const volMatch = status.match(/voluntary_ctxt_switches:\s+(\d+)/);
       const nvolMatch = status.match(/nonvoluntary_ctxt_switches:\s+(\d+)/);
       const vol = volMatch ? parseInt(volMatch[1], 10) : 0;
@@ -221,6 +278,7 @@ export class ProcSampler {
 
   /** macOS: use top to get CSW for a single process */
   _sampleDarwin(pid) {
+    const execSync = this._execSync;
     try {
       const out = execSync(
         `top -l 1 -pid ${pid} -stats pid,csw -s 0 2>/dev/null`,
@@ -244,18 +302,14 @@ export class ProcSampler {
    */
   _writeProcState() {
     try {
-      const state = {
-        pid: this._lastPid,
-        alive: this._alive,
-        frozen: this.isFrozen(),
-        frozenCount: this._frozenCount,
-        lastDelta: this._lastDelta,
-        lastSampleAt: this._lastSampleAt,
-        platform: this._platform,
-      };
-      const tmpPath = PROC_STATE_FILE + '.tmp';
-      fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2));
-      fs.renameSync(tmpPath, PROC_STATE_FILE);
+      const state = this.getState();
+      if (this._writeStateImpl) {
+        this._writeStateImpl(state);
+        return;
+      }
+      const tmpPath = this._stateFile + '.tmp';
+      this._fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2));
+      this._fs.renameSync(tmpPath, this._stateFile);
     } catch {
       // Best-effort — don't crash the monitor loop
     }
@@ -267,13 +321,18 @@ export class ProcSampler {
  * Intended for use by the dispatcher (or any external process).
  * @returns {object|null}
  */
-export function readProcState() {
+export function readProcState({ fsImpl, stateFile, now } = {}) {
+  const fsMod = fsImpl || fs;
+  const file = stateFile || PROC_STATE_FILE;
   try {
-    if (!fs.existsSync(PROC_STATE_FILE)) return null;
-    const data = JSON.parse(fs.readFileSync(PROC_STATE_FILE, 'utf8'));
-    // Treat stale data (>30s old) as unknown
-    const age = Math.floor(Date.now() / 1000) - (data.lastSampleAt || 0);
-    if (age > 30) return null;
+    if (!fsMod.existsSync(file)) return null;
+    const data = JSON.parse(fsMod.readFileSync(file, 'utf8'));
+    // Treat stale data as unknown. The cutoff follows the writer's sampling
+    // interval, which the file carries: a fixed 30s cutoff silently discarded
+    // every sample whenever the interval was configured above 30s.
+    const nowSeconds = Number.isFinite(now) ? now : Math.floor(Date.now() / 1000);
+    const age = nowSeconds - (data.lastSampleAt || 0);
+    if (age > staleAfterSeconds(data.sampleInterval)) return null;
     return data;
   } catch {
     return null;
