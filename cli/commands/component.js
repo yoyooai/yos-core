@@ -27,6 +27,57 @@ import { evaluateUpgrade } from '../lib/claude-eval.js';
 import { runComponentRepair } from '../lib/component-repair.js';
 
 /**
+ * Render an upgrade analysis, including everything it did not examine.
+ *
+ * The screen this produces is the last thing a user reads before approving an
+ * operation that overwrites files they have edited. A list of green verdicts
+ * with no mention of the twenty files nobody looked at is worse than no
+ * analysis at all, so coverage is printed whenever it is less than total.
+ *
+ * @param {object} evalResult - as returned by evaluateUpgrade()
+ * @param {string} indent
+ * @returns {string[]} lines to print
+ */
+export function formatEvalReport(evalResult, indent = '') {
+  const lines = [];
+
+  if (evalResult.available === false) {
+    lines.push(`${indent}${warn(`Analysis unavailable: ${evalResult.reason}`)}`);
+    lines.push(`${indent}${warn('No file was assessed. Review your local changes yourself before upgrading.')}`);
+    for (const f of evalResult.unevaluatedFiles || []) {
+      lines.push(`${indent}  ${dim(f)}`);
+    }
+    return lines;
+  }
+
+  for (const f of evalResult.files) {
+    const text = `${f.file}: ${f.reason}`;
+    if (f.verdict === 'safe') lines.push(`${indent}${success(text)}`);
+    else if (f.verdict === 'warning') lines.push(`${indent}${warn(text)}`);
+    else if (f.verdict === 'unknown') lines.push(`${indent}${warn(`${text} [NOT ASSESSED]`)}`);
+    else lines.push(`${indent}${error(text)}`);
+  }
+
+  if (evalResult.skippedFiles?.length) {
+    lines.push('');
+    lines.push(`${indent}${warn(`${evalResult.skippedFiles.length} changed file(s) were NOT examined at all:`)}`);
+    for (const f of evalResult.skippedFiles) lines.push(`${indent}  ${warn(f)}`);
+  }
+
+  if (evalResult.truncatedFiles?.length) {
+    lines.push('');
+    lines.push(`${indent}${warn(`${evalResult.truncatedFiles.length} file(s) were only read in part: ${evalResult.truncatedFiles.join(', ')}`)}`);
+  }
+
+  lines.push('');
+  lines.push(`${indent}${bold('Recommendation:')} ${evalResult.recommendation}`);
+  if (!evalResult.complete) {
+    lines.push(`${indent}${warn('This analysis is incomplete — treat it as a partial review, not an all-clear.')}`);
+  }
+  return lines;
+}
+
+/**
  * Print a single upgrade step result in real time.
  * Each step result includes { step, total, name, status, message?, error? }.
  */
@@ -553,16 +604,7 @@ async function handleCheckOnly(component, { jsonOutput, branch, beta = false }) 
 
       if (evalResult) {
         console.log(`\n${heading('Upgrade analysis:')}`);
-        for (const f of evalResult.files) {
-          if (f.verdict === 'safe') {
-            console.log(`  ${success(`${f.file}: ${f.reason}`)}`);
-          } else if (f.verdict === 'warning') {
-            console.log(`  ${warn(`${f.file}: ${f.reason}`)}`);
-          } else {
-            console.log(`  ${error(`${f.file}: ${f.reason}`)}`);
-          }
-        }
-        console.log(`\n${bold('Recommendation:')} ${evalResult.recommendation}`);
+        for (const line of formatEvalReport(evalResult, '  ')) console.log(line);
       }
 
       if (changelog) {
@@ -748,20 +790,11 @@ async function handleUpgradeFlow(component, { jsonOutput, skipConfirm, skipEval,
           console.log(`\n${heading('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')}`);
           console.log(heading('Upgrade analysis:'));
           console.log(`${heading('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')}`);
-          for (const f of evalResult.files) {
-            if (f.verdict === 'safe') {
-              console.log(`${bold(f.file)}:\n  ${success(f.reason)}\n`);
-            } else if (f.verdict === 'warning') {
-              console.log(`${bold(f.file)}:\n  ${warn(f.reason)}\n`);
-            } else {
-              console.log(`${bold(f.file)}:\n  ${error(f.reason)}\n`);
-            }
-          }
-          console.log(`\n${bold('Recommendation:')} ${evalResult.recommendation}`);
+          for (const line of formatEvalReport(evalResult, '')) console.log(line);
           console.log(`${heading('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')}`);
         }
       } else if (!jsonOutput) {
-        console.log(`  ${dim('(Upgrade analysis skipped)')}`);
+        console.log(`  ${dim('(No local modifications to analyse)')}`);
       }
     }
 
