@@ -30,11 +30,11 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { detectApiErrorText } from './api-error-patterns.js';
 import { tmuxCapturePaneText } from '../runtime/tmux-helpers.js';
+import { readPendingRecord, writePendingRecord, clearPendingRecord } from './pending-state.js';
 
 const YOS_DIR = process.env.YOS_DIR || path.join(os.homedir(), 'yos');
 const C4_CONTROL = path.join(YOS_DIR, '.claude/skills/comm-bridge/scripts/c4-control.js');
@@ -86,7 +86,7 @@ export function createCodexProbe({
         if (!match) return false;
 
         const controlId = parseInt(match[1], 10);
-        return _writePending(pendingFile, {
+        return writePendingRecord(pendingFile, {
           control_id: controlId,
           phase,
           created_at: Math.floor(Date.now() / 1000),
@@ -160,22 +160,19 @@ export function createCodexProbe({
     // ── Pending state management ─────────────────────────────────────────────
 
     /**
-     * Read pending heartbeat state from disk.
-     * @returns {{ control_id: number, phase: string, created_at: number } | null}
+     * Read pending heartbeat state from disk. Returns null unless the record is
+     * one HealthEngine can both query and age — see pending-state.js.
+     * @returns {{ control_id: number, phase?: string, created_at: number } | null}
      */
     readHeartbeatPending() {
-      try {
-        return JSON.parse(fs.readFileSync(pendingFile, 'utf8'));
-      } catch {
-        return null;
-      }
+      return readPendingRecord(pendingFile);
     },
 
     /**
      * Clear the pending heartbeat state file.
      */
     clearHeartbeatPending() {
-      try { fs.unlinkSync(pendingFile); } catch { /* already gone */ }
+      clearPendingRecord(pendingFile);
     },
   };
 }
@@ -185,16 +182,4 @@ function _getAckDeadline(phase, { ackDeadline, recoveryAckDeadline }) {
   return ackDeadline;
 }
 
-// ── Private helpers ──────────────────────────────────────────────────────────
-
-function _writePending(file, data) {
-  try {
-    const tmp = `${file}.tmp.${process.pid}`;
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-    fs.renameSync(tmp, file);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
