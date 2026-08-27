@@ -329,13 +329,17 @@ export class CodexAdapter extends RuntimeAdapter {
   /**
    * Returns a CodexContextMonitor instance for this runtime.
    * Reads threshold from config.json `codex_new_session_threshold` (default 75%).
+   *
+   * @param {object} [opts] - Forwarded to the monitor; `log` is what lets it
+   *   say so when context usage becomes unreadable, which is otherwise a
+   *   silent loss of all rotation protection.
    * @returns {CodexContextMonitor}
    */
-  getContextMonitor() {
+  getContextMonitor(opts = {}) {
     const config = getYosConfig();
     const val = parseInt(config.codex_new_session_threshold, 10);
     const threshold = (!isNaN(val) && val > 0 && val <= 100) ? val / 100 : 0.75;
-    return new CodexContextMonitor({ threshold });
+    return new CodexContextMonitor({ threshold, ...opts });
   }
 }
 

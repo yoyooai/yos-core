@@ -12,6 +12,10 @@
  *
  * Ceiling fallback chain:
  *   token_count event → ~/.codex/models_cache.json → DEFAULT_CEILING (128K)
+ *
+ * Everything this class touches — the filesystem, the sqlite3 CLI, the clock —
+ * is injectable, so the decisions above can be tested without a live Codex.
+ * Production defaults are unchanged.
  */
 
 import fs from 'node:fs';
@@ -22,8 +26,6 @@ import { ContextMonitorBase } from './context-monitor-base.js';
 
 const HOME = os.homedir();
 const CODEX_DIR = path.join(HOME, '.codex');
-const SQLITE_FILE = path.join(CODEX_DIR, 'state_5.sqlite');
-const MODELS_CACHE_FILE = path.join(CODEX_DIR, 'models_cache.json');
 
 // Bytes to read from the end of the JSONL file — large enough to capture
 // several turns including their token_count events.
@@ -37,13 +39,21 @@ export class CodexContextMonitor extends ContextMonitorBase {
    * @param {object} [opts]
    * @param {string} [opts.model] - Model slug to look up in models_cache.json.
    *   When omitted, uses the first model in the cache (most recently used).
+   * @param {string} [opts.codexDir] - Codex home (tests)
+   * @param {object} [opts.fsImpl] - fs module (tests)
+   * @param {Function} [opts.execFileSyncImpl] - execFileSync (tests)
    */
   constructor(opts = {}) {
     super(opts);
     this._model = opts.model ?? null;
+    this._fs = opts.fsImpl ?? fs;
+    this._execFileSync = opts.execFileSyncImpl ?? execFileSync;
+    this._codexDir = opts.codexDir ?? CODEX_DIR;
+    this._sqliteFile = path.join(this._codexDir, 'state_5.sqlite');
+    this._modelsCacheFile = path.join(this._codexDir, 'models_cache.json');
     // Record start time so SQLite queries ignore threads from prior sessions.
     // Threads updated before this timestamp belong to a previous Codex run.
-    this._startTime = Math.floor(Date.now() / 1000);
+    this._startTime = Math.floor(this._now() / 1000);
   }
 
   /**
@@ -73,18 +83,18 @@ export class CodexContextMonitor extends ContextMonitorBase {
     if (!rolloutPath) return null;
 
     try {
-      const stat = fs.statSync(rolloutPath);
+      const stat = this._fs.statSync(rolloutPath);
       if (!stat.size) return null;
 
       // Read only the tail to avoid loading large session files
       const readBytes = Math.min(TAIL_BYTES, stat.size);
       const offset = stat.size - readBytes;
       const buf = Buffer.alloc(readBytes);
-      const fd = fs.openSync(rolloutPath, 'r');
+      const fd = this._fs.openSync(rolloutPath, 'r');
       try {
-        fs.readSync(fd, buf, 0, readBytes, offset);
+        this._fs.readSync(fd, buf, 0, readBytes, offset);
       } finally {
-        fs.closeSync(fd);
+        this._fs.closeSync(fd);
       }
 
       const lines = buf.toString('utf8').split('\n');
@@ -93,22 +103,30 @@ export class CodexContextMonitor extends ContextMonitorBase {
       for (let i = lines.length - 1; i >= 0; i--) {
         const line = lines[i].trim();
         if (!line) continue;
+        let event;
         try {
-          const event = JSON.parse(line);
-          if (
-            event.type === 'event_msg' &&
-            event.payload?.type === 'token_count' &&
-            event.payload?.info?.last_token_usage?.input_tokens != null
-          ) {
-            // last_token_usage.input_tokens = tokens sent in the last turn =
-            // current context window fill. Do NOT use total_token_usage.input_tokens,
-            // which is cumulative session cost and grows unboundedly across turns.
-            const used = event.payload.info.last_token_usage.input_tokens;
-            // model_context_window is the effective ceiling (already multiplied by pct)
-            const ceiling = event.payload.info.model_context_window ?? this._getModelCeiling();
-            return { used, ceiling };
-          }
-        } catch { /* skip malformed or partial line at read boundary */ }
+          event = JSON.parse(line);
+        } catch {
+          continue; // malformed or partial line at read boundary
+        }
+        if (event?.type !== 'event_msg' || event.payload?.type !== 'token_count') continue;
+
+        // last_token_usage.input_tokens = tokens sent in the last turn =
+        // current context window fill. Do NOT use total_token_usage.input_tokens,
+        // which is cumulative session cost and grows unboundedly across turns.
+        const used = event.payload.info?.last_token_usage?.input_tokens;
+        // A token_count event without a usable count is not a reading. Keeping
+        // the scan going reaches the previous turn, which is a slightly stale
+        // but true number; returning the unusable one would have made the whole
+        // monitor blind for as long as that event stayed in the tail.
+        if (!Number.isFinite(used) || used < 0) continue;
+
+        // model_context_window is the effective ceiling (already multiplied by pct)
+        const eventCeiling = event.payload.info?.model_context_window;
+        const ceiling = (Number.isFinite(eventCeiling) && eventCeiling > 0)
+          ? eventCeiling
+          : this._getModelCeiling();
+        return { used, ceiling };
       }
     } catch { /* file unreadable or stat failed */ }
 
@@ -131,7 +149,7 @@ export class CodexContextMonitor extends ContextMonitorBase {
                      AND updated_at >= ${this._startTime}
                    ORDER BY updated_at DESC
                    LIMIT 1;`;
-      const out = execFileSync('sqlite3', [SQLITE_FILE, sql], {
+      const out = this._execFileSync('sqlite3', [this._sqliteFile, sql], {
         encoding: 'utf8', stdio: 'pipe', timeout: 5_000,
       }).trim();
       if (out) return out;
@@ -151,20 +169,20 @@ export class CodexContextMonitor extends ContextMonitorBase {
    */
   _getActiveRolloutPathFromFilesystem() {
     try {
-      const sessionsDir = path.join(CODEX_DIR, 'sessions');
+      const sessionsDir = path.join(this._codexDir, 'sessions');
       let best = null;
       let bestMtime = 0;
 
       // Walk up to 3 directory levels: YYYY/MM/DD
-      for (const year of _readdirSafe(sessionsDir)) {
-        for (const month of _readdirSafe(path.join(sessionsDir, year))) {
-          for (const day of _readdirSafe(path.join(sessionsDir, year, month))) {
+      for (const year of this._readdirSafe(sessionsDir)) {
+        for (const month of this._readdirSafe(path.join(sessionsDir, year))) {
+          for (const day of this._readdirSafe(path.join(sessionsDir, year, month))) {
             const dayDir = path.join(sessionsDir, year, month, day);
-            for (const file of _readdirSafe(dayDir)) {
+            for (const file of this._readdirSafe(dayDir)) {
               if (!file.startsWith('rollout-') || !file.endsWith('.jsonl')) continue;
               const fpath = path.join(dayDir, file);
               try {
-                const { mtimeMs } = fs.statSync(fpath);
+                const { mtimeMs } = this._fs.statSync(fpath);
                 const mtimeSec = mtimeMs / 1000;
                 if (mtimeSec >= this._startTime && mtimeSec > bestMtime) {
                   bestMtime = mtimeSec;
@@ -194,12 +212,12 @@ export class CodexContextMonitor extends ContextMonitorBase {
                      AND updated_at >= ${this._startTime}
                    ORDER BY updated_at DESC
                    LIMIT 1;`;
-      const out = execFileSync('sqlite3', [SQLITE_FILE, sql], {
+      const out = this._execFileSync('sqlite3', [this._sqliteFile, sql], {
         encoding: 'utf8', stdio: 'pipe', timeout: 5_000,
       }).trim();
       if (!out) return null;
       const tokensUsed = parseInt(out, 10);
-      if (isNaN(tokensUsed)) return null;
+      if (!Number.isFinite(tokensUsed) || tokensUsed < 0) return null;
       return { used: tokensUsed, ceiling: this._getModelCeiling() };
     } catch {
       return null;
@@ -217,33 +235,34 @@ export class CodexContextMonitor extends ContextMonitorBase {
    */
   _getModelCeiling() {
     try {
-      const cache = JSON.parse(fs.readFileSync(MODELS_CACHE_FILE, 'utf8'));
-      const models = cache.models ?? [];
+      const cache = JSON.parse(this._fs.readFileSync(this._modelsCacheFile, 'utf8'));
+      const models = Array.isArray(cache?.models) ? cache.models : [];
       const model = this._model
-        ? (models.find(m => m.slug === this._model) ?? models[0])
+        ? (models.find(m => m?.slug === this._model) ?? models[0])
         : models[0];
 
-      if (model?.context_window) {
-        const pct = model.effective_context_window_percent ?? 100;
-        return Math.round(model.context_window * (pct / 100));
+      if (Number.isFinite(model?.context_window) && model.context_window > 0) {
+        const pct = Number.isFinite(model.effective_context_window_percent)
+          ? model.effective_context_window_percent
+          : 100;
+        const ceiling = Math.round(model.context_window * (pct / 100));
+        if (Number.isFinite(ceiling) && ceiling > 0) return ceiling;
       }
     } catch { /* models_cache.json missing or malformed */ }
 
     return DEFAULT_CEILING;
   }
-}
 
-// ── Private helpers ────────────────────────────────────────────────────────
-
-/**
- * Safe readdir — returns empty array instead of throwing on missing/unreadable dirs.
- * @param {string} dir
- * @returns {string[]}
- */
-function _readdirSafe(dir) {
-  try {
-    return fs.readdirSync(dir);
-  } catch {
-    return [];
+  /**
+   * Safe readdir — returns empty array instead of throwing on missing/unreadable dirs.
+   * @param {string} dir
+   * @returns {string[]}
+   */
+  _readdirSafe(dir) {
+    try {
+      return this._fs.readdirSync(dir);
+    } catch {
+      return [];
+    }
   }
 }
