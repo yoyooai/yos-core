@@ -2,6 +2,56 @@
 
 All notable changes to YOS are recorded here from the point at which the independent YOS product baseline was established.
 
+## [0.1.20] - 2026-08-28
+
+### Fixed
+
+- Stop shipping a false capability claim to every customer machine. The Codex
+  system prompt — the one the default runtime reads — asserted "No built-in
+  WebSearch/WebFetch: use curl/wget". That is false: measured on a real 0.1.19
+  install, interactive path, with no `[tools]` entry anywhere in the tree, the
+  runtime searched the web and returned the live figure. The line is replaced
+  by one pointing at the built-in search. **No behavioural win is claimed**:
+  asked point blank, the agent said it could search under the old prompt too.
+  Removing a false statement from a customer-facing artifact is the whole
+  justification.
+
+### Added
+
+- Both system prompts declare what the agent can already do, ahead of the
+  behavioural rules. Previously 264 lines of behaviour, security, memory and
+  comms rules carried no capability declaration at all — the runtime could
+  read Office files, read PDFs, see images and search the web, and nothing on
+  the machine said so. Each entry was measured on a factory install rather
+  than written from what sounded right: Office files via `unzip -p` (a .docx
+  and an .xlsx were pulled that way with nothing installed), PDFs with a text
+  layer via python3, images directly, web search with no flag or config.
+- Two rules travel with the declaration: a missing capability is a claim that
+  needs a real attempt behind it, and an unreadable file is a fact about that
+  file — never widened into "I cannot read documents".
+- `test/native-capability-declaration.test.js` locks it: both prompts must
+  declare the capabilities, must place them ahead of the behavioural rules,
+  must name the shell route to Office formats, must forbid the untested
+  "I can't" and the widened refusal, and "No built-in WebSearch" must never
+  return. Ten knives, ten reds, green on restore. Jest floor 491→508.
+
+### Notes
+
+- A reproducible failure was found and is **not** fixed here: asked what an
+  index closed at today, an agent may answer from memory — a different
+  fabricated number each run, never searching. The live-fact rule added above
+  did not change it, even though the agent can quote the rule back verbatim.
+  That is worse than "I can't", because the customer cannot tell. Later
+  measurement found it intermittent — 34 controlled runs across six isolated
+  variables all searched and answered correctly, and the original failure
+  could not be reproduced. Cause unknown; tracked as debt, not resolved.
+  (TD-278)
+- One change was made, measured, and reverted: a `[tools] web_search` default
+  in the Codex project config. The premise ("the switch ships off") was wrong
+  — the real machine searched without it. Shipping it would have been a
+  redundant component with a plausible story attached, which is the exact
+  mistake this release came out of.
+
 ## [0.1.19] - 2026-08-27
 
 ### Changed
