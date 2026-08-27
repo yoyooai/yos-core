@@ -27,7 +27,7 @@ import {
   verifyMirrorDownload,
 } from '../dist-integrity.js';
 
-const BASE = 'https://yoyooai.com/dist';
+const BASE = 'https://dist.yoyooai.com';
 const TARBALL_URL = `${BASE}/yoyooai/yos-core/tarball/tags/v0.1.3.tar.gz`;
 const TARBALL_PATH = 'yoyooai/yos-core/tarball/tags/v0.1.3.tar.gz';
 const env = { YOS_DIST_BASE: BASE };

@@ -28,7 +28,7 @@
  *      actually resolves.
  *
  * Usage:
- *   node scripts/verify-public-shelf.mjs [--base-url https://yoyooai.com/dist]
+ *   node scripts/verify-public-shelf.mjs [--base-url https://dist.yoyooai.com]
  *     [--full | --sample 40] [--concurrency 8] [--expect-build-id <id>]
  *     [--expect-index-sha256 <hex>]
  *     [--expect-versions yos=0.1.14,feishu=0.1.4,weixin=0.1.3]
@@ -79,7 +79,7 @@ const SIGNOFF_REQUIRED = [
 
 function parseArgs(argv) {
   const o = {
-    baseUrl: 'https://yoyooai.com/dist', local: null, full: false, sample: 40, concurrency: 8,
+    baseUrl: 'https://dist.yoyooai.com', local: null, full: false, sample: 40, concurrency: 8,
     json: false, expectBuildId: null, expectIndexSha256: null, expectVersions: null,
     signoff: false, allowLegacy013: false,
     stallMs: 30_000, maxFileSeconds: 600, retries: 2,

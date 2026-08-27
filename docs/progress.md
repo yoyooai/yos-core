@@ -28,7 +28,7 @@
 | **OS 主体** | `0.1.18` on shelf (2026-08-15 出货) |
 | **飞书渠道** | `0.1.8` on shelf (2026-08-15 出货) |
 | **微信渠道** | `0.1.3` on shelf (2026-08-10 出货，本轮未变) |
-| **客户唯一取货口** | `https://yoyooai.com/dist/` |
+| **客户唯一取货口** | `https://dist.yoyooai.com/` |
 | **源码正本 / 备胎** | GitHub `yoyooai/yos-core`、`yoyooai/yos-components` |
 | **测试底线** | Jest / Node 见 `scripts/test-baselines.json`（**现查，不要背**） |
 
@@ -81,7 +81,7 @@
 
 ### ① 出货口不是 GitHub
 
-**客户首选取货口 = `https://yoyooai.com/dist/`。** GitHub 两个仓是源码正本，也是镜像缺货或不可用时的备用来源。
+**客户首选取货口 = `https://dist.yoyooai.com/`。** GitHub 两个仓是源码正本，也是镜像缺货或不可用时的备用来源。
 
 - 正常路径优先从我们自己的域名完成装机、升级、组件和依赖下载；镜像缺少目标制品时，
   代码会按既有合同回退到 GitHub。需要证明或强制全程只用镜像时，设置 `YOS_DIST_ONLY=1`。
@@ -171,7 +171,7 @@
 
 ```bash
 # 取货（客户视角，唯一正确路径）
-curl -fsSL https://yoyooai.com/dist/install.sh | bash
+curl -fsSL https://dist.yoyooai.com/install.sh | bash
 
 # 源码
 git clone https://github.com/yoyooai/yos-core.git        # OS 主体
@@ -195,5 +195,5 @@ lockfile 提交必须来自这个环境；非标准环境用 `npm ci`，不提�
 ---
 
 **有出入以下列为准**：`CHANGELOG.md`（改了什么）、
-`scripts/test-baselines.json`（底线是多少）、`https://yoyooai.com/dist/VERSIONS.md`（现在的货是哪一版）。
+`scripts/test-baselines.json`（底线是多少）、`https://dist.yoyooai.com/VERSIONS.md`（现在的货是哪一版）。
 本文是导航，不是副本。

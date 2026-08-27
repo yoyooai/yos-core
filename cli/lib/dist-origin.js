@@ -16,7 +16,7 @@
 
 import { readEnvFile } from './env.js';
 
-const DEFAULT_DIST_BASE = 'https://yoyooai.com/dist';
+const DEFAULT_DIST_BASE = 'https://dist.yoyooai.com';
 
 /** Owners whose repositories the mirror carries. `*` means "every owner". */
 const DEFAULT_DIST_OWNERS = 'yoyooai';

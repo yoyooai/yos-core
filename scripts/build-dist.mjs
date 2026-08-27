@@ -14,7 +14,7 @@
  *     --repo yoyooai/yos-core=. \
  *     --repo yoyooai/yos-components=../yos-components \
  *     [--tags 50] [--default-branch main] [--vendor-cache <dir>]
- *     [--base-url https://yoyooai.com/dist]
+ *     [--base-url https://dist.yoyooai.com]
  *     [--skip-vendor] [--allow-missing-vendor] [--allow-tag-drop]
  *
  * Release procedure (which order, what to re-check, how to roll back): docs/release.md
@@ -65,7 +65,7 @@ function parseArgs(argv) {
     // Public address the catalog prints in its copy-paste install commands.
     // A default is deliberate: a catalog whose commands point at nothing is
     // worse than no catalog, and the mirror has exactly one public home.
-    baseUrl: 'https://yoyooai.com/dist',
+    baseUrl: 'https://dist.yoyooai.com',
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];

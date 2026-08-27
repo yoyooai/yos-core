@@ -18,7 +18,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { resolveDistBase } from '../dist-origin.js';
 
-const DEFAULT = 'https://yoyooai.com/dist';
+const DEFAULT = 'https://dist.yoyooai.com';
 const recorded = (map) => () => new Map(Object.entries(map));
 
 describe('resolveDistBase with a recorded mirror', () => {
