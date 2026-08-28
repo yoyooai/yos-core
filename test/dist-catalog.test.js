@@ -357,3 +357,82 @@ capabilities:
     expect(html).toContain('不是取货口'); // GitHub is the backup, not the counter
   });
 });
+
+/**
+ * Withdrawn versions.
+ *
+ * 0.1.22 was published, failed its own customer-path acceptance about 25
+ * minutes later, and was rolled back. The catalog then kept offering it as the
+ * worked example of installing an older version — not because anything was
+ * broken, but because "older" was computed as "the previous tag" and nothing in
+ * the data said one of those tags was no longer something we stand behind.
+ *
+ * The fix is a data concept, not a special case in the renderer: hardcoding
+ * "skip 0.1.22" would be the same defect this product spent two releases
+ * removing — a fact written into code that nothing keeps current.
+ */
+describe('withdrawn versions', () => {
+  const withdrawnIndex = () => ({
+    ...fakeIndex(),
+    withdrawn: [{
+      repo: 'yoyooai/yos-core',
+      tag: 'v0.1.9',
+      date: '2026-08-28',
+      replacedBy: 'v0.2.0',
+      reason: 'the health probes reported healthy stores as broken',
+    }],
+  });
+
+  test('a withdrawn version is never the worked example for pinning', () => {
+    // Without the fix this is exactly what the page printed: the only older
+    // version there is, which is the one we pulled.
+    const before = renderCatalogMarkdown(fakeIndex(), { baseUrl: BASE, registry: REGISTRY });
+    expect(before).toContain('--branch v0.1.9');
+
+    const after = renderCatalogMarkdown(withdrawnIndex(), { baseUrl: BASE, registry: REGISTRY });
+    const pinSection = after.split('## 装指定的旧版本')[1].split('\n## ')[0];
+    expect(pinSection).not.toContain('--branch v0.1.9');
+    // And it says so rather than printing a command with an empty version.
+    expect(pinSection).toContain('没有可推荐的旧版本可钉');
+  });
+
+  test('the version is still listed and still on the mirror — withdrawn is not deleted', () => {
+    // A pinned address that 404s is a worse failure than a version that
+    // installs with a warning, so the artifact must stay.
+    const { rows } = catalogRows(withdrawnIndex(), REGISTRY);
+    const core = rows.find(r => r.id === 'yos');
+    const pulled = core.versions.find(v => v.version === '0.1.9');
+    expect(pulled.onMirror).toBe(true);
+    expect(pulled.withdrawn).toBe(true);
+    expect(core.versions.find(v => v.version === '0.2.0').withdrawn).toBe(false);
+
+    const markdown = renderCatalogMarkdown(withdrawnIndex(), { baseUrl: BASE, registry: REGISTRY });
+    expect(markdown).toContain('~~`0.1.9`~~（已撤回）');
+  });
+
+  test('the page says which version was withdrawn, when, why, and what to use', () => {
+    const markdown = renderCatalogMarkdown(withdrawnIndex(), { baseUrl: BASE, registry: REGISTRY });
+    const section = markdown.split('## 已撤回的版本')[1].split('\n## ')[0];
+    expect(section).toContain('`0.1.9`');
+    expect(section).toContain('2026-08-28');
+    expect(section).toContain('the health probes reported healthy stores as broken');
+    expect(section).toContain('`0.2.0`');
+  });
+
+  test('withdrawn and dropped are kept apart', () => {
+    // Dropped means gone from the mirror (installing it 404s). Withdrawn means
+    // still there on purpose. Merging the two sections would be false in both
+    // directions.
+    const markdown = renderCatalogMarkdown(withdrawnIndex(), { baseUrl: BASE, registry: REGISTRY });
+    expect(markdown).toContain('## 已撤回的版本');
+    expect(markdown).toContain('## 掉出镜像的版本');
+    const dropped = markdown.split('## 掉出镜像的版本')[1];
+    expect(dropped).toContain('没有 —— 目前每个打过的版本都还在镜像上');
+  });
+
+  test('a shelf with nothing withdrawn says so instead of omitting the section', () => {
+    const markdown = renderCatalogMarkdown(fakeIndex(), { baseUrl: BASE, registry: REGISTRY });
+    expect(markdown).toContain('## 已撤回的版本');
+    expect(markdown).toContain('没有 —— 发布过的版本都还作数。');
+  });
+});

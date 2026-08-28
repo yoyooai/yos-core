@@ -412,7 +412,14 @@
     },
     {
       "path": "templates/memory/identity.md"
+    },
+    {
+      "path": "test/withdrawn-versions.test.js",
+      "minimumTests": 1
+    },
+    {
+      "path": "scripts/lib/withdrawn.mjs"
     }
   ],
-  "approvedDigest": "636a1a04b72c25c1a3618439f8850a9ed168e439aa5233679f54aaeb0ebb8953"
+  "approvedDigest": "2f95123610b372898dd755a87e4fdd1ebe7c676136275ce4d5dbfc271e5e97d9"
 }

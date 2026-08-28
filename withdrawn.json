@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "_readme": "Versions that were published and then pulled. A tag listed here stays on the mirror on purpose — a pinned address that 404s is a worse failure than a version that installs with a warning. What this file changes is that nothing recommends it any more: the catalog stops offering it as the 'install an older version' example, marks it on the page with the reason, and the installer says so out loud before proceeding. Adding an entry whose tag the mirror does not carry fails the build, because an entry that silently matches nothing is the same defect this file exists to prevent.",
+  "withdrawn": [
+    {
+      "repo": "yoyooai/yos-core",
+      "tag": "v0.1.22",
+      "date": "2026-08-28",
+      "replacedBy": "v0.1.23",
+      "reason": "yos doctor reported two of three capability health probes as degraded on a healthy install: the probes were resolved against the package copy of each core skill, which ships no node_modules, so they could not load their driver and reported the store they never opened as unreadable. Fixed in 0.1.23."
+    }
+  ]
+}

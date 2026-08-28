@@ -220,6 +220,52 @@ if [ -z "$BRANCH" ]; then
   fi
 fi
 
+# ── Withdrawn-version advisory ────────────────────────────────
+# A version we published and then pulled stays on the mirror on purpose, so a
+# pinned address never 404s. But installing one silently is the failure this
+# check exists to stop: 0.1.22 was pulled because `yos doctor` reported healthy
+# stores as broken, and for a while the catalog still offered it as the worked
+# example of installing an older version.
+#
+# Advisory, not a gate. The person typed this tag on purpose, and an install
+# that refuses to run because an advisory file was unreachable would be worse
+# than the thing being warned about. Unreachable means silent — fail open.
+warn_if_withdrawn() {
+  local tag="$1" url raw entry reason replaced
+  [ -n "$tag" ] || return 0
+  url="$(dist_url 'withdrawn.json')" || return 0
+  raw="$(curl -fsSL --connect-timeout "$DOWNLOAD_CONNECT_TIMEOUT" \
+    --max-time "$DOWNLOAD_MAX_TIME" "$url" 2>/dev/null)" || return 0
+  # Flatten to one line per entry before matching. Matching the whole document
+  # would let one entry's tag and another entry's reason be read as the same
+  # record — the warning would then be about the wrong version.
+  local pattern
+  pattern="$(printf '%s' "$tag" | sed 's/[].[\*^$]/\\&/g')"
+  # `|| true` is load-bearing under `set -euo pipefail`: grep exits 1 when the
+  # tag is NOT withdrawn, which is the ordinary case, and pipefail would turn
+  # that into a dead install. An advisory that can abort the install is worse
+  # than the thing it advises about.
+  entry="$(printf '%s' "$raw" | tr -d '\n' | tr '{' '\n' \
+    | grep -E "\"tag\"[[:space:]]*:[[:space:]]*\"${pattern}\"" | head -1 || true)"
+  [ -n "$entry" ] || return 0
+  reason="$(printf '%s' "$entry" | sed -n 's/.*"reason": *"\([^"]*\)".*/\1/p')"
+  replaced="$(printf '%s' "$entry" | sed -n 's/.*"replacedBy": *"\([^"]*\)".*/\1/p')"
+  warn "──────────────────────────────────────────────────────────"
+  warn "${tag} is a WITHDRAWN release. It is still downloadable, but"
+  warn "it is not a version we stand behind."
+  # `if`, not `[ ... ] && ...`. Measured, not assumed: under `set -euo pipefail`
+  # a failing `[ ... ] && cmd` in the MIDDLE of a function is exempt and does
+  # nothing, but the same line as the function's LAST statement makes the
+  # function return 1 and kills the caller. Both spellings work where they sit
+  # today; `if` is the one that keeps working if a line is ever added after.
+  if [ -n "$reason" ]; then warn "Why: ${reason}"; fi
+  if [ -n "$replaced" ]; then warn "Use instead: --branch ${replaced}"; fi
+  warn "Continuing, because you asked for this version by name."
+  warn "──────────────────────────────────────────────────────────"
+}
+
+warn_if_withdrawn "$BRANCH"
+
 # ── OS Detection ──────────────────────────────────────────────
 detect_os() {
   OS="$(uname -s)"

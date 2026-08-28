@@ -46,6 +46,7 @@ import {
   renderCatalogMarkdown,
 } from './lib/dist-catalog.mjs';
 import { deriveCapabilityIndex } from './lib/capability-index.mjs';
+import { loadWithdrawn, withdrawnProblems } from './lib/withdrawn.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -582,6 +583,11 @@ function main() {
   };
 
   const repos = [];
+  // Which tag each repo is publishing as newest. Kept beside the summaries
+  // rather than inside them because it is a fact about this build, not part of
+  // the published index shape — and the withdrawn check needs it to refuse a
+  // declaration that would pull the very version being shipped as the default.
+  const newestByRepo = new Map();
   for (const entry of options.repos) {
     const built = buildRepo(entry, options, record);
     // Only the core package is installed by npm; components are installed from
@@ -604,6 +610,7 @@ function main() {
       built.summary.pinnedInstallers = installers.pinned;
     }
     repos.push(built.summary);
+    newestByRepo.set(entry.repo, built.newest);
     console.log(`[dist] ${entry.repo}: ${built.summary.tags.length} tag(s), newest ${built.newest}`);
     // Say what fell outside the window. Silence here reads as "everything is
     // mirrored", and the first sign otherwise is a 404 on somebody's machine.
@@ -632,6 +639,22 @@ function main() {
     console.log('[dist] vendor: skipped');
   }
 
+  // Versions that were published and then pulled. Declared in the core repo,
+  // cross-checked against what this build actually mirrored, and published as
+  // its own file so the installer can read it without parsing the whole index.
+  const core = options.repos.find(entry => entry.repo.endsWith('/yos-core'));
+  const withdrawn = core ? loadWithdrawn(core.dir) : [];
+  const problems = withdrawnProblems(
+    withdrawn,
+    repos.map(summary => ({ ...summary, newest: newestByRepo.get(summary.repo) })),
+  );
+  if (problems.length > 0) {
+    throw new Error(`withdrawn.json does not match this build:\n  ${problems.join('\n  ')}`);
+  }
+  if (withdrawn.length > 0) {
+    console.log(`[dist] withdrawn: ${withdrawn.map(w => `${w.repo} ${w.tag}`).join(', ')}`);
+  }
+
   const index = {
     schemaVersion: 1,
     generator: 'scripts/build-dist.mjs',
@@ -639,8 +662,13 @@ function main() {
     buildId: buildIdentity(repos),
     repos,
     vendor,
+    withdrawn,
     files: files.sort((a, b) => a.path.localeCompare(b.path, 'en')),
   };
+
+  const withdrawnPath = path.join(options.output, 'withdrawn.json');
+  writeJson(withdrawnPath, { schemaVersion: 1, withdrawn });
+  record(withdrawnPath);
 
   const capabilityPath = path.join(options.output, 'capabilities.json');
   writeJson(capabilityPath, deriveCapabilityIndex({

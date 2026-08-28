@@ -528,6 +528,26 @@ async function main() {
   }
   for (const problem of missingRegistrations(index, { legacy013: legacy013Accepted })) note(problem);
 
+  // A withdrawn version keeps its artifacts on the mirror on purpose, so the
+  // integrity checks above cannot see anything wrong with it. What must not
+  // happen is the shelf recommending it: 0.1.22 was pulled and the catalog
+  // went on printing it as the worked example of installing an older version,
+  // because "older" meant "the previous tag" and nothing recorded that one of
+  // them was withdrawn. Checked against the published page, not the build.
+  const withdrawn = Array.isArray(index.withdrawn) ? index.withdrawn : [];
+  if (withdrawn.length > 0 && !legacy013Accepted) {
+    const versionsMd = (await reader.read('VERSIONS.md')).toString('utf8');
+    const pinSection = versionsMd.split('## 装指定的旧版本')[1]?.split('\n## ')[0] ?? '';
+    for (const entry of withdrawn) {
+      const version = String(entry.tag).replace(/^v/, '');
+      // Two forms, because the two install paths spell a pin differently:
+      // `--branch v0.1.22` for the core, `yos add feishu@0.1.7` for a channel.
+      if (pinSection.includes(`--branch ${entry.tag}`) || pinSection.includes(`@${version}\``)) {
+        note(`the catalog offers withdrawn ${entry.repo} ${entry.tag} as the way to pin an older version`);
+      }
+    }
+  }
+
   let providers = [];
   if (!legacy013Accepted) {
     // Modern shelves must publish a non-empty capability catalog. The pinned

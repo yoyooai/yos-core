@@ -22,6 +22,8 @@
  * resolves `yos add <name>` against — not from a copy typed into this file.
  */
 
+import { withdrawnTagsFor } from './withdrawn.mjs';
+
 /** Latest first. Mirrors compareVersionsDesc in build-dist.mjs. */
 function compareVersionsDesc(a, b) {
   const [aBase, aPre] = String(a).split(/-(.+)/);
@@ -81,6 +83,7 @@ function archiveArtifact(repo, tag) {
 export function catalogRows(index, registry = { components: {} }) {
   const repos = Array.isArray(index?.repos) ? index.repos : [];
   const shipped = new Set((index?.files || []).map(f => f.path));
+  const withdrawnEntries = Array.isArray(index?.withdrawn) ? index.withdrawn : [];
   const rows = [];
   const legacyTags = [];
 
@@ -95,12 +98,12 @@ export function catalogRows(index, registry = { components: {} }) {
       repo: core.repo,
       latestTag: tags[0] || null,
       latestVersion: versionOf(tags[0]) || null,
-      versions: tags.map(tag => ({
+      versions: withMarks(tags, tag => ({
         tag,
         version: versionOf(tag),
         artifact: coreArtifact(core.repo, tag),
         onMirror: shipped.has(coreArtifact(core.repo, tag) || ''),
-      })),
+      }), withdrawnTagsFor(withdrawnEntries, core.repo)),
       // install.sh is republished every build from the newest tag.
       installPaths: ['install.sh'],
     });
@@ -150,18 +153,27 @@ export function catalogRows(index, registry = { components: {} }) {
         repo: repo.repo,
         latestTag: tags[0] || null,
         latestVersion: versionOf(tags[0]) || null,
-        versions: tags.map(tag => ({
+        versions: withMarks(tags, tag => ({
           tag,
           version: versionOf(tag),
           artifact: archiveArtifact(repo.repo, tag),
           onMirror: shipped.has(archiveArtifact(repo.repo, tag)),
-        })),
+        }), withdrawnTagsFor(withdrawnEntries, repo.repo)),
         installPaths: [],
       });
     }
   }
 
   return { rows, legacyTags: legacyTags.sort((a, b) => compareVersionsDesc(versionOf(a), versionOf(b))) };
+}
+
+/**
+ * A withdrawn version stays in the list — it is still on the mirror and someone
+ * may have pinned it — but it is marked, so nothing downstream has to remember
+ * which ones they were.
+ */
+function withMarks(tags, build, withdrawnTags) {
+  return tags.map(tag => ({ ...build(tag), withdrawn: withdrawnTags.has(tag) }));
 }
 
 /** The install command a customer copies, per kind. */
@@ -254,9 +266,13 @@ export function renderCatalogMarkdown(index, { baseUrl, registry, builtAt } = {}
   out.push('## 装指定的旧版本');
   out.push('');
   for (const row of rows) {
-    const older = row.versions.find(v => v.tag !== row.latestTag && v.onMirror) || row.versions[1];
+    // Never work the example with a version we pulled. Falling back to
+    // `versions[1]` regardless was how a withdrawn release ended up printed
+    // here as the thing to install.
+    const usable = row.versions.filter(v => v.tag !== row.latestTag && !v.withdrawn);
+    const older = usable.find(v => v.onMirror) || usable[0];
     const example = pinCommand(row, base, older?.tag);
-    out.push(`- **${row.label}**：${example ? `\`${example}\`（示例：装 \`${older.version}\`）` : '镜像里只有一个版本，没有旧版可钉'}`);
+    out.push(`- **${row.label}**：${example ? `\`${example}\`（示例：装 \`${older.version}\`）` : '镜像里没有可推荐的旧版本可钉'}`);
   }
   out.push('');
   out.push('⚠️ `install-v<tag>.sh` 这类地址是**那个 tag 时点的安装器**，直接跑它仍然会装最新版。');
@@ -275,7 +291,7 @@ export function renderCatalogMarkdown(index, { baseUrl, registry, builtAt } = {}
       out.push('');
     }
     out.push(`- 源码正本（备胎）：\`${row.repo}\``);
-    out.push(`- 镜像留存 ${row.versions.length} 个版本：${row.versions.map(v => `\`${v.version}\``).join(' ')}`);
+    out.push(`- 镜像留存 ${row.versions.length} 个版本：${row.versions.map(v => (v.withdrawn ? `~~\`${v.version}\`~~（已撤回）` : `\`${v.version}\``)).join(' ')}`);
     out.push(`- ${mirrorNote(row)}`);
     out.push('');
   }
@@ -288,6 +304,25 @@ export function renderCatalogMarkdown(index, { baseUrl, registry, builtAt } = {}
     out.push(legacyTags.map(t => `\`${t}\``).join(' '));
     out.push('');
   }
+
+  // Withdrawn is not the same as dropped, and conflating them would be a lie in
+  // both directions: a dropped version is gone from the mirror, a withdrawn one
+  // is still here on purpose so that pinned addresses keep working.
+  const withdrawn = Array.isArray(index?.withdrawn) ? index.withdrawn : [];
+  out.push('## 已撤回的版本');
+  out.push('');
+  if (withdrawn.length === 0) {
+    out.push('没有 —— 发布过的版本都还作数。');
+  } else {
+    out.push('这些版本发布过，后来被我们撤回了。**件还在镜像上**（已经钉了它的地址不会 404），');
+    out.push('但目录不再拿它举例，装它的时候安装器会当场说明。');
+    out.push('');
+    for (const entry of withdrawn) {
+      const replaced = entry.replacedBy ? `，改用 \`${versionOf(entry.replacedBy) || entry.replacedBy}\`` : '';
+      out.push(`- \`${entry.repo}\` \`${versionOf(entry.tag) || entry.tag}\`（${entry.date} 撤回${replaced}）：${entry.reason}`);
+    }
+  }
+  out.push('');
 
   const dropped = (index?.repos || []).flatMap(r => (r.droppedTags || []).map(t => `${r.repo} ${t}`));
   out.push('## 掉出镜像的版本');

@@ -61,6 +61,8 @@ function makeShelf({
   omitPublicationMode = false,
   omitBuildId = false,
   omitCapabilities = false,
+  withdrawn = [],
+  pinExample = null,
 } = {}) {
   const bodies = new Map();
   const put = (p, text) => bodies.set(p, Buffer.from(text, 'utf8'));
@@ -68,7 +70,12 @@ function makeShelf({
   const newestCore = coreTags[0];
   const newestComponent = componentTags[0];
 
-  put('VERSIONS.md', `# YOS 版本目录\n\n${coreTags.map((t) => `| **YOS OS 主体** | \`${versionOf(t)}\` |`).join('\n')}\n`);
+  // The pin section is part of the fixture because the verifier reads it: a
+  // withdrawn version must not be what the page tells people to install.
+  const pinSection = pinExample
+    ? `\n## 装指定的旧版本\n\n- **YOS OS 主体**：\`curl -fsSL https://x/install.sh | bash -s -- --branch ${pinExample}\`\n`
+    : '';
+  put('VERSIONS.md', `# YOS 版本目录\n\n${coreTags.map((t) => `| **YOS OS 主体** | \`${versionOf(t)}\` |`).join('\n')}\n${pinSection}`);
   put('index.html', '<h1>shelf</h1>');
   put('install.sh', '#!/usr/bin/env bash\necho install\n');
 
@@ -126,6 +133,7 @@ function makeShelf({
     schemaVersion: 1,
     ...(omitPublicationMode ? {} : { publicationMode }),
     ...(omitBuildId ? {} : { buildId }),
+    withdrawn,
     repos: [
       {
         repo: CORE,
@@ -868,5 +876,70 @@ describe('public shelf verifier: sample mode is not proof', () => {
     expect(stdout).toContain('not proof of the whole shelf');
     expect(stdout).toContain('Release sign-off requires --full');
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+/**
+ * Withdrawn versions.
+ *
+ * Every integrity check above passes on a shelf that still carries a version we
+ * pulled — and it should, because the artifacts are genuinely there and are
+ * meant to stay there so pinned addresses keep working. What must not survive
+ * is the page telling people to install it. That is what happened after 0.1.22
+ * was rolled back: the catalog kept printing it as the worked example of
+ * installing an older version.
+ *
+ * Checked against the page the public shelf actually serves, not against the
+ * build that produced it — the build already has its own check, and two checks
+ * reading the same source would only ever agree with each other.
+ */
+describe('public shelf verifier: withdrawn versions', () => {
+  const WITHDRAWN = [{
+    repo: CORE,
+    tag: 'v0.1.13',
+    date: '2026-08-28',
+    replacedBy: 'v0.1.14',
+    reason: 'pulled during acceptance',
+  }];
+
+  test('fails when the page offers a withdrawn version as the way to pin', async () => {
+    const { base } = await serve(makeShelf({
+      coreTags: ['v0.1.14', 'v0.1.13'],
+      withdrawn: WITHDRAWN,
+      pinExample: 'v0.1.13',
+    }));
+    const { code, stderr } = await run(base);
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/offers withdrawn .* v0\.1\.13 as the way to pin/);
+  });
+
+  test('passes when the page pins something we still stand behind', async () => {
+    const { base } = await serve(makeShelf({
+      coreTags: ['v0.1.14', 'v0.1.13', 'v0.1.12'],
+      withdrawn: WITHDRAWN,
+      pinExample: 'v0.1.12',
+    }));
+    const { code, stdout } = await run(base);
+    expect(stdout).toContain('[shelf] PASS');
+    expect(code).toBe(0);
+  });
+
+  test('the withdrawn version itself stays on the shelf and stays verifiable', async () => {
+    // Withdrawn is not deleted. If this ever starts failing because the
+    // artifacts went missing, the fix is not to relax this test.
+    const { base } = await serve(makeShelf({
+      coreTags: ['v0.1.14', 'v0.1.13', 'v0.1.12'],
+      withdrawn: WITHDRAWN,
+      pinExample: 'v0.1.12',
+    }));
+    const { code, stdout } = await run(base);
+    expect(code).toBe(0);
+    expect(stdout).toMatch(/hashes matched/);
+  });
+
+  test('a shelf with nothing withdrawn is unaffected', async () => {
+    const { base } = await serve(makeShelf({ coreTags: ['v0.1.14', 'v0.1.13'], pinExample: 'v0.1.13' }));
+    const { code } = await run(base);
+    expect(code).toBe(0);
   });
 });
