@@ -402,7 +402,14 @@
     },
     {
       "path": "skills/activity-monitor/scripts/status-writer.js"
+    },
+    {
+      "path": "test/onboarding-message-truth.test.js",
+      "minimumTests": 12
+    },
+    {
+      "path": "templates/onboarding.md"
     }
   ],
-  "approvedDigest": "82c3c4e421a33c94d24a3b1a55e7fdeb8b4cf6627b91c5d046c07b296f038cc7"
+  "approvedDigest": "da910ed7679df1507d0fef0d85fa84ce6eb029f600d03293bff8234e1e46f015"
 }
