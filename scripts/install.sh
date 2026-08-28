@@ -306,6 +306,56 @@ ensure_tmux() {
   ok "tmux: installed"
 }
 
+# ── Prerequisites: document reading (unzip, python3) ─────────
+# The factory manual tells the agent, in "What You Can Already Do", that it
+# can read Office files with `unzip -p` and text-layer PDFs with `python3` on
+# a stock machine. That sentence is only true if the installer puts those two
+# commands there — a stock ubuntu:24.04 container has neither. Shipping the
+# claim without the tool is how a manual starts lying (see the "not your
+# capability list" rule in the templates).
+#
+# These are NOT required for YOS itself to run, so a machine we cannot install
+# on gets a loud warning and a working install, not an aborted one.
+can_install_packages() {
+  if [ "$OS" = "macos" ]; then
+    command -v brew &>/dev/null
+    return
+  fi
+  if [ "$(id -u)" -ne 0 ] && ! command -v sudo &>/dev/null; then
+    return 1
+  fi
+  command -v apt-get &>/dev/null || command -v dnf &>/dev/null || command -v yum &>/dev/null
+}
+
+ensure_document_tool() {
+  local cmd="$1" pkg="$2" enables="$3"
+  if command -v "$cmd" &>/dev/null; then
+    ok "$cmd: present"
+    return
+  fi
+  if ! can_install_packages; then
+    warn "$cmd not found and no usable package manager. $enables until you install $pkg by hand."
+    return
+  fi
+  if ! install_system_package "$pkg"; then
+    warn "$cmd could not be installed ($pkg). $enables until you install it by hand."
+    return
+  fi
+  if command -v "$cmd" &>/dev/null; then
+    ok "$cmd: installed"
+  else
+    warn "$pkg installed but $cmd is still not on PATH. $enables until that is fixed."
+  fi
+}
+
+ensure_unzip() {
+  ensure_document_tool unzip unzip "Reading Office files (.docx/.xlsx/.pptx) will not work"
+}
+
+ensure_python3() {
+  ensure_document_tool python3 python3 "Reading PDFs with a text layer will not work"
+}
+
 # ── Prerequisite: xz (Linux Node.js archives are .tar.xz) ────
 xz_package_name() {
   if command -v apt-get &>/dev/null; then
@@ -797,6 +847,8 @@ ensure_curl
 ensure_git
 ensure_tmux
 ensure_node
+ensure_unzip
+ensure_python3
 
 echo ""
 install_yos
