@@ -405,11 +405,14 @@
     },
     {
       "path": "test/onboarding-message-truth.test.js",
-      "minimumTests": 14
+      "minimumTests": 17
     },
     {
       "path": "templates/onboarding.md"
+    },
+    {
+      "path": "templates/memory/identity.md"
     }
   ],
-  "approvedDigest": "f77c52cc7637a2d19d8b86a2ff11316c40f1fe6aa10ded2adfe482ce3dcc80ba"
+  "approvedDigest": "636a1a04b72c25c1a3618439f8850a9ed168e439aa5233679f54aaeb0ebb8953"
 }
