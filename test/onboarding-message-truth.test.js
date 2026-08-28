@@ -102,6 +102,11 @@ describe('the customer notice stays readable', () => {
   it('keeps it to something a person will actually read', () => {
     expect(customerNotice(onboarding()).length).toBeLessThan(900);
   });
+
+  it('offers to pick up work instead of asking the user to think of some', () => {
+    // The close is the whole difference between a briefing and a first meeting.
+    expect(customerNotice(onboarding())).toMatch(/I'll take it\.$/);
+  });
 });
 
 describe('the file still knows the details it no longer leads with', () => {
@@ -119,6 +124,13 @@ describe('the file still knows the details it no longer leads with', () => {
     expect(onboarding()).not.toMatch(/check the source and permissions/i);
   });
 
+  it('still carries the impostor disclosure it stopped leading with', () => {
+    // Moving a security fact out of the opening message is a judgement call
+    // about timing. Deleting it is not, and without this the two look the same
+    // in a diff.
+    expect(onboarding()).toMatch(/impostor/i);
+  });
+
   it('hands the agent no canned capability example', () => {
     // Both phrases shipped in Step 2. The first was false on every machine in
     // this repository; the second is unfalsifiable by construction.
@@ -134,16 +146,18 @@ describe('the file still knows the details it no longer leads with', () => {
 
 describe('the first message cannot change without a human signing for it', () => {
   it('pins the approved onboarding bytes', () => {
-    // Repinned 2026-08-28: rewrote the security notice from four warnings aimed
-    // at the customer into three plain-language disclosures, moved the paths
-    // and commands out of it into answer-on-request notes for the agent, and
-    // replaced the Step 2 capability example with an instruction to read the
-    // capability list off the machine.
+    // Repinned 2026-08-28: rewrote the opening from a four-warning compliance
+    // notice into a first meeting — what the assistant can take off the
+    // person's hands, three conveniences instead of three risks, and a close
+    // that offers to pick up work. The paths, the stop command and the
+    // impostor disclosure moved out into answer-on-request notes, and the
+    // Step 2 capability example became an instruction to read the capability
+    // list off the machine.
     //
     // Prose cannot be verified by test. This pin is the substitute: any edit
     // fails here until someone updates the hash on purpose, which is the point
     // at which the new wording gets read by a human.
-    const expected = '01c656d42e425c33f39cba00d1cf4ef48c3f6036a60c60fac779117b1a4f217f';
+    const expected = '71a7b90672e24afbced22028490bd1fc0eea2b40cb57e8061b850e3bce6ef125';
     expect(crypto.createHash('sha256').update(onboarding()).digest('hex')).toBe(expected);
   });
 });

@@ -2,11 +2,11 @@
   "version": 1,
   "baselines": {
     "jest": {
-      "minimumPassed": 554
+      "minimumPassed": 556
     },
     "node": {
       "minimumPassed": 1818
     }
   },
-  "approvedDigest": "a7525dab94d7eb60a7f8857420eb4da3313c97b457c6be6ca6a886334fd4123c"
+  "approvedDigest": "be75001c235e5b987cc5d5901bf6d38e0236f2612266742aa7f762f11d7db5b9"
 }
