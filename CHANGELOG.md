@@ -2,6 +2,48 @@
 
 All notable changes to YOS are recorded here from the point at which the independent YOS product baseline was established.
 
+## [0.1.24] - 2026-08-28
+
+### Added
+
+- A published version can be withdrawn without being deleted. 0.1.22 was pulled
+  off the shelf about 25 minutes after it went up, and the version catalog then
+  kept printing it as the worked example of installing an older version —
+  "older" meant "the previous tag", and nothing in the data recorded that one of
+  them was no longer something we stand behind. Deleting the tag was not
+  available: every pinned address ever published would 404, which is what the
+  build's own droppedTags gate exists to prevent. Hardcoding a skip in the
+  renderer was worse — a version number written into code is the same defect
+  this product spent two releases removing. So it is data: `withdrawn.json`
+  declares repo, tag, date, reason, and optionally the replacement.
+- The declaration is cross-checked against what the build actually mirrored. An
+  entry naming a tag this build does not carry fails the build rather than
+  quietly matching nothing, as does one naming a repo this build does not
+  publish, or a replacement that is not a tag here, or — the one that would hurt
+  most — withdrawing the very version being published as newest, which would
+  make the default install path serve a version we say not to use.
+- The mirror publishes `withdrawn.json` as its own file and carries the same
+  list inside `index.json`, so the installer can read it without parsing the
+  whole manifest and the file is digest-registered like everything else on the
+  shelf.
+- The catalog stops offering a withdrawn version as the way to pin an older one,
+  marks it in the version list, and adds a section saying which version, when,
+  why, and what to use instead. Withdrawn and dropped are kept as separate
+  sections because they are opposites: dropped is gone from the mirror,
+  withdrawn is still there on purpose.
+- `verify-public-shelf.mjs` fails sign-off if the page the public shelf actually
+  serves recommends a withdrawn version. Checked against the served page rather
+  than the build that produced it — two checks reading the same source would
+  only ever agree with each other.
+- `install.sh` warns before installing a withdrawn version, naming the reason
+  and the replacement. Advisory, not a gate: the person asked for that tag by
+  name, and an install that dies because an advisory file was unreachable would
+  be worse than the thing being warned about. It fails open when the mirror does
+  not answer, and the pipeline is guarded — `grep` exits 1 in the ordinary case
+  where nothing is withdrawn, and under `set -euo pipefail` that would have
+  ended the install.
+- `0.1.22` is recorded as withdrawn, with the reason it was pulled.
+
 ## [0.1.23] - 2026-08-28
 
 ### Fixed

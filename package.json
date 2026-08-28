@@ -1,6 +1,6 @@
 {
   "name": "yos",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "type": "module",
   "description": "YOS persistent AI Agent runtime",
   "main": "cli/yos.js",
