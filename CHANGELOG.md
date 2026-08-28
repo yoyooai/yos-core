@@ -2,6 +2,33 @@
 
 All notable changes to YOS are recorded here from the point at which the independent YOS product baseline was established.
 
+## [0.1.23] - 2026-08-28
+
+### Fixed
+
+- A capability health probe now runs from the copy of the skill that can
+  actually run it. A core skill exists twice on a machine: the package copy,
+  which carries the `SKILL.md` the declaration is read from, and the installed
+  copy under the skills directory, which is the one with `node_modules`. The
+  catalog resolved the probe against the first, so any probe with an import
+  could not load its dependency — and `yos doctor` on a healthy factory install
+  went red on two of three capabilities. 0.1.22's own acceptance run caught it
+  before it reached a customer; the release was rolled back off the shelf
+  rather than shipped.
+- A probe that cannot load its driver no longer reports the store it watches as
+  unreadable. Loading the driver and reading the store were the same `try`, so
+  a failure to start was reported as a fault in the thing being probed: a false
+  alarm that also named the wrong cause, which sends whoever reads it to look
+  at the wrong place. The two are separate now, and the driver failure says
+  which directory it was looking from.
+- The tests for this area passed the same directory as both the package copy
+  and the installed copy — the one arrangement no real machine has, and the
+  reason a defect this visible survived a green suite. They now hold the two
+  apart: the probe path must land in the installed copy when the skill is
+  installed, fall back to the package copy when it is not, and refuse a
+  symlinked skill directory. The false alarm itself is reproduced against a
+  healthy database and pinned by its message.
+
 ## [0.1.22] - 2026-08-28
 
 ### Changed
