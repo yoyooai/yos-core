@@ -2,6 +2,81 @@
 
 All notable changes to YOS are recorded here from the point at which the independent YOS product baseline was established.
 
+## [0.1.22] - 2026-08-28
+
+### Changed
+
+- The factory system prompt no longer tells the agent what it can do. 0.1.20
+  replaced a false capability claim with a true capability list; 0.1.21 then had
+  to ship an installer fix because that list named `unzip` and `python3` while
+  `install.sh` put neither on the machine. Two releases, same shape of defect,
+  48 hours apart — a capability list is a fact that expires. "What You Can
+  Already Do" is gone; in its place "Meeting a Request" describes the procedure
+  (look for an existing capability with `yos capability list` / `yos search`,
+  and if nothing fits go find a solution — reviewed first, confirmed with the
+  user before anything is installed). Abilities are discovered by attempting
+  the work, which is the only source that cannot go stale.
+- The first message a customer ever receives is now the wording written and
+  approved by the product owner, shipped word for word. Four earlier drafts
+  failed for the same reason: they described this machine. The approved text
+  opens by telling the person *not* to study the feature list, describes what
+  it can take off their hands in their terms, and spends its last third asking
+  about them while explicitly excusing them from being organised about it. The
+  Chinese is the original rather than a translation, so it ships verbatim under
+  its own byte pin, with the author's own typography; the English rendering
+  carries the same message for every other language.
+- The customer-facing opening no longer promises to announce payments before
+  making them. Nothing in this product can make a payment, and while the
+  sentence was a promise to ask first rather than a claim of ability, a reader
+  reasonably concludes payment is on the menu.
+- Roughly 70 lines of memory bookkeeping moved out of both system prompts into
+  `templates/memory-system.md`, read on demand through the same mechanism as
+  `onboarding.md`. It was a permanent per-session cost on every customer
+  machine for rules consulted only at write time. Codex prompt 300 -> 239
+  lines, Claude 289 -> 229.
+- "Don't answer live facts from memory" appeared three times in three wordings.
+  Merged into one.
+
+### Added
+
+- The capability table is now true about the machine reading it. Four core
+  skills shipped with no declaration at all, so the list under-reported what
+  the machine had while naming them under "Undeclared capabilities" — which
+  reads as a fault rather than an omission. Declarations may now carry
+  `runtimes:`, because two capabilities drive Claude Code and nothing else
+  while customers get Codex by default; an unscoped declaration there would
+  have been false on essentially every customer machine. Absent means every
+  runtime, an unknown name is rejected rather than ignored, and the filter
+  fails open — hiding a capability the machine really has makes a working
+  product look broken.
+- Health probes on the three capabilities that can be installed and still be
+  broken (message store, task store, monitor status). The `health` field and
+  the doctor's runner for it already existed and not one shipped declaration
+  used them — an alarm wired to nothing. Every probe is read-only, does no
+  network, has no side effects, and treats a missing store as a pass.
+- Guards, in both directions: the prompt may not assert a missing capability
+  (the 0.1.19 bug) and may not enumerate capabilities either (the 0.1.20 fix
+  that became 0.1.21's bug); every `yos <command>` named in customer-facing
+  prose must exist in the CLI's own command table; the customer-facing text may
+  contain no filesystem paths and no shell commands; every rendering of the
+  opening must ask the person something; the approved Chinese is byte-pinned;
+  and a prompt may not point at an instruction file that does not ship. The
+  installer's `unzip`/`python3` guarantee survives, re-anchored on `install.sh`
+  directly — deriving it from a section that no longer exists would have let it
+  pass vacuously.
+- `templates/memory/identity.md` ships a `## My Name` slot. The opening does
+  not ask the customer for a name, per the owner's call, but a name they offer
+  on their own is written down so the next session still knows it.
+
+### Removed
+
+- Two onboarding guards, removed rather than loosened because the approved
+  wording disproved them: "exactly one question per message" (the approved text
+  asks four in a row, all asking the same thing in different words, which reads
+  as somebody taking an interest rather than as a form) and "must end on the
+  question" (it ends on a reassurance, which is better). Counting question
+  marks was never a measure of what it was claimed to measure.
+
 ## [0.1.21] - 2026-08-28
 
 ### Fixed
