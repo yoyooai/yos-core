@@ -22,6 +22,7 @@
  * resolves `yos add <name>` against — not from a copy typed into this file.
  */
 
+import { ESCAPABLE, renderMarkdownPage } from './markdown-page.mjs';
 import { withdrawnTagsFor } from './withdrawn.mjs';
 
 /** Latest first. Mirrors compareVersionsDesc in build-dist.mjs. */
@@ -56,6 +57,18 @@ function trimSlash(url) {
  */
 function cell(text) {
   return String(text).replace(/\|/g, '\\|');
+}
+
+/**
+ * Free text that came from data, not from this file: a withdrawal reason, a
+ * component description from registry.json. It is prose, so it must reach the
+ * page as prose — a reason mentioning `node_modules` opened an italic run the
+ * first time the page was rendered for real, and one containing `**` would have
+ * bolded whatever followed. Escaping at the interpolation is the only place that
+ * covers every reader of the markdown (the page, VERSIONS.md, anything later).
+ */
+function escapeMarkdownText(text) {
+  return String(text).replace(new RegExp(`[${ESCAPABLE.replace(/[\\\][]/g, '\\$&')}]`, 'g'), '\\$&');
 }
 
 /**
@@ -148,7 +161,11 @@ export function catalogRows(index, registry = { components: {} }) {
         // a component by the same name; falling back to the id keeps an
         // unregistered component visible instead of unnamed.
         label: meta ? (meta.displayName || name) : `${name}（未登记）`,
-        description: meta?.description || '镜像里有它的版本，但内置登记册没有登记 —— `yos add ' + name + '` 认不出这个名字',
+        // Plain text, no markdown: every label and description on a row is data
+        // (mostly registry.json), and the renderer escapes data so a description
+        // cannot become markup. A backtick typed here would reach the page as a
+        // literal backtick, which is how this line first shipped.
+        description: meta?.description || `镜像里有它的版本，但内置登记册没有登记 —— yos add ${name} 认不出这个名字`,
         registered: Boolean(meta),
         repo: repo.repo,
         latestTag: tags[0] || null,
@@ -226,7 +243,7 @@ export function missingCatalogAddresses(rows, exists) {
 function mirrorNote(row) {
   const missing = row.versions.filter(v => !v.onMirror).map(v => v.tag);
   if (missing.length === 0) return '每个版本都能离线装回';
-  return `⚠️ 这些版本镜像里没有件，装不回：${missing.join('、')}`;
+  return `⚠️ 这些版本镜像里没有件，装不回：${missing.map(escapeMarkdownText).join('、')}`;
 }
 
 /**
@@ -259,7 +276,7 @@ export function renderCatalogMarkdown(index, { baseUrl, registry, builtAt } = {}
   out.push('|---|---|---|');
   for (const row of rows) {
     const version = row.latestVersion ? `\`${row.latestVersion}\`` : '❓无版本 tag';
-    out.push(`| **${cell(row.label)}** | ${version} | \`${cell(installCommand(row, base))}\` |`);
+    out.push(`| **${cell(escapeMarkdownText(row.label))}** | ${version} | \`${cell(installCommand(row, base))}\` |`);
   }
   out.push('');
 
@@ -272,7 +289,7 @@ export function renderCatalogMarkdown(index, { baseUrl, registry, builtAt } = {}
     const usable = row.versions.filter(v => v.tag !== row.latestTag && !v.withdrawn);
     const older = usable.find(v => v.onMirror) || usable[0];
     const example = pinCommand(row, base, older?.tag);
-    out.push(`- **${row.label}**：${example ? `\`${example}\`（示例：装 \`${older.version}\`）` : '镜像里没有可推荐的旧版本可钉'}`);
+    out.push(`- **${escapeMarkdownText(row.label)}**：${example ? `\`${example}\`（示例：装 \`${older.version}\`）` : '镜像里没有可推荐的旧版本可钉'}`);
   }
   out.push('');
   out.push('⚠️ `install-v<tag>.sh` 这类地址是**那个 tag 时点的安装器**，直接跑它仍然会装最新版。');
@@ -282,9 +299,9 @@ export function renderCatalogMarkdown(index, { baseUrl, registry, builtAt } = {}
   out.push('## 镜像里有哪些版本');
   out.push('');
   for (const row of rows) {
-    out.push(`### ${row.label}`);
+    out.push(`### ${escapeMarkdownText(row.label)}`);
     out.push('');
-    out.push(`${row.description}`);
+    out.push(`${escapeMarkdownText(row.description)}`);
     out.push('');
     if (!row.registered && row.kind === 'component') {
       out.push('⚠️ **内置登记册没有登记这个组件** —— 按名字装不出来。');
@@ -319,7 +336,7 @@ export function renderCatalogMarkdown(index, { baseUrl, registry, builtAt } = {}
     out.push('');
     for (const entry of withdrawn) {
       const replaced = entry.replacedBy ? `，改用 \`${versionOf(entry.replacedBy) || entry.replacedBy}\`` : '';
-      out.push(`- \`${entry.repo}\` \`${versionOf(entry.tag) || entry.tag}\`（${entry.date} 撤回${replaced}）：${entry.reason}`);
+      out.push(`- \`${entry.repo}\` \`${versionOf(entry.tag) || entry.tag}\`（${escapeMarkdownText(entry.date)} 撤回${replaced}）：${escapeMarkdownText(entry.reason)}`);
     }
   }
   out.push('');
@@ -340,31 +357,11 @@ export function renderCatalogMarkdown(index, { baseUrl, registry, builtAt } = {}
   return `${out.join('\n')}\n`;
 }
 
-/** Same content as the markdown, for a browser. Self-contained, no assets. */
+/**
+ * Same content as the markdown, laid out for a browser. Still one
+ * self-contained file with nothing to fetch — see markdown-page.mjs for why the
+ * renderer is a small subset that throws rather than degrades.
+ */
 export function renderCatalogHtml(index, options = {}) {
-  const markdown = renderCatalogMarkdown(index, options);
-  const escape = s => String(s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  // Deliberately not a markdown engine: the page must render with no
-  // dependency reachable from a machine that cannot reach the internet.
-  const body = escape(markdown);
-  return `<!doctype html>
-<html lang="zh">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>YOS 版本目录</title>
-<style>
-  :root { color-scheme: light dark; }
-  body { margin: 0 auto; padding: 2rem 1.25rem 4rem; max-width: 52rem;
-         font: 15px/1.65 -apple-system, "Segoe UI", "Noto Sans SC", sans-serif; }
-  pre { white-space: pre-wrap; word-break: break-word; margin: 0;
-        font: 13px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; }
-</style>
-</head>
-<body>
-<pre>${body}</pre>
-</body>
-</html>
-`;
+  return renderMarkdownPage(renderCatalogMarkdown(index, options), { title: 'YOS 版本目录' });
 }

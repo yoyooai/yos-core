@@ -33,6 +33,7 @@ import {
   installCommand,
   missingCatalogAddresses,
   pinCommand,
+  renderCatalogHtml,
   renderCatalogMarkdown,
 } from '../scripts/lib/dist-catalog.mjs';
 
@@ -434,5 +435,90 @@ describe('withdrawn versions', () => {
     const markdown = renderCatalogMarkdown(fakeIndex(), { baseUrl: BASE, registry: REGISTRY });
     expect(markdown).toContain('## 已撤回的版本');
     expect(markdown).toContain('没有 —— 发布过的版本都还作数。');
+  });
+});
+
+/**
+ * The catalog reaches a browser as a laid-out page, not as its own source.
+ *
+ * For most of this file's life index.html was the markdown escaped into one
+ * <pre>: right content, unreadable presentation. Rendering it put a parser
+ * between the data and the reader, so these lock the two things that parser must
+ * never do — pass raw syntax through to the shelf, and read data as markup.
+ */
+describe('version catalog (rendered for a browser)', () => {
+  const page = () => renderCatalogHtml(withdrawnCatalogIndex(), { baseUrl: BASE, registry: REGISTRY });
+  const withdrawnCatalogIndex = () => ({
+    ...fakeIndex(),
+    withdrawn: [{
+      repo: 'yoyooai/yos-core',
+      tag: 'v0.1.9',
+      date: '2026-08-28',
+      replacedBy: 'v0.2.0',
+      reason: 'probes resolved against the package copy, which ships no node_modules',
+    }],
+  });
+
+  test('the page is markup, not a wall of markdown source', () => {
+    const html = page();
+    expect(html).not.toContain('<pre>');
+    expect(html).toContain('<h1>YOS 版本目录</h1>');
+    expect(html).toContain('<table>');
+    expect(html).toContain('<th>组件</th>');
+    expect(html).toContain('<title>YOS 版本目录</title>');
+  });
+
+  test('no leftover markdown syntax reaches the body', () => {
+    const body = page().split('<body>')[1];
+    expect(body).not.toMatch(/\*\*/);
+    expect(body).not.toMatch(/~~/);
+    expect(body).not.toMatch(/`/);
+    expect(body).not.toMatch(/\|---/);
+    expect(body).not.toMatch(/^#{1,6} /m);
+    expect(body).not.toMatch(/^- /m);
+    expect(body).not.toMatch(/\\/);
+  });
+
+  test('the install command survives the table with its pipe intact', () => {
+    // The row-shredding defect, now checked on the rendered side too: the pipe
+    // must be inside one cell, not a cell border.
+    expect(page()).toContain(`<code>curl -fsSL ${BASE}/install.sh | bash</code>`);
+  });
+
+  /**
+   * Measured the first time the renderer ran against the real mirror: the live
+   * withdrawal reason says "ships no node_modules", and that underscore opened
+   * an italic run. Free text is data — it must render as written.
+   */
+  test('markdown characters in free-text data render literally', () => {
+    expect(page()).toContain('ships no node_modules');
+
+    const loud = {
+      ...withdrawnCatalogIndex(),
+      withdrawn: [{
+        repo: 'yoyooai/yos-core',
+        tag: 'v0.1.9',
+        date: '2026-08-28',
+        reason: 'a **bold** claim, a | pipe, an _underscore_ and a [link](x)',
+      }],
+    };
+    const html = renderCatalogHtml(loud, { baseUrl: BASE, registry: REGISTRY });
+    expect(html).toContain('a **bold** claim, a | pipe, an _underscore_ and a [link](x)');
+    expect(html).not.toContain('<strong>bold</strong>');
+  });
+
+  test('a component description carrying markdown cannot break the build', () => {
+    const registry = {
+      components: {
+        feishu: {
+          repo: 'yoyooai/yos-components',
+          tagPrefix: 'feishu',
+          displayName: '飞书渠道',
+          description: 'DM *and* group messaging_with underscores | and a pipe',
+        },
+      },
+    };
+    const html = renderCatalogHtml(fakeIndex(), { baseUrl: BASE, registry });
+    expect(html).toContain('DM *and* group messaging_with underscores | and a pipe');
   });
 });
