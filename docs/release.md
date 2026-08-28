@@ -101,6 +101,42 @@ git ls-remote origin 'refs/tags/v<x.y.z>*'
 拿它去和验收报告比会永远对不上，然后有人就会去"修"一个不存在的问题。
 渠道标签同理（`feishu-v<x.y.z>` / `weixin-v<x.y.z>`）。
 
+#### 🔴 2b · 建 GitHub Release（**推标签不等于发布**）
+
+**这一步以前不在这份手册里，0.1.25 就漏掉了**：标签推上去了、镜像也认了、
+公网签字 1319/1319 全绿，但 GitHub 上**根本没有那条 release**。
+`install.sh` 取不到货架时会 fallback 去问 `api.github.com/.../releases/latest`，
+那里当时还答 `v0.1.24` —— **比目录页标称的旧一版**。
+
+在**发布机**上跑。`GITHUB_TOKEN` 从 `.env` 进环境变量，**不要写进命令行**
+（命令行会进 shell 历史和进程表）。下面是 JS 片段不是 shell 块，
+所以用 `node -e '<片段>' <x.y.z>` 的形式喂给它：
+
+```js
+const body = require("fs").readFileSync("CHANGELOG.md", "utf8")
+  .split(/^## \[/m).find((s) => s.startsWith(process.argv[1]));
+fetch("https://api.github.com/repos/yoyooai/yos-core/releases", {
+  method: "POST",
+  headers: { Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+             Accept: "application/vnd.github+json" },
+  body: JSON.stringify({ tag_name: `v${process.argv[1]}`, name: `v${process.argv[1]}`,
+                         target_commitish: "main", make_latest: "true",
+                         body: "## [" + body.trimEnd() }),
+}).then((r) => r.json()).then((d) => console.log(d.html_url ?? d));
+```
+
+- **正文用本版的 CHANGELOG 那一节**，与 `0.1.23`／`0.1.24` 同体例。
+- **`make_latest: "true"` 不能省** —— 兜底路径读的就是 latest 这一个指针。
+- 漏了也不用慌：**第 7 步的签字会报红**（那道检查就是为这件事加的）。
+  但**红在第 7 步意味着货已经切上去了**，所以别指望它，这里就做掉。
+- **上面这段不是照着想象写的，是真跑出来对过的**：把这段片段原样跑一遍
+  （只把 `fetch` 换成假的、不发请求），它生成的正文与**线上那条 `v0.1.25`
+  release 的正文 sha256 逐字相同**（`2eedef60…`）；`tag_name`／`name`／
+  `target_commitish`／`make_latest` 四个字段也与补建时真正发出去的那次一致。
+  补建后实测两条解析路径——货架 `latest.json` 与 GitHub `releases/latest`——
+  都答 `v0.1.25`。**别在这份文件里留没验过的命令**（0.1.24 的教训：
+  代码注释里留一句没验过的话，和说明书说假话是同一个病）。
+
 ### 第 3 步 · 构建（**必须带 vendor**）
 
 > 🔴 **2026-08-27 起，这一步不在货架机上做。** 香港货架机 08-26 被清空重装之后
@@ -532,6 +568,22 @@ node scripts/verify-public-shelf.mjs \
 | **`--expect-index-sha256`** | 清单本身被换掉（见下） |
 | **核心版本 = 镜像标签集里最新的那个**，且与 `releases/latest.json` 一致 | 货架上有比本轮更新的版本却当成本轮通过 |
 | 组件版本 = 能力目录里的 provider 版本，且其标签**确实被镜像、且是该条线最新** | 目录与货架各说一套 |
+| **GitHub `releases/latest` 与本货架同一个 tag** | **标签推了但 GitHub Release 没建** —— 上面每一项读的都是货架，货架自己跟自己一致证明不了这件事 |
+
+> 🔴 **最后一行是 0.1.25 用真事换来的。** 那一版标签推了、镜像认了、公网签字
+> **1319/1319 全绿**，但 **GitHub Release 对象根本没建**。后果不在货架上，在
+> **取不到货架的那台机器**：`install.sh` 先问货架 `releases/latest.json`，
+> **问不到就 fallback 去 `api.github.com/.../releases/latest`** —— 那里当时还停在
+> `v0.1.24`，**比目录页标称的旧一版**。全套货架侧检查都是绿的，是人眼发现的
+> （2026-08-28）。所以现在签字会**额外向 GitHub 发一次请求**：
+>
+> - **两边 tag 不一致** ⇒ 报红，且消息里直接写"取不到货架的机器会装到哪个版本"。
+> - **GitHub 上没有 release** ⇒ 报红（与"不一致"分开报，因为修法不同：
+>   一个是漏了发布动作，一个是货架与兜底路径跑偏了）。
+> - **问不到 GitHub（网络/限流）** ⇒ **也报红**。签不了字就是没签字，
+>   不是默认通过。要接受就显式带 `--skip-github-latest`（它在人读输出和
+>   `--json` 摘要里都会留痕，事后能查出这一次是"跳过"不是"核过"）。
+> - `--local`（备份自审）**不问 GitHub** —— 恢复出来的备份本来就是旧货架。
 
 > **后三项是 2026-08-11 复核补上的，补之前那两条是真的假绿**（都实测过）：
 > ①把一个包从 `index.json` 里删掉、文件照样在架 ⇒ 旧版脚本 **PASS**；
@@ -623,8 +675,18 @@ node scripts/verify-public-shelf.mjs --signoff --full \
   $LEGACY_MODE \
   $BUILD_MODE \
   --expect-index-sha256 "$OLDSHA" \
-  --expect-versions "$EXPECTED_VERSIONS"
+  --expect-versions "$EXPECTED_VERSIONS" \
+  --expect-github-latest "v<刚回退掉的那个新版本>"
 ```
+
+> 🔴 **回退时 `--expect-github-latest` 基本一定要带。** 回退把货架退回旧版本，
+> 但 **GitHub 上的 latest 还是那个新版本** —— 两边本来就该不一致。
+> 这不是把检查关掉，是**把"我知道它们不一致、不一致的是这个 tag"写进命令行**，
+> 而这条命令行是要抄进台账的。**写错 tag 照样报红**（它不是万能开关）。
+>
+> ⚠️ 但先想清楚：**兜底路径现在会把客户送到那个被你回退掉的版本上去。**
+> 如果这次回退是因为新版本有问题（0.1.22 就是），那么光退货架不够 ——
+> 还要把 GitHub 的 latest 也挪回去，否则连不上货架的机器照样装到坏版本。
 
 **货架机整台没了的情况**：`$CRED` 跟着机器一起没了 —— 这正是第 5 步要把它
 一起推到站外 `${RUN}meta/` 的原因。按第 5 步「恢复验证」那段把

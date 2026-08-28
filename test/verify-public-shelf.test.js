@@ -169,6 +169,26 @@ function makeShelf({
 }
 
 let server = null;
+let githubServer = null;
+
+/**
+ * A stand-in for api.github.com, because the check under test is a check about
+ * the network: install.sh falls back to GitHub when the mirror does not answer,
+ * so a fake that is merely a stubbed function would not exercise the request
+ * the installer actually makes. `tag` null serves a release-less repository
+ * (404), which is the shape the real 0.1.25 gap had.
+ */
+async function serveGithub({ tag = null, status = 200, body = null } = {}) {
+  const hits = [];
+  githubServer = http.createServer((req, res) => {
+    hits.push(req.url);
+    if (status !== 200) { res.writeHead(status); res.end('nope'); return; }
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(body ?? JSON.stringify({ tag_name: tag, name: tag }));
+  });
+  await new Promise((resolve) => githubServer.listen(0, '127.0.0.1', resolve));
+  return { base: `http://127.0.0.1:${githubServer.address().port}`, hits };
+}
 
 /**
  * @param {object} shelf
@@ -240,6 +260,7 @@ function restoreDir(shelf, { remove = null } = {}) {
 
 afterEach(async () => {
   if (server) { await new Promise((resolve) => server.close(resolve)); server = null; }
+  if (githubServer) { await new Promise((resolve) => githubServer.close(resolve)); githubServer = null; }
 });
 
 describe('public shelf verifier', () => {
@@ -567,11 +588,13 @@ describe('public shelf verifier: sign-off mode', () => {
   test('a fully credentialled sign-off passes', async () => {
     const shelf = makeShelf();
     const { base } = await serve(shelf);
+    const github = await serveGithub({ tag: 'v0.1.14' });
     const { code, stdout, stderr } = await run(base, [
       '--signoff',
       '--expect-build-id', shelf.buildId,
       '--expect-index-sha256', shelf.indexSha256,
       '--expect-versions', 'yos=0.1.14,feishu=0.1.4',
+      '--github-api-base', github.base,
     ]);
     expect(stdout).toContain('[shelf] PASS');
     expect(code).toBe(0);
@@ -614,11 +637,13 @@ describe('public shelf verifier: sign-off mode', () => {
   test('sign-off passes when every provider is named', async () => {
     const shelf = makeShelf({ providers: 2 });
     const { base } = await serve(shelf);
+    const github = await serveGithub({ tag: 'v0.1.14' });
     const { code, stdout } = await run(base, [
       '--signoff',
       '--expect-build-id', shelf.buildId,
       '--expect-index-sha256', shelf.indexSha256,
       '--expect-versions', 'yos=0.1.14,feishu=0.1.4,c1=0.1.4',
+      '--github-api-base', github.base,
     ]);
     expect(stdout).toContain('[shelf] PASS');
     expect(code).toBe(0);
@@ -641,6 +666,206 @@ describe('public shelf verifier: sign-off mode', () => {
  * therefore has to recognise that exact shape and pin its complete index bytes;
  * treating any missing field as production would weaken every future release.
  */
+/**
+ * The shelf agreeing with itself is not the whole story. `install.sh` resolves
+ * the newest release from the mirror first and falls back to
+ * `api.github.com/.../releases/latest`, so every check that reads the shelf can
+ * be green while the machine that cannot reach the shelf installs something
+ * else. That is not hypothetical: 0.1.25 was tagged, mirrored and signed off
+ * with no GitHub release object created at all, and the fallback answered
+ * 0.1.24 — older than the catalog advertised — until a person noticed by eye
+ * (2026-08-28). These tests pin both shapes of that failure red.
+ */
+describe('public shelf verifier: the installer fallback', () => {
+  const credentials = (shelf) => [
+    '--signoff',
+    '--expect-build-id', shelf.buildId,
+    '--expect-index-sha256', shelf.indexSha256,
+    '--expect-versions', 'yos=0.1.14,feishu=0.1.4',
+  ];
+
+  test('sign-off fails when the tag is pushed but no release was ever created', async () => {
+    const shelf = makeShelf();
+    const { base } = await serve(shelf);
+    // 404 is what api.github.com answers for a repository with no releases —
+    // the exact shape of the 0.1.25 gap.
+    const github = await serveGithub({ status: 404 });
+    const { code, stderr } = await run(base, [...credentials(shelf), '--github-api-base', github.base]);
+
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/sign-off could not confirm the installer's fallback/);
+    expect(stderr).toMatch(/--skip-github-latest/);
+  });
+
+  test('sign-off fails when GitHub names an older release than the shelf serves', async () => {
+    const shelf = makeShelf();
+    const { base } = await serve(shelf);
+    const github = await serveGithub({ tag: 'v0.1.13' });
+    const { code, stderr } = await run(base, [...credentials(shelf), '--github-api-base', github.base]);
+
+    expect(code).toBe(1);
+    // The message has to name the consequence, not just the mismatch: what
+    // matters is which version a customer ends up with.
+    expect(stderr).toMatch(/GitHub's latest release is v0\.1\.13, expected v0\.1\.14/);
+    expect(stderr).toMatch(/cannot reach the mirror installs v0\.1\.13/);
+  });
+
+  test('sign-off fails when the release body names no tag at all', async () => {
+    const shelf = makeShelf();
+    const { base } = await serve(shelf);
+    const github = await serveGithub({ body: JSON.stringify({ name: 'untagged' }) });
+    const { code, stderr } = await run(base, [...credentials(shelf), '--github-api-base', github.base]);
+
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/GitHub publishes no latest release, expected v0\.1\.14/);
+  });
+
+  test('an unreachable GitHub is a failed sign-off, not a quiet pass', async () => {
+    const shelf = makeShelf();
+    const { base } = await serve(shelf);
+    // A port with nothing listening: the request cannot be made at all.
+    const { code, stdout, stderr } = await run(base, [
+      ...credentials(shelf), '--github-api-base', 'http://127.0.0.1:1', '--retries', '0',
+    ]);
+
+    expect(code).toBe(1);
+    expect(stdout).not.toContain('[shelf] PASS');
+    expect(stderr).toMatch(/sign-off could not confirm the installer's fallback/);
+  });
+
+  test('sign-off passes and reports the tag when the two agree', async () => {
+    const shelf = makeShelf();
+    const { base } = await serve(shelf);
+    const github = await serveGithub({ tag: 'v0.1.14' });
+    const { code, stdout } = await run(base, [...credentials(shelf), '--github-api-base', github.base]);
+
+    expect(stdout).toContain('[shelf] GitHub latest release v0.1.14');
+    expect(stdout).toContain('[shelf] PASS');
+    expect(code).toBe(0);
+    expect(github.hits).toEqual([`/repos/${CORE}/releases/latest`]);
+  });
+
+  /**
+   * A rollback legitimately leaves the two disagreeing: the mirror goes back to
+   * the older version while GitHub still points at the newer one. That is a
+   * decision, so it is stated on the command line and ends up in the ledger
+   * entry that quotes the run — not switched off.
+   */
+  test('--expect-github-latest states a deliberate disagreement', async () => {
+    const shelf = makeShelf();
+    const { base } = await serve(shelf);
+    const github = await serveGithub({ tag: 'v0.1.15' });
+    const { code, stdout } = await run(base, [
+      ...credentials(shelf), '--github-api-base', github.base, '--expect-github-latest', 'v0.1.15',
+    ]);
+
+    expect(stdout).toContain('[shelf] PASS');
+    expect(code).toBe(0);
+  });
+
+  test('--expect-github-latest is not a blanket bypass', async () => {
+    const shelf = makeShelf();
+    const { base } = await serve(shelf);
+    const github = await serveGithub({ tag: 'v0.1.13' });
+    const { code, stderr } = await run(base, [
+      ...credentials(shelf), '--github-api-base', github.base, '--expect-github-latest', 'v0.1.15',
+    ]);
+
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/GitHub's latest release is v0\.1\.13, expected v0\.1\.15/);
+  });
+
+  test('stating a tag and skipping the check at once is refused', async () => {
+    const shelf = makeShelf();
+    const { base } = await serve(shelf);
+    const { code, stderr } = await run(base, [
+      ...credentials(shelf), '--expect-github-latest', 'v0.1.15', '--skip-github-latest',
+    ]);
+
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/contradict each other/);
+  });
+
+  test('--skip-github-latest passes but says so out loud', async () => {
+    const shelf = makeShelf();
+    const { base } = await serve(shelf);
+    const { code, stdout } = await run(base, [...credentials(shelf), '--skip-github-latest']);
+
+    expect(code).toBe(0);
+    expect(stdout).toContain('[shelf] PASS');
+    expect(stdout).toMatch(/SKIPPED: GitHub's latest release was not checked/);
+  });
+
+  test('the skip is recorded in the machine-readable summary too', async () => {
+    const shelf = makeShelf();
+    const { base } = await serve(shelf);
+    const { code, stdout } = await new Promise((resolve) => {
+      execFile(process.execPath, [
+        SCRIPT, '--base-url', base, '--full', '--json',
+        ...credentials(shelf), '--skip-github-latest',
+      ], { timeout: 30_000 }, (error, out, err) => resolve({ code: error ? error.code ?? 1 : 0, stdout: out, stderr: err }));
+    });
+
+    expect(code).toBe(0);
+    const summary = JSON.parse(stdout);
+    // A run that skipped must not be quotable as one that checked.
+    expect(summary.githubLatestSkipped).toBe(true);
+    expect(summary.githubLatestChecked).toBe(false);
+    expect(summary.pass).toBe(true);
+  });
+
+  test('a passing sign-off records the tag it confirmed', async () => {
+    const shelf = makeShelf();
+    const { base } = await serve(shelf);
+    const github = await serveGithub({ tag: 'v0.1.14' });
+    const { stdout } = await new Promise((resolve) => {
+      execFile(process.execPath, [
+        SCRIPT, '--base-url', base, '--full', '--json',
+        ...credentials(shelf), '--github-api-base', github.base,
+      ], { timeout: 30_000 }, (error, out, err) => resolve({ code: error ? error.code ?? 1 : 0, stdout: out, stderr: err }));
+    });
+
+    const summary = JSON.parse(stdout);
+    expect(summary.githubLatestChecked).toBe(true);
+    expect(summary.githubLatestSkipped).toBe(false);
+    expect(summary.githubLatestTag).toBe('v0.1.14');
+  });
+
+  /**
+   * The check belongs to sign-off. An everyday "is the shelf still intact" run
+   * must not start depending on GitHub being reachable, or the quick check
+   * becomes a chore and chores get skipped.
+   */
+  test('an everyday check does not ask GitHub', async () => {
+    const shelf = makeShelf();
+    const { base } = await serve(shelf);
+    const github = await serveGithub({ tag: 'v0.1.13' });
+    const { code, stdout } = await run(base, [
+      '--expect-versions', 'yos=0.1.14', '--github-api-base', github.base,
+    ]);
+
+    expect(stdout).toContain('[shelf] PASS');
+    expect(code).toBe(0);
+    expect(github.hits).toEqual([]);
+  });
+
+  /**
+   * A restored off-site backup is an old shelf on purpose — auditing it says
+   * nothing about what GitHub should currently call latest.
+   */
+  test('a local backup audit does not ask GitHub', async () => {
+    const shelf = makeShelf();
+    const github = await serveGithub({ tag: 'v0.1.13' });
+    const { code, stdout } = await runLocal(restoreDir(shelf), [
+      ...credentials(shelf), '--github-api-base', github.base,
+    ]);
+
+    expect(stdout).toContain('[shelf] PASS');
+    expect(code).toBe(0);
+    expect(github.hits).toEqual([]);
+  });
+});
+
 describe('public shelf verifier: 0.1.13 rollback compatibility', () => {
   test('the legacy shelf still fails closed without the explicit compatibility flag', async () => {
     const { base } = await serve(makeShelf({

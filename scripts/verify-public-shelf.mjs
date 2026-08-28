@@ -26,6 +26,14 @@
  *      the mirrored tag set — the same `newestReleaseTag()` the capability index
  *      uses — and from `releases/latest.json`, which is what the installer
  *      actually resolves.
+ *   3. **The mirror being the only way in.** `install.sh` resolves the newest
+ *      release from the mirror *first* and falls back to
+ *      `api.github.com/repos/<repo>/releases/latest`. So the shelf agreeing with
+ *      itself proves nothing about the machine that cannot reach the shelf.
+ *      0.1.25 shipped with its tag pushed but no GitHub release object created,
+ *      and for the hours until it was noticed by eye that fallback answered
+ *      0.1.24 — a version older than the catalog advertised — while every
+ *      shelf-side check was green (2026-08-28). Sign-off now asks GitHub too.
  *
  * Usage:
  *   node scripts/verify-public-shelf.mjs [--base-url https://dist.yoyooai.com]
@@ -34,6 +42,8 @@
  *     [--expect-versions yos=0.1.14,feishu=0.1.4,weixin=0.1.3]
  *     [--signoff] [--stall-ms 30000] [--max-file-seconds 600] [--retries 2] [--json]
  *     [--allow-legacy-0.1.13]
+ *     [--github-api-base https://api.github.com]
+ *     [--expect-github-latest v0.1.25 | --skip-github-latest]
  *
  *   --signoff is for the two moments the answer gets quoted as a verdict —
  *   releasing and rolling back. Modern shelves require --full and all three
@@ -45,7 +55,17 @@
  *
  *   --local <dir> reads the same index.json from a directory instead of a URL,
  *   which is how a restored off-site backup gets checked: an archive that
- *   extracts is not the same as an archive whose bytes are all intact.
+ *   extracts is not the same as an archive whose bytes are all intact. The
+ *   GitHub cross-check is skipped for --local, because a restored backup is an
+ *   old shelf on purpose and has no claim on what GitHub calls latest.
+ *
+ *   --expect-github-latest states the tag GitHub should call latest when that is
+ *   deliberately not the tag this shelf serves — a rollback leaves the mirror on
+ *   the older version while GitHub still points at the newer one, and that is a
+ *   decision to record on the command line, not a check to switch off.
+ *   --skip-github-latest is the escape when GitHub cannot be reached at all; it
+ *   is loud in both output modes, because a sign-off that quietly skipped a
+ *   check is the thing this file exists to prevent.
  *
  * --sample N checks the always-list (index.json, capabilities.json, VERSIONS.md,
  * index.html, install.sh) plus every package/archive plus N of the remaining
@@ -82,6 +102,7 @@ function parseArgs(argv) {
     baseUrl: 'https://dist.yoyooai.com', local: null, full: false, sample: 40, concurrency: 8,
     json: false, expectBuildId: null, expectIndexSha256: null, expectVersions: null,
     signoff: false, allowLegacy013: false,
+    githubApiBase: 'https://api.github.com', expectGithubLatest: null, skipGithubLatest: false,
     stallMs: 30_000, maxFileSeconds: 600, retries: 2,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -100,6 +121,9 @@ function parseArgs(argv) {
     else if (a === '--expect-index-sha256') o.expectIndexSha256 = val().trim().toLowerCase();
     else if (a === '--expect-versions') o.expectVersions = val();
     else if (a === '--signoff') o.signoff = true;
+    else if (a === '--github-api-base') o.githubApiBase = val().replace(/\/+$/, '');
+    else if (a === '--expect-github-latest') o.expectGithubLatest = val().trim();
+    else if (a === '--skip-github-latest') o.skipGithubLatest = true;
     else if (a === '--allow-legacy-0.1.13') {
       o.allowLegacy013 = true;
     }
@@ -132,6 +156,15 @@ function parseArgs(argv) {
     if (missing.length > 0) {
       throw new Error(`--signoff requires ${missing.join(', ')} — a sign-off with a missing credential is not a sign-off`);
     }
+  }
+  // Two ways to say "GitHub will not match the shelf" is one way too many: the
+  // pair would let a stated expectation sit next to the switch that ignores it,
+  // and the reader of the command line could not tell which one won.
+  if (o.expectGithubLatest && o.skipGithubLatest) {
+    throw new Error('--expect-github-latest and --skip-github-latest contradict each other — state the tag or skip the check, not both');
+  }
+  if (o.expectGithubLatest && !/^[A-Za-z0-9][A-Za-z0-9_.+-]*$/.test(o.expectGithubLatest)) {
+    throw new Error('--expect-github-latest must be a tag name, e.g. v0.1.25');
   }
   if (o.allowLegacy013 && !o.full) {
     throw new Error('--allow-legacy-0.1.13 requires --full');
@@ -426,6 +459,69 @@ export function versionCoverageGaps(wanted, providers) {
   return gaps;
 }
 
+/**
+ * What GitHub answers the machine that could not reach the mirror.
+ *
+ * `install.sh` resolves the newest release from `releases/latest.json` on the
+ * shelf and falls back to `api.github.com/.../releases/latest`. Every other
+ * check in this file reads the shelf, so all of them stayed green while those
+ * two answers disagreed: 0.1.25 was tagged and mirrored but no GitHub release
+ * object was ever created, leaving the fallback pointing at 0.1.24 — older than
+ * the catalog advertised — until a person happened to look (2026-08-28).
+ *
+ * A tag with no release is reported differently from a release naming another
+ * tag, because the two are fixed differently: one is a forgotten publish step,
+ * the other is a shelf and a fallback that have drifted apart.
+ *
+ * @param {string} expectedTag the tag GitHub should be calling latest
+ * @param {string|null} githubTag what it actually calls latest, null if none
+ * @returns {string[]} problems, empty when the two agree
+ */
+export function githubLatestProblems(expectedTag, githubTag) {
+  if (!githubTag) {
+    return [
+      `GitHub publishes no latest release, expected ${expectedTag} — a tag that is pushed without a release is invisible to the installer's fallback`,
+    ];
+  }
+  if (githubTag !== expectedTag) {
+    return [
+      `GitHub's latest release is ${githubTag}, expected ${expectedTag} — a machine that cannot reach the mirror installs ${githubTag}`,
+    ];
+  }
+  return [];
+}
+
+/**
+ * Ask GitHub, over the network, from outside — the same request the installer
+ * makes. Reaching it is part of the check: a sign-off that could not ask is a
+ * sign-off that did not check, so an unreachable API is a problem and
+ * --skip-github-latest is the deliberate way to accept that.
+ */
+async function checkGithubLatest(options, { index, note, onRetry }) {
+  const newest = newestVersionOnShelf(index);
+  if (newest.error) { note(newest.error); return null; }
+
+  const expectedTag = options.expectGithubLatest ?? newest.tag;
+  const url = `${options.githubApiBase}/repos/${newest.repo}/releases/latest`;
+  let githubTag = null;
+  try {
+    const buf = await fetchBuffer(url, {
+      stallMs: options.stallMs, maxFileSeconds: options.maxFileSeconds, retries: options.retries, onRetry,
+    });
+    const body = JSON.parse(buf.toString('utf8'));
+    // A repository with no releases at all answers 404, which fetchBuffer
+    // throws; a malformed or release-less body is normalised to "no tag" so it
+    // reports as the same forgotten-publish problem rather than as a parse
+    // error the reader has to interpret.
+    githubTag = typeof body?.tag_name === 'string' && body.tag_name ? body.tag_name : null;
+  } catch (error) {
+    note(`${url}: ${error.message} — sign-off could not confirm the installer's fallback; pass --skip-github-latest to accept that deliberately`);
+    return null;
+  }
+  for (const problem of githubLatestProblems(expectedTag, githubTag)) note(problem);
+  return { expectedTag, githubTag };
+}
+
 async function checkVersions(options, { index, providers, reader, note }) {
   const wanted = parseExpectedVersions(options.expectVersions);
 
@@ -574,6 +670,20 @@ async function main() {
 
   if (options.expectVersions) await checkVersions(options, { index, providers, reader, note });
 
+  // Asked before the bulk download for the same reason as the coverage gaps
+  // above: it is two small requests, and a disagreement here is not worth 1300
+  // hashes to find out about. Skipped for --local, where the directory under
+  // audit is an old shelf by design.
+  let githubLatest = null;
+  if (options.signoff && !options.local) {
+    if (options.skipGithubLatest) {
+      const line = "[shelf] SKIPPED: GitHub's latest release was not checked (--skip-github-latest)";
+      if (!options.json) console.log(line);
+    } else {
+      githubLatest = await checkGithubLatest(options, { index, note, onRetry });
+    }
+  }
+
   const files = Array.isArray(index.files) ? index.files : [];
   if (files.length === 0) note('index.json registers no files');
   const picked = pickEntries(files, options);
@@ -620,6 +730,11 @@ async function main() {
     providers: providers.length,
     mode: options.full ? 'full' : 'sample',
     signoff: options.signoff,
+    // Recorded either way: the ledger entry that quotes this run has to show
+    // whether the fallback path was confirmed or waved through.
+    githubLatestChecked: githubLatest !== null,
+    githubLatestSkipped: options.signoff && !options.local && options.skipGithubLatest,
+    githubLatestTag: githubLatest?.githubTag ?? null,
     retries: retried,
     problems,
     pass: problems.length === 0,
@@ -630,6 +745,7 @@ async function main() {
     console.log(`[shelf] hashes matched ${matched}/${entries.length}`);
     console.log(`[shelf] providers ${providers.length}, buildId ${index.buildId}`);
     console.log(`[shelf] index.json sha256 ${indexDigest}`);
+    if (githubLatest) console.log(`[shelf] GitHub latest release ${githubLatest.githubTag}`);
     if (retried > 0) console.log(`[shelf] ${retried} transport retry/retries`);
     console.log(problems.length === 0 ? '[shelf] PASS' : `[shelf] FAILED with ${problems.length} problem(s)`);
     if (!options.full && problems.length === 0) {
