@@ -85,6 +85,7 @@ export function instructionPaths(runtime, { yosDir = YOS_DIR } = {}) {
     markerPath: path.join(instructionsDir, 'meta.json'),
     assemblerPath: path.join(instructionsDir, 'assembler.mjs'),
     onboardingPath: path.join(instructionsDir, 'onboarding.md'),
+    memorySystemPath: path.join(instructionsDir, 'memory-system.md'),
     systemPath: path.join(instructionsDir, `${runtime}-system.md`),
     userPath: path.join(root, 'YOS.md'),
     outputPath: path.join(root, runtime === 'claude' ? 'CLAUDE.md' : 'AGENTS.md'),
@@ -198,6 +199,11 @@ export function deployInstructionAssets({
   const onboardingSource = path.join(templatesDir, 'onboarding.md');
   if (!fs.existsSync(onboardingSource)) throw new Error(`Onboarding instruction template not found: ${onboardingSource}`);
   atomicWrite(paths.onboardingPath, fs.readFileSync(onboardingSource));
+  // The system prompt points at this file instead of carrying the memory rules
+  // inline; if it is missing the pointer dangles, so treat it like onboarding.
+  const memorySystemSource = path.join(templatesDir, 'memory-system.md');
+  if (!fs.existsSync(memorySystemSource)) throw new Error(`Memory system instruction template not found: ${memorySystemSource}`);
+  atomicWrite(paths.memorySystemPath, fs.readFileSync(memorySystemSource));
   atomicWrite(paths.assemblerPath, fs.readFileSync(assemblerSource));
   return paths.instructionsDir;
 }
@@ -385,6 +391,7 @@ export function activateFreshSplitInstructions({
     { name: 'claude-system', path: claude.systemPath, content: systems.claude },
     { name: 'codex-system', path: instructionPaths('codex', { yosDir }).systemPath, content: systems.codex },
     { name: 'onboarding', path: claude.onboardingPath, content: fs.readFileSync(path.join(templatesDir, 'onboarding.md'), 'utf8') },
+    { name: 'memory-system', path: claude.memorySystemPath, content: fs.readFileSync(path.join(templatesDir, 'memory-system.md'), 'utf8') },
     { name: 'assembler', path: claude.assemblerPath, content: fs.readFileSync(assemblerSource) },
   ];
   if (!fs.existsSync(claude.userPath)) {
@@ -454,6 +461,7 @@ export function refreshSplitInstructions({
     }
   }
   entries.push({ name: 'onboarding', path: claude.onboardingPath, content: fs.readFileSync(path.join(templatesDir, 'onboarding.md'), 'utf8') });
+  entries.push({ name: 'memory-system', path: claude.memorySystemPath, content: fs.readFileSync(path.join(templatesDir, 'memory-system.md'), 'utf8') });
   entries.push({ name: 'assembler', path: claude.assemblerPath, content: fs.readFileSync(assemblerSource) });
   marker.refreshedAt = now.toISOString();
   marker.userSha256 = crypto.createHash('sha256').update(userContent).digest('hex');

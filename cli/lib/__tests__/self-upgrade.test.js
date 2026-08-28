@@ -35,6 +35,7 @@ function writeSplitPackage(pkgRoot) {
   fs.writeFileSync(path.join(templatesDir, 'claude-system.md'), '# Claude system\n');
   fs.writeFileSync(path.join(templatesDir, 'codex-system.md'), '# Codex system\n');
   fs.writeFileSync(path.join(templatesDir, 'onboarding.md'), '# Onboarding\n');
+  fs.writeFileSync(path.join(templatesDir, 'memory-system.md'), '# Memory system\n');
   fs.writeFileSync(path.join(templatesDir, 'YOS.md'), '# YOS user instructions\n');
   fs.copyFileSync(path.resolve('cli/lib/runtime/assembler.mjs'), path.join(runtimeDir, 'assembler.mjs'));
 }

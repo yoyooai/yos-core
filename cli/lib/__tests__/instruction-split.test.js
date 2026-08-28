@@ -93,15 +93,18 @@ describe('split instruction assembler', () => {
   it('pins the system templates to the approved content-redraft bytes', () => {
     // Reintroduction guard: any template edit must consciously update these
     // pins alongside the reviewed content change (issue #722 content redraft).
-    // Repinned 2026-08-27: added the "What You Can Already Do" capability
-    // declaration to both templates and removed the false "No built-in
-    // WebSearch/WebFetch" line from the Codex one. Content assertions for that
-    // change live in test/native-capability-declaration.test.js — these pins
-    // only catch unreviewed drift, they do not describe the content.
+    // Repinned 2026-08-28: dropped the "What You Can Already Do" capability
+    // enumeration in favour of "Meeting a Request" (look for an existing
+    // capability, then go find one), merged the duplicated date rule into the
+    // live-fact rule, and moved the memory bookkeeping detail out to
+    // templates/memory-system.md so it is read on demand instead of on every
+    // session. Content assertions for that change live in
+    // test/native-capability-declaration.test.js — these pins only catch
+    // unreviewed drift, they do not describe the content.
     const managedHeader = '> **YOS-managed system instructions.** This file is replaced during upgrades. Put all custom instructions in `~/yos/YOS.md`.\n\n';
     const expected = {
-      claude: 'e4fbd7a0741be1efb06fdf5f6af41e7b4ef5f17b88930b441945cc463492062d',
-      codex: '2ade604fb9431bf57c84238801b60d22adb7cf4339aba603a0940877f8e93d7b',
+      claude: '7b8fa9a0f3f171ca4c071862b42a7cb6f76d1a7bc829b75dd2ae2ac3a5ef3178',
+      codex: '73d68a82775a600d21a9e4ec62636603c7755d420e66fdc923e400ed279ec133',
     };
     for (const runtime of ['claude', 'codex']) {
       const content = fs.readFileSync(path.join(TEMPLATES_DIR, `${runtime}-system.md`), 'utf8');
