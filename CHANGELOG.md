@@ -2,6 +2,47 @@
 
 All notable changes to YOS are recorded here from the point at which the independent YOS product baseline was established.
 
+## [0.1.25] - 2026-08-28
+
+### Changed
+
+- The version catalog reaches a browser as a laid-out page instead of its own
+  markdown source. It shipped as the markdown escaped into a single `<pre>`,
+  which was a deliberate trade — the page must open on a machine with no route
+  to the internet, so it may not fetch a markdown library, a stylesheet or a
+  font. The trade was mispriced: "no external dependency" does not require "a
+  wall of pipes and asterisks". Rendering now happens at build time in the same
+  process that writes the mirror, so the shipped page is still one
+  self-contained file with zero fetches, still generated from `index.json`, and
+  therefore still unable to disagree with the goods. Headings, tables, lists,
+  code, emphasis and the strike-through on a withdrawn version are markup;
+  install commands are selectable code; wide tables scroll in their own box so
+  the page never does; both colour schemes are styled because the reader's theme
+  is not ours to choose.
+- The renderer is a deliberately small markdown subset (headings, paragraphs
+  `- ` lists, pipe tables, bold, italic, strike, code) and anything outside it
+  **stops the build** instead of degrading. A renderer that passes through what
+  it does not understand is the same failure mode as a hand-kept table: it keeps
+  looking confident while quietly going wrong. Adding a construct to the catalog
+  source without teaching the renderer is now a red build with the offending
+  line quoted, not raw syntax on the shelf.
+
+### Fixed
+
+- Free text that comes from data is escaped where it enters the markdown, so it
+  can no longer be read as markup. Found by rendering the real mirror on the
+  first try: the live withdrawal reason for 0.1.22 says "ships no
+  node_modules", and that underscore opened an italic run. A reason containing
+  `**` would have bolded whatever followed, and one containing `|` inside a
+  table cell is the row-shredding defect the existing pipe escaping was added to
+  prevent. Reasons, dates, component labels and descriptions all go through it;
+  code spans do not, because their content is already literal.
+- The description shown for a component the built-in registry does not name no
+  longer carries markdown of its own. Every label and description on a catalog
+  row is data, and data is escaped — so the backticks written into that one
+  sentence reached the page as literal backticks. The markup lives in the
+  renderer now, and the data layer is plain text.
+
 ## [0.1.24] - 2026-08-28
 
 ### Added
