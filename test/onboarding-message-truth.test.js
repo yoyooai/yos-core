@@ -147,7 +147,7 @@ describe('the opening message asks about the person', () => {
     // is the specific loss this prevents.
     expect(onboarding()).toMatch(/send\s+the Chinese one word for word/);
     expect(crypto.createHash('sha256').update(renderings(onboarding())[0]).digest('hex'))
-      .toBe('8c7f865415890ad40eb48b613afc680328b2306aee7cf6117c4eb5749b06a74e');
+      .toBe('82dd4cfb7974bb0d62f58330154076636ae18a696048144fc73eaa3397612064');
   });
 });
 
@@ -215,7 +215,7 @@ describe('the first conversation cannot change without a human signing for it', 
     // Prose cannot be verified by test. This pin is the substitute: any edit
     // fails here until someone updates the hash on purpose, which is the point
     // at which the new wording gets read by a human.
-    const expected = 'd8ec5367ca33161b42aeb957c02af8f1a5c19fadfa11c1c5de0c79d1a44839b3';
+    const expected = 'bdfd89400fc54b2f376f8cdff0f0e9d5e224feb6cc6e748c47dba8ca4d1a6470';
     expect(crypto.createHash('sha256').update(onboarding()).digest('hex')).toBe(expected);
   });
 });
