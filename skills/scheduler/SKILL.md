@@ -7,6 +7,7 @@ capabilities:
     operations: [create, update, query, pause, resume, cancel]
     keywords: [task, schedule, cron, reminder]
     stability: stable
+    health: scripts/health.js
 ---
 
 # Task Scheduler (C5)

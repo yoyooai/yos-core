@@ -1,6 +1,15 @@
 ---
 name: upgrade-claude
 description: Upgrade Claude Code to the latest version with graceful shutdown and auto-restart. Use when the user asks to upgrade or when a new Claude Code version is available.
+capabilities:
+  - id: runtime.lifecycle
+    title: Runtime restart and upgrade
+    operations: [upgrade]
+    keywords: [upgrade, runtime, claude]
+    stability: stable
+    # Claude Code only — see restart-claude for why this is scoped rather than
+    # left undeclared.
+    runtimes: [claude]
 ---
 
 # Upgrade Claude Code Skill

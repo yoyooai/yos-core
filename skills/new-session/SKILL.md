@@ -1,6 +1,12 @@
 ---
 name: new-session
 description: Start a new session when context is high. Claude uses /clear, Codex uses /exit. Use when context is high or when a fresh session is needed.
+capabilities:
+  - id: runtime.session
+    title: Session context inspection and rotation
+    operations: [rotate]
+    keywords: [context, session, handoff, restart]
+    stability: stable
 ---
 
 # New Session Skill

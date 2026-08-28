@@ -1,6 +1,16 @@
 ---
 name: restart-claude
 description: Use when the user asks to restart Claude Code, or after changing settings/hooks/keybindings.
+capabilities:
+  - id: runtime.lifecycle
+    title: Runtime restart and upgrade
+    operations: [restart]
+    keywords: [restart, runtime, claude]
+    stability: stable
+    # Claude Code only. Declared with a scope rather than left undeclared so
+    # that a Codex machine — the default install — neither advertises it nor
+    # reports it as an unexplained gap.
+    runtimes: [claude]
 ---
 
 # Restart Claude Code Skill

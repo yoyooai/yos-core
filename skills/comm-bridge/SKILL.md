@@ -13,6 +13,7 @@ capabilities:
     operations: [send, receive]
     keywords: [message, communication, c4]
     stability: stable
+    health: scripts/health.js
 ---
 
 # Communication Bridge (C4)

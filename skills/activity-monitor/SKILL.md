@@ -8,6 +8,7 @@ capabilities:
     operations: [monitor, recover]
     keywords: [runtime, status, recovery]
     stability: stable
+    health: scripts/health.js
 ---
 
 # Activity Monitor Skill

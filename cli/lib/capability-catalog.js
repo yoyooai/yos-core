@@ -105,11 +105,27 @@ export function discoverLocalCapabilityProviders({
   };
 }
 
+/**
+ * A declaration scoped to other runtimes describes something this machine
+ * cannot do, so the catalog leaves it out rather than advertising it.
+ *
+ * Fail open on purpose: when the active runtime is unknown, nothing is
+ * filtered. Hiding a capability the machine really has is worse than listing
+ * one it does not — the first makes a working product look broken, which is
+ * the failure this whole area exists to prevent.
+ */
+function appliesToRuntime(declaration, activeRuntime) {
+  if (!declaration.runtimes) return true;
+  if (!activeRuntime) return true;
+  return declaration.runtimes.includes(activeRuntime);
+}
+
 export function buildLocalCapabilityCatalog({
   coreProviders = [],
   componentProviders = [],
   coreVersion,
   nodeVersion = process.version,
+  activeRuntime = null,
   readFile = fs.readFileSync,
   lstat = fs.lstatSync,
 } = {}) {
@@ -126,6 +142,7 @@ export function buildLocalCapabilityCatalog({
   const healthChecks = [];
   for (const provider of providers) {
     for (const declaration of provider.capabilities) {
+      if (!appliesToRuntime(declaration, activeRuntime)) continue;
       if (!byCapability.has(declaration.id)) {
         byCapability.set(declaration.id, {
           id: declaration.id,

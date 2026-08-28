@@ -9,8 +9,17 @@ const CAPABILITY_FIELDS = new Set([
   'keywords',
   'stability',
   'health',
+  'runtimes',
 ]);
 const STABILITIES = new Set(['stable', 'beta', 'experimental']);
+
+/**
+ * Runtimes a declaration may scope itself to. Kept as a literal rather than
+ * imported from ../runtime/index.js, which would drag both adapter classes and
+ * their dependencies into what is otherwise a pure validator. The two are
+ * pinned together by a test instead, so they cannot drift apart quietly.
+ */
+export const KNOWN_RUNTIMES = Object.freeze(['claude', 'codex']);
 const IDENTIFIER = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
 
 function invalid(message) {
@@ -109,6 +118,17 @@ export function validateCapabilityDeclarations(frontmatter, {
     };
     if (entry.health !== undefined) {
       capability.health = validateHealthEntry(entry.health, skillDir, lstat);
+    }
+    if (entry.runtimes !== undefined) {
+      // Absent means "every runtime". Present means the declaration is only
+      // true on the runtimes listed, so the catalog can leave it out on a
+      // machine where it could never work. An unknown name is rejected rather
+      // than ignored: a typo would silently scope a capability to nothing.
+      const runtimes = requireStringArray(entry.runtimes, 'runtimes', { nonEmpty: true });
+      for (const runtime of runtimes) {
+        if (!KNOWN_RUNTIMES.includes(runtime)) throw invalid(`unknown runtime: ${runtime}`);
+      }
+      capability.runtimes = runtimes;
     }
     return capability;
   });

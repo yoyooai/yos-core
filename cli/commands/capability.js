@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { SKILLS_DIR } from '../lib/config.js';
+import { SKILLS_DIR, getYosConfig } from '../lib/config.js';
 import { loadComponents } from '../lib/components.js';
 import { loadLocalRegistry, loadShelfCapabilityCatalog } from '../lib/registry.js';
 import {
@@ -31,6 +31,10 @@ export async function loadLocalCapabilityCatalog() {
     ...providers,
     coreVersion: readCoreVersion(),
     nodeVersion: process.version,
+    // Runtime-scoped declarations are dropped for other runtimes. Customers
+    // install Codex by default, so without this the list carries entries that
+    // can never run on the machine reading it.
+    activeRuntime: getYosConfig().runtime ?? null,
   });
   return catalog;
 }

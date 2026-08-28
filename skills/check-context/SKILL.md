@@ -2,6 +2,12 @@
 name: check-context
 description: Accurately check current context window and token usage. Use when the user asks about context usage, token consumption, or when monitoring context levels.
 user-invocable: false
+capabilities:
+  - id: runtime.session
+    title: Session context inspection and rotation
+    operations: [inspect]
+    keywords: [context, session, token, usage]
+    stability: stable
 ---
 
 # Check Context Skill
