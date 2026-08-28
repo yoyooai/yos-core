@@ -2,6 +2,39 @@
 
 All notable changes to YOS are recorded here from the point at which the independent YOS product baseline was established.
 
+## [0.1.21] - 2026-08-28
+
+### Fixed
+
+- The installer now puts on the machine what the manual says the agent already
+  has. 0.1.20 added a capability section naming `unzip -p` for Office files and
+  `python3` for text-layer PDFs; `install.sh` guaranteed neither. Measured on a
+  stock `ubuntu:24.04` image: both absent, so on a minimal system the manual
+  promised a capability the machine did not have. This is the same defect as
+  the false "No built-in WebSearch/WebFetch" line that section was written to
+  delete, pointing the other way — a sentence with nothing verifying it.
+  Scope, stated honestly: on the Tencent Cloud Ubuntu machines actually
+  shipped to customers both commands were already present, so no customer is
+  known to have hit this. It was found by installing 0.1.20 into an empty
+  container during final release checks.
+- `ensure_unzip` and `ensure_python3` join the prerequisite list and run
+  through the same `install_system_package` path as curl, git and tmux. They
+  support a capability rather than YOS itself, so a machine with no usable
+  package manager gets a loud warning and a working install instead of an
+  aborted one — hard-failing here would turn a documentation gap into a broken
+  install, which is worse than the bug.
+
+### Added
+
+- A guard that keeps the manual and the installer from drifting apart again.
+  `test/native-capability-declaration.test.js` reads the prerequisite list out
+  of `install.sh` rather than restating it, and requires every external command
+  named in either template's capability section to appear there. Naming
+  `pdftotext` tomorrow without a matching `ensure_*` call goes red instead of
+  shipping as a sentence the customer's machine cannot honour. Both reversals
+  were run: deleting the two call sites fails 3 tests, adding an unguaranteed
+  `pdftotext` to the Codex template fails 1. Jest floor 508 → 513.
+
 ## [0.1.20] - 2026-08-28
 
 ### Fixed
