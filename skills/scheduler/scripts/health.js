@@ -23,8 +23,23 @@ const DB_PATH = path.join(YOS_DIR, 'scheduler', 'scheduler.db');
 
 if (!fs.existsSync(DB_PATH)) process.exit(0);
 
+// The driver is loaded on its own, because failing to load it says nothing
+// about the store. Folding it into the same try reported a perfectly readable
+// database as unreadable — a false alarm that also named the wrong cause, and
+// so sent whoever read it to look at the wrong thing.
+let Database;
 try {
-  const { default: Database } = await import('better-sqlite3');
+  ({ default: Database } = await import('better-sqlite3'));
+} catch (error) {
+  process.stderr.write(
+    `sqlite driver unavailable to this probe (${import.meta.dirname}): `
+    + `${error?.message ?? error}\n`
+    + `the store at ${DB_PATH} was not examined\n`,
+  );
+  process.exit(1);
+}
+
+try {
   const db = new Database(DB_PATH, { readonly: true, fileMustExist: true });
   try {
     db.prepare('select count(*) as n from sqlite_master').get();

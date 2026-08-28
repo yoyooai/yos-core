@@ -43,6 +43,10 @@ function normalizeProvider(provider, source, options) {
     declarationStatus: declaration.declarationStatus,
     compatibility: { node, core },
     dir: provider.dir,
+    // Where the probe actually runs. For a core skill the declaration is read
+    // from the package copy, which ships no node_modules — a probe that
+    // imports anything cannot run there. See discoverLocalCapabilityProviders.
+    runDir: provider.runDir ?? provider.dir,
     capabilities: declaration.capabilities,
   };
 }
@@ -59,6 +63,28 @@ export function discoverLocalCapabilityProviders({
   registry = {},
   readdir = fs.readdirSync,
 } = {}) {
+  // Core skills exist twice on a machine: the package copy, which carries the
+  // SKILL.md the declaration is read from, and the installed copy under the
+  // skills directory, which is the one with node_modules. A health probe that
+  // imports a dependency can only run in the second. Resolving it against the
+  // first made every probe with an import fail to load and report the thing it
+  // was probing as broken — an alarm that fires on a healthy machine and names
+  // the wrong cause.
+  const installedCoreDirs = new Map();
+  if (installedSkillsDir) {
+    let installed = [];
+    try {
+      installed = readdir(installedSkillsDir, { withFileTypes: true });
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+    for (const entry of installed) {
+      // Same rule as below: a symlinked skill directory is not trusted to run.
+      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+      installedCoreDirs.set(entry.name, path.join(installedSkillsDir, entry.name));
+    }
+  }
+
   const coreProviders = [];
   if (coreSkillsDir) {
     let entries = [];
@@ -75,7 +101,10 @@ export function discoverLocalCapabilityProviders({
         error.code = 'capability_provider_invalid';
         throw error;
       }
-      coreProviders.push({ id: entry.name, dir });
+      // Fall back to the package copy when the skill is not installed: a
+      // dependency-free probe still runs there, and one that needs a
+      // dependency reports that plainly rather than silently passing.
+      coreProviders.push({ id: entry.name, dir, runDir: installedCoreDirs.get(entry.name) ?? dir });
     }
   }
 
@@ -172,7 +201,7 @@ export function buildLocalCapabilityCatalog({
         healthChecks.push({
           providerId: provider.id,
           capabilityId: declaration.id,
-          path: path.resolve(provider.dir, declaration.health),
+          path: path.resolve(provider.runDir, declaration.health),
         });
       }
     }
@@ -195,7 +224,9 @@ export function buildLocalCapabilityCatalog({
     schemaVersion: 1,
     generatedAt: null,
     capabilities,
-    providers: providers.map(({ capabilities: ignored, dir: ignoredDir, ...provider }) => provider),
+    providers: providers.map(
+      ({ capabilities: ignored, dir: ignoredDir, runDir: ignoredRunDir, ...provider }) => provider,
+    ),
     healthChecks,
   };
 }

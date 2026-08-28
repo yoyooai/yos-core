@@ -259,3 +259,97 @@ describe('capability health probes report the truth about this machine', () => {
     if (/better-sqlite3/.test(source)) expect(source).toMatch(/readonly:\s*true/);
   });
 });
+
+/**
+ * 0.1.22 shipped these probes and `yos doctor` went red on a healthy factory
+ * machine: two of three reported the store they watch as unreadable when the
+ * store was fine. A core skill exists twice — the package copy that carries
+ * SKILL.md, and the installed copy under `~/yos/.claude/skills` that carries
+ * node_modules — and the catalog resolved the probe against the first, where
+ * `import 'better-sqlite3'` cannot resolve. The probe then reported its own
+ * failure to start as a fault in the thing it was probing.
+ *
+ * The tests above did not catch it because they pass the same directory as
+ * both copies, which is the one arrangement no real machine has. So these
+ * hold the two apart on purpose.
+ */
+describe('a probe runs from the copy of the skill that can actually run it', () => {
+  const tmpDirs = [];
+  afterAll(() => {
+    while (tmpDirs.length > 0) fs.rmSync(tmpDirs.pop(), { recursive: true, force: true });
+  });
+
+  const tmpDir = prefix => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+    tmpDirs.push(dir);
+    return dir;
+  };
+
+  const healthPathWithInstalledDir = (installedSkillsDir, capabilityId = 'task.schedule') => {
+    const providers = discoverLocalCapabilityProviders({
+      coreSkillsDir: CORE_SKILLS,
+      installedSkillsDir,
+      components: {},
+      registry: {},
+    });
+    const catalog = buildLocalCapabilityCatalog({
+      ...providers,
+      coreVersion: JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version,
+      activeRuntime: 'codex',
+    });
+    return catalog.healthChecks.find(check => check.capabilityId === capabilityId)?.path;
+  };
+
+  it('points at the installed copy when the skill is installed', () => {
+    const installed = tmpDir('yos-installed-');
+    fs.mkdirSync(path.join(installed, 'scheduler'), { recursive: true });
+
+    expect(healthPathWithInstalledDir(installed))
+      .toBe(path.join(installed, 'scheduler', 'scripts', 'health.js'));
+  });
+
+  it('falls back to the package copy when the skill is not installed', () => {
+    // A dependency-free probe still runs there, and one that needs a
+    // dependency now says so instead of blaming the store.
+    expect(healthPathWithInstalledDir(tmpDir('yos-empty-')))
+      .toBe(path.join(CORE_SKILLS, 'scheduler', 'scripts', 'health.js'));
+  });
+
+  it('will not run a probe out of a symlinked skill directory', () => {
+    const installed = tmpDir('yos-symlinked-');
+    fs.symlinkSync(path.join(CORE_SKILLS, 'scheduler'), path.join(installed, 'scheduler'), 'dir');
+
+    expect(healthPathWithInstalledDir(installed))
+      .toBe(path.join(CORE_SKILLS, 'scheduler', 'scripts', 'health.js'));
+  });
+
+  it('says the driver is missing rather than calling a healthy store unreadable', () => {
+    // The false alarm itself, reproduced: run the probe from a directory with
+    // no node_modules, against a database that is perfectly fine.
+    const runDir = tmpDir('yos-nodeps-');
+    fs.copyFileSync(
+      path.join(CORE_SKILLS, 'scheduler', 'scripts', 'health.js'),
+      path.join(runDir, 'health.js'),
+    );
+    expect(() => createRequire(path.join(runDir, 'health.js')).resolve('better-sqlite3'))
+      .toThrow(); // precondition: the driver really is out of reach from here
+
+    const yosDir = tmpDir('yos-data-');
+    const target = path.join(yosDir, 'scheduler', 'scheduler.db');
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    const require = createRequire(path.join(ROOT, 'skills', 'scheduler', 'package.json'));
+    const Database = require('better-sqlite3');
+    const db = new Database(target);
+    db.exec('create table probe_fixture (a)');
+    db.close();
+
+    const result = spawnSync(process.execPath, [path.join(runDir, 'health.js')], {
+      encoding: 'utf8', env: { ...process.env, YOS_DIR: yosDir }, timeout: 30000,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/driver unavailable/);
+    // The claim that would have been false: this store reads fine.
+    expect(result.stderr).not.toMatch(/store unreadable/);
+  });
+});

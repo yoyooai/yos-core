@@ -135,7 +135,9 @@ describe('local capability catalog', () => {
       },
       registry: { feishu: { official: true } },
     });
-    assert.deepEqual(discovered.coreProviders, [{ id: 'scheduler', dir: coreDir }]);
+    // runDir is where a health probe is executed from. This core skill has no
+    // installed copy here, so it falls back to the package copy.
+    assert.deepEqual(discovered.coreProviders, [{ id: 'scheduler', dir: coreDir, runDir: coreDir }]);
     assert.deepEqual(discovered.componentProviders, [{
       id: 'feishu', dir: componentDir, provenance: 'official', installMode: 'declarative',
     }]);
