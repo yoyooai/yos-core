@@ -11,6 +11,12 @@ import {
 const TEST_FILE = /(^|\/)(?:__tests__\/.*|tests?\/.*|[^/]+\.(?:test|spec))\.(?:[cm]?js|jsx|ts|tsx)$/;
 const CONFIG_FILE = /(^|\/)(?:jest\.config\.[^/]+|package\.json|run-[^/]*tests?\.[^/]+)$/;
 const DISABLED_CALL = /\b(describe|it|test)\s*\.\s*(skip|todo|only)\s*\(|\b(xdescribe|xit|xtest)\s*\(/g;
+// A test that mints a temp directory straight off os.tmpdir() has no teardown
+// behind it. Nesting one inside a directory the test already owns is fine — the
+// parent's cleanup takes it — so only the os.tmpdir() form is refused. See
+// verifyTempDirPolicy.
+const RAW_TEMP_DIR = /\bmkdtemp(?:Sync)?\s*\([^;]*?os\.tmpdir\(\)/g;
+const TEMP_DIR_HELPER = 'test/helpers/temp-dir.js';
 const JEST_IGNORE_PROPERTY = /\btestPathIgnorePatterns\s*:/g;
 const JEST_IGNORE_JSON_PROPERTY = /"testPathIgnorePatterns"\s*:/g;
 const JEST_IGNORE_CLI = /--testPathIgnorePatterns\b/g;
@@ -325,6 +331,61 @@ function readJson(filePath, label) {
   }
 }
 
+/**
+ * Test files must take temp directories from test/helpers/temp-dir.js.
+ *
+ * Calling `fs.mkdtempSync` in a test file is how the suite came to leave 19599
+ * directories and 6.2G in /tmp by 2026-08-29: the call is one line, the teardown
+ * is three, and 119 files across both suites reached for the call without the
+ * teardown — 267 sites in all, not the eight a first pass over the Jest suite
+ * alone reported. The helper reverses the
+ * default — its directories are registered and removed by the global afterAll in
+ * test/setup/cleanup-temp-dirs.js — so this check exists to stop a new test file
+ * from opting back out, silently, by reaching for `mkdtemp` again.
+ *
+ * The helper itself is exempt: it is the one place `mkdtempSync` belongs.
+ *
+ * Comments are deliberately NOT stripped before the scan. Stripping them means
+ * writing a lexer, and a lexer that mis-parses turns a real call into a pass —
+ * a false green, which is the failure mode this whole check exists to prevent.
+ * Un-stripped, the worst case is a comment that quotes the forbidden call and
+ * gets a loud red naming its own line, which the message above is enough to
+ * resolve by rewording. Do not "fix" this by adding comment stripping.
+ *
+ * @param {{root: string, gitCommand?: string}} options
+ * @returns {{scannedFiles: number}}
+ */
+export function verifyTempDirPolicy({ root, gitCommand = 'git' } = {}) {
+  if (!root || !fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
+    throw new Error('temp-dir policy scan root is missing');
+  }
+  const tracked = listTrackedFiles(root, { gitCommand });
+  const scanPaths = tracked.filter((file) => TEST_FILE.test(file) && file !== TEMP_DIR_HELPER);
+  if (scanPaths.length === 0) throw new Error('temp-dir policy scan found no tracked test files');
+
+  const helperPath = path.join(root, TEMP_DIR_HELPER);
+  if (!fs.existsSync(helperPath)) {
+    throw new Error(`temp-dir helper is missing: ${TEMP_DIR_HELPER}`);
+  }
+
+  const offenders = [];
+  for (const file of scanPaths) {
+    const source = fs.readFileSync(path.join(root, file), 'utf8');
+    RAW_TEMP_DIR.lastIndex = 0;
+    let match;
+    while ((match = RAW_TEMP_DIR.exec(source)) !== null) {
+      offenders.push(`${file}:${lineNumberAt(source, match.index)}`);
+    }
+  }
+  if (offenders.length > 0) {
+    throw new Error(
+      'test files must use makeTempDir from test/helpers/temp-dir.js instead of mkdtemp, '
+      + `so the directories get cleaned up:\n${offenders.join('\n')}`,
+    );
+  }
+  return { scannedFiles: scanPaths.length };
+}
+
 export function verifyTestPolicy({
   root,
   gitCommand = 'git',
@@ -354,5 +415,6 @@ export function verifyTestPolicy({
 
   verifyCriticalTestFiles(root, readJson(criticalManifestPath, 'critical test manifest'));
   verifyTestBaselineGuard(root);
+  verifyTempDirPolicy({ root, gitCommand });
   return { scannedFiles: scanPaths.length, criticalFiles: readJson(criticalManifestPath, 'critical test manifest').files.length };
 }

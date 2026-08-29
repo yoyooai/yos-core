@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { describe, test } from 'node:test';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..', '..');
 const ENTRYPOINT = path.join(ROOT, 'docker', 'entrypoint.sh');
@@ -29,7 +30,7 @@ function runCredentialSelection(env = {}) {
 }
 
 function runConfigFallback(config = null) {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-docker-runtime-'));
+  const home = makeTempDir('yos-docker-runtime-');
   try {
     const yosDir = path.join(home, 'yos');
     fs.mkdirSync(path.join(yosDir, '.yos'), { recursive: true });

@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
+
 const {
   createFinalizeState,
   prepareSelfUpgrade,
@@ -281,7 +283,7 @@ describe('self-upgrade finalizer handoff', () => {
 describe('self-upgrade preflight', () => {
   it('prepares the candidate package and dependencies before any backup or service stop', () => {
     const calls = [];
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-preflight-test-'));
+    const tempDir = makeTempDir('yos-preflight-test-');
     const ctx = { tempDir };
     const result = prepareSelfUpgrade(ctx, {
       preparationDir: path.join(tempDir, 'prepared'),
@@ -411,7 +413,7 @@ describe('step10_ensureCodexConfig', () => {
 
 describe('self-upgrade backup and rollback', () => {
   it('backs up the deployed core ecosystem file', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-self-upgrade-backup-'));
+    const tmpDir = makeTempDir('yos-self-upgrade-backup-');
     const yosDir = path.join(tmpDir, 'yos');
     const skillsDir = path.join(tmpDir, 'skills');
     const backupDir = path.join(tmpDir, 'backup');
@@ -445,7 +447,7 @@ describe('self-upgrade backup and rollback', () => {
   });
 
   it('backs up real skill contents when the skills root is a symlink', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-self-upgrade-symlink-backup-'));
+    const tmpDir = makeTempDir('yos-self-upgrade-symlink-backup-');
     const yosDir = path.join(tmpDir, 'yos');
     const realSkillsDir = path.join(tmpDir, 'real-skills');
     const skillsDir = path.join(yosDir, '.claude', 'skills');
@@ -476,7 +478,7 @@ describe('self-upgrade backup and rollback', () => {
   });
 
   it('restores the backed-up ecosystem before restarting services', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-self-upgrade-rollback-'));
+    const tmpDir = makeTempDir('yos-self-upgrade-rollback-');
     const yosDir = path.join(tmpDir, 'yos');
     const skillsDir = path.join(tmpDir, 'skills');
     const backupDir = path.join(tmpDir, 'backup');
@@ -534,7 +536,7 @@ describe('self-upgrade backup and rollback', () => {
   });
 
   it('fails rollback verification when the installed core version did not return to the previous version', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-self-upgrade-version-verify-'));
+    const tmpDir = makeTempDir('yos-self-upgrade-version-verify-');
     const backupDir = path.join(tmpDir, 'backup');
     const skillsDir = path.join(tmpDir, 'skills');
     const previousCorePackage = path.join(backupDir, 'core', 'yos-old.tgz');
@@ -569,7 +571,7 @@ describe('self-upgrade backup and rollback', () => {
   });
 
   it('keeps a core version mismatch from being reported as a completed rollback', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-self-upgrade-version-result-'));
+    const tmpDir = makeTempDir('yos-self-upgrade-version-result-');
     const backupDir = path.join(tmpDir, 'backup');
     const skillsDir = path.join(tmpDir, 'skills');
     const previousCorePackage = path.join(backupDir, 'core', 'yos-old.tgz');
@@ -624,7 +626,7 @@ describe('self-upgrade backup and rollback', () => {
   });
 
   it('fails restore_core_skills when the restored tree does not match its backup', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-self-upgrade-skills-verify-'));
+    const tmpDir = makeTempDir('yos-self-upgrade-skills-verify-');
     const backupDir = path.join(tmpDir, 'backup');
     const backupSkillsDir = path.join(backupDir, 'skills');
     const skillsDir = path.join(tmpDir, 'skills');
@@ -649,7 +651,7 @@ describe('self-upgrade backup and rollback', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
   it('falls back to plain restart when the backup has no ecosystem file', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-self-upgrade-rollback-fallback-'));
+    const tmpDir = makeTempDir('yos-self-upgrade-rollback-fallback-');
     const yosDir = path.join(tmpDir, 'yos');
     const skillsDir = path.join(tmpDir, 'skills');
     const backupDir = path.join(tmpDir, 'backup');
@@ -686,7 +688,7 @@ describe('self-upgrade backup and rollback', () => {
   });
 
   it('recovers a retained transaction backup through the supported recovery entrypoint', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-self-upgrade-recover-'));
+    const tmpDir = makeTempDir('yos-self-upgrade-recover-');
     const backupDir = path.join(tmpDir, 'yos-core-backup-test');
     fs.mkdirSync(backupDir, { recursive: true });
     fs.writeFileSync(path.join(backupDir, 'rollback-state.json'), JSON.stringify({
@@ -725,7 +727,7 @@ describe('self-upgrade backup and rollback', () => {
   });
 
   it('rejects a recovery state that points at a core package outside its backup', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-self-upgrade-recover-'));
+    const tmpDir = makeTempDir('yos-self-upgrade-recover-');
     const backupDir = path.join(tmpDir, 'yos-core-backup-test');
     fs.mkdirSync(backupDir, { recursive: true });
     fs.writeFileSync(path.join(backupDir, 'rollback-state.json'), JSON.stringify({
@@ -755,7 +757,7 @@ describe('self-upgrade backup and rollback', () => {
 
 describe('Claude model migration hints', () => {
   it('adds a model backfill hint when the installed settings omit model', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-model-hints-'));
+    const tmpDir = makeTempDir('yos-model-hints-');
     const templatesDir = path.join(tmpDir, 'templates');
     const yosDir = path.join(tmpDir, 'yos');
 
@@ -774,7 +776,7 @@ describe('Claude model migration hints', () => {
   });
 
   it('downgrades 1m model in hint when threshold is above 30', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-model-guard-'));
+    const tmpDir = makeTempDir('yos-model-guard-');
     const templatesDir = path.join(tmpDir, 'templates');
     const yosDir = path.join(tmpDir, 'yos');
 
@@ -796,7 +798,7 @@ describe('Claude model migration hints', () => {
   });
 
   it('does not add a model backfill hint when the user already configured model', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-model-nohint-'));
+    const tmpDir = makeTempDir('yos-model-nohint-');
     const templatesDir = path.join(tmpDir, 'templates');
     const yosDir = path.join(tmpDir, 'yos');
 
@@ -812,7 +814,7 @@ describe('Claude model migration hints', () => {
   });
 
   it('backfills model during applyMigrationHints only when the field is absent', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-model-apply-'));
+    const tmpDir = makeTempDir('yos-model-apply-');
     const yosDir = path.join(tmpDir, 'yos');
     const settingsPath = path.join(yosDir, '.claude', 'settings.json');
 
@@ -836,7 +838,7 @@ describe('Claude model migration hints', () => {
 
 describe('Boolean setting migration hints (autoMemoryEnabled, autoDreamEnabled)', () => {
   it('adds setting_backfill hints when installed settings omit them', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-setting-hints-'));
+    const tmpDir = makeTempDir('yos-setting-hints-');
     const templatesDir = path.join(tmpDir, 'templates');
     const yosDir = path.join(tmpDir, 'yos');
 
@@ -857,7 +859,7 @@ describe('Boolean setting migration hints (autoMemoryEnabled, autoDreamEnabled)'
   });
 
   it('does not add hints when user already configured the settings', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-setting-nohint-'));
+    const tmpDir = makeTempDir('yos-setting-nohint-');
     const templatesDir = path.join(tmpDir, 'templates');
     const yosDir = path.join(tmpDir, 'yos');
 
@@ -875,7 +877,7 @@ describe('Boolean setting migration hints (autoMemoryEnabled, autoDreamEnabled)'
   });
 
   it('backfills settings during applyMigrationHints only when absent', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-setting-apply-'));
+    const tmpDir = makeTempDir('yos-setting-apply-');
     const yosDir = path.join(tmpDir, 'yos');
     const settingsPath = path.join(yosDir, '.claude', 'settings.json');
 
@@ -908,7 +910,7 @@ describe('Boolean setting migration hints (autoMemoryEnabled, autoDreamEnabled)'
 
 describe('self-upgrade hook migration hints', () => {
   function writeSettingsPair({ templateSettings, installedSettings }) {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-hook-hints-'));
+    const tmpDir = makeTempDir('yos-hook-hints-');
     const templatesDir = path.join(tmpDir, 'templates');
     const yosDir = path.join(tmpDir, 'yos');
     fs.mkdirSync(path.join(templatesDir, '.claude'), { recursive: true });
@@ -1040,7 +1042,7 @@ describe('self-upgrade hook migration hints', () => {
   });
 
   it('removes hooks by canonical script key during applyMigrationHints', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-hook-apply-'));
+    const tmpDir = makeTempDir('yos-hook-apply-');
     const yosDir = path.join(tmpDir, 'yos');
     const settingsPath = path.join(yosDir, '.claude', 'settings.json');
 
@@ -1074,7 +1076,7 @@ describe('self-upgrade hook migration hints', () => {
 
 describe('step7 manifest deploy (real step7_syncInstructions)', () => {
   it('fails closed when the current YOS split marker is missing', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-step7-unsupported-'));
+    const tmpDir = makeTempDir('yos-step7-unsupported-');
     const yosDir = path.join(tmpDir, 'yos');
     const pkgRoot = path.join(tmpDir, 'pkg');
     writeSplitPackage(pkgRoot);
@@ -1091,7 +1093,7 @@ describe('step7 manifest deploy (real step7_syncInstructions)', () => {
   });
 
   it('uses the split-era step name when the new package has no templates', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-step7-no-templates-'));
+    const tmpDir = makeTempDir('yos-step7-no-templates-');
     const result = step7_syncInstructions({ tempDir: tmpDir, yosDir: path.join(tmpDir, 'yos') });
     assert.equal(result.status, 'skipped');
     assert.equal(result.name, 'sync_instructions');
@@ -1099,7 +1101,7 @@ describe('step7 manifest deploy (real step7_syncInstructions)', () => {
   });
 
   it('refreshes both generated files when split mode is already active', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-step7-active-'));
+    const tmpDir = makeTempDir('yos-step7-active-');
     const yosDir = path.join(tmpDir, 'yos');
     const pkgRoot = path.join(tmpDir, 'pkg');
     writeSplitPackage(pkgRoot);
@@ -1122,7 +1124,7 @@ describe('step7 manifest deploy (real step7_syncInstructions)', () => {
   });
 
   it('returns before all v2 instruction work for a future format version', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-step7-future-'));
+    const tmpDir = makeTempDir('yos-step7-future-');
     const yosDir = path.join(tmpDir, 'yos');
     const pkgRoot = path.join(tmpDir, 'pkg');
     writeSplitPackage(pkgRoot);
@@ -1158,7 +1160,7 @@ describe('step7 manifest deploy (real step7_syncInstructions)', () => {
   });
 
   it('returns before instruction refresh when a future format omits YOS.md', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-step7-future-no-yos-'));
+    const tmpDir = makeTempDir('yos-step7-future-no-yos-');
     const yosDir = path.join(tmpDir, 'yos');
     const pkgRoot = path.join(tmpDir, 'pkg');
     writeSplitPackage(pkgRoot);
@@ -1179,7 +1181,7 @@ describe('step7 manifest deploy (real step7_syncInstructions)', () => {
   });
 
   it('backfills the format version for active split instructions', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-step7-backfill-'));
+    const tmpDir = makeTempDir('yos-step7-backfill-');
     const yosDir = path.join(tmpDir, 'yos');
     const pkgRoot = path.join(tmpDir, 'pkg');
     writeSplitPackage(pkgRoot);
@@ -1199,7 +1201,7 @@ describe('step7 manifest deploy (real step7_syncInstructions)', () => {
   });
 
   it('creates manifest from tempDir template when missing, message includes manifest: created', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-step7-'));
+    const tmpDir = makeTempDir('yos-step7-');
     const yosDir = path.join(tmpDir, 'yos');
     const templatesDir = path.join(tmpDir, 'pkg', 'templates');
     fs.mkdirSync(path.join(yosDir, '.yos'), { recursive: true });
@@ -1227,7 +1229,7 @@ describe('step7 manifest deploy (real step7_syncInstructions)', () => {
   });
 
   it('does not overwrite existing manifest, message includes manifest: exists', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-step7-'));
+    const tmpDir = makeTempDir('yos-step7-');
     const yosDir = path.join(tmpDir, 'yos');
     const templatesDir = path.join(tmpDir, 'pkg', 'templates');
     fs.mkdirSync(path.join(yosDir, '.yos'), { recursive: true });
@@ -1252,7 +1254,7 @@ describe('step7 manifest deploy (real step7_syncInstructions)', () => {
   });
 
   it('falls back to packageRoot template when tempDir template is missing', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-step7-'));
+    const tmpDir = makeTempDir('yos-step7-');
     const yosDir = path.join(tmpDir, 'yos');
     const templatesDir = path.join(tmpDir, 'pkg', 'templates');
     const pkgRoot = path.join(tmpDir, 'installed-pkg');
@@ -1278,7 +1280,7 @@ describe('step7 manifest deploy (real step7_syncInstructions)', () => {
   });
 
   it('reports template_missing when both tempDir and packageRoot templates are absent', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-step7-'));
+    const tmpDir = makeTempDir('yos-step7-');
     const yosDir = path.join(tmpDir, 'yos');
     const templatesDir = path.join(tmpDir, 'pkg', 'templates');
     fs.mkdirSync(path.join(yosDir, '.yos'), { recursive: true });
@@ -1298,7 +1300,7 @@ describe('step7 manifest deploy (real step7_syncInstructions)', () => {
   });
 
   it('works end-to-end through runSelfUpgradeFinalize with real POST_INSTALL_STEPS', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-step7-'));
+    const tmpDir = makeTempDir('yos-step7-');
     const yosDir = path.join(tmpDir, 'yos');
     const templatesDir = path.join(tmpDir, 'pkg', 'templates');
     writeSplitPackage(path.join(tmpDir, 'pkg'));

@@ -27,6 +27,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, test } from '@jest/globals';
+
+import { makeTempDir } from './helpers/temp-dir.js';
 import {
   catalogPaths,
   catalogRows,
@@ -219,7 +221,7 @@ describe('version catalog (published by the build)', () => {
   }
 
   beforeAll(() => {
-    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-catalog-fixture-'));
+    const fixture = makeTempDir('yos-catalog-fixture-');
     git(fixture, ['init', '-q', '-b', 'main']);
     fs.mkdirSync(path.join(fixture, 'scripts'), { recursive: true });
     for (const tag of TAGS) {
@@ -255,7 +257,7 @@ describe('version catalog (published by the build)', () => {
     git(fixture, ['add', 'registry.json']);
     git(fixture, ['commit', '-q', '-m', 'register feishu after the core release']);
 
-    const componentsFixture = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-components-catalog-fixture-'));
+    const componentsFixture = makeTempDir('yos-components-catalog-fixture-');
     git(componentsFixture, ['init', '-q', '-b', 'main']);
     const feishuDir = path.join(componentsFixture, 'channels', '001_feishu');
     fs.mkdirSync(feishuDir, { recursive: true });
@@ -279,7 +281,7 @@ capabilities:
     git(componentsFixture, ['commit', '-q', '-m', 'release feishu']);
     git(componentsFixture, ['tag', 'feishu-v0.1.4']);
 
-    output = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-catalog-out-'));
+    output = makeTempDir('yos-catalog-out-');
     buildLog = execFileSync(process.execPath, [
       BUILD_DIST,
       '--test-only',
@@ -290,7 +292,7 @@ capabilities:
       '--skip-vendor',
       '--base-url', BASE,
     ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-    secondOutput = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-catalog-out-'));
+    secondOutput = makeTempDir('yos-catalog-out-');
     execFileSync(process.execPath, [
       BUILD_DIST,
       '--test-only',

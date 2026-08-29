@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { describe, it } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -10,6 +9,8 @@ import Database from 'better-sqlite3';
 
 import { getNextRun } from '../cron-utils.js';
 import { parseTime } from '../time-utils.js';
+
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
 
 const CLI_PATH = fileURLToPath(new URL('../cli.js', import.meta.url));
 
@@ -54,7 +55,7 @@ describe('scheduler timezone behavior', () => {
   it('loadTimezone validates and follows fallback chain', async () => {
     const originalTz = process.env.TZ;
     const originalYOSDir = process.env.YOS_DIR;
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scheduler-tz-'));
+    const tmpDir = makeTempDir('scheduler-tz-');
     const envPath = path.join(tmpDir, '.env');
     try {
       process.env.YOS_DIR = tmpDir;
@@ -101,7 +102,7 @@ describe('scheduler timezone behavior', () => {
   it('loadTimezone parses dotenv quoted values with inline comments', async () => {
     const originalTz = process.env.TZ;
     const originalYOSDir = process.env.YOS_DIR;
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scheduler-tz-dotenv-'));
+    const tmpDir = makeTempDir('scheduler-tz-dotenv-');
     const envPath = path.join(tmpDir, '.env');
     try {
       process.env.YOS_DIR = tmpDir;
@@ -125,7 +126,7 @@ describe('scheduler timezone behavior', () => {
   it('loadTimezone falls back when .env has no TZ key', async () => {
     const originalTz = process.env.TZ;
     const originalYOSDir = process.env.YOS_DIR;
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scheduler-tz-nokey-'));
+    const tmpDir = makeTempDir('scheduler-tz-nokey-');
     const envPath = path.join(tmpDir, '.env');
     try {
       process.env.YOS_DIR = tmpDir;
@@ -145,7 +146,7 @@ describe('scheduler timezone behavior', () => {
   });
 
   it('cmdUpdate syncs timezone column when schedule changes', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scheduler-cli-tz-'));
+    const tmpDir = makeTempDir('scheduler-cli-tz-');
     const dbPath = path.join(tmpDir, 'scheduler', 'scheduler.db');
     let db;
     try {

@@ -2,10 +2,11 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 import {
   activateFreshSplitInstructions,
@@ -29,7 +30,7 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 const TEMPLATES_DIR = path.join(REPO_ROOT, 'templates');
 
 function fixture() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'yos-split-test-'));
+  return makeTempDir('yos-split-test-');
 }
 
 function leftovers(root) {

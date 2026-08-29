@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { describe, it } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
 
 const CLI_PATH = fileURLToPath(new URL('../c4-control.js', import.meta.url));
 
@@ -17,7 +18,7 @@ function cliRaw(args, env = {}) {
 }
 
 function withTmpDir(fn) {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'c4-control-cli-'));
+  const tmpDir = makeTempDir('c4-control-cli-');
   const env = { YOS_DIR: tmpDir };
   try {
     return fn({ tmpDir, env });

@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { createCodexProbe } from '../heartbeat/codex-probe.js';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 /**
  * These tests exist because readHeartbeatPending() is the only thing standing
@@ -38,7 +39,7 @@ let dir;
 let pendingFile;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-probe-'));
+  dir = makeTempDir('codex-probe-');
   pendingFile = path.join(dir, 'codex-heartbeat-pending.json');
 });
 

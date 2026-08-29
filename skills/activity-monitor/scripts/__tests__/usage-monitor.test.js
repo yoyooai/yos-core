@@ -5,10 +5,12 @@ import path from 'path';
 import { afterEach, describe, it } from 'node:test';
 import { UsageMonitor } from '../usage-monitor.js';
 
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
+
 const tmpDirs = [];
 
 function makeMonitor(overrides = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'usage-monitor-'));
+  const dir = makeTempDir('usage-monitor-');
   tmpDirs.push(dir);
   const calls = { log: [], control: [] };
   const monitor = new UsageMonitor(

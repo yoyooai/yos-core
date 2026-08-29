@@ -29,6 +29,8 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, test } from '@jest/globals';
 
+import { makeTempDir } from './helpers/temp-dir.js';
+
 import {
 
   assignmentsIn,
@@ -79,7 +81,7 @@ let servers = [];
 let tmpDirs = [];
 
 function tmpDir(prefix = 'releasedoc-') {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const dir = makeTempDir(prefix);
   tmpDirs.push(dir);
   return dir;
 }

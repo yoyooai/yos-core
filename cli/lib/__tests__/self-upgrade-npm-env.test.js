@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { prepareSelfUpgrade } from '../self-upgrade.js';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 /**
  * A machine upgrading itself installs native dependencies twice: once in the
@@ -19,14 +20,14 @@ const SOURCE = fs.readFileSync(new URL('../self-upgrade.js', import.meta.url), '
 
 describe('self-upgrade installs native dependencies from our mirror', () => {
   it('carries the prebuilt-binary host into the preflight npm install', () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-selfupg-env-'));
+    const tempDir = makeTempDir('yos-selfupg-env-');
     const skillDir = path.join(tempDir, 'skills', 'comm-bridge');
     fs.mkdirSync(skillDir, { recursive: true });
     fs.writeFileSync(
       path.join(skillDir, 'package.json'),
       JSON.stringify({ name: 'comm-bridge', dependencies: { 'better-sqlite3': '^12.6.2' } }),
     );
-    const preparationDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-selfupg-prep-'));
+    const preparationDir = makeTempDir('yos-selfupg-prep-');
 
     const calls = [];
     const result = prepareSelfUpgrade(

@@ -1,8 +1,9 @@
 import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { smartSync } from '../cli/lib/smart-merge.js';
+
+import { makeTempDir } from './helpers/temp-dir.js';
 import {
   generateManifest,
   hashFile,
@@ -25,7 +26,7 @@ function writeFile(dir, relPath, content) {
 }
 
 beforeEach(() => {
-  tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-baseline-boundary-'));
+  tmpRoot = makeTempDir('yos-baseline-boundary-');
 });
 
 afterEach(() => {

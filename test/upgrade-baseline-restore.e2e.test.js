@@ -7,7 +7,8 @@ import { describe, test, expect, beforeAll, afterAll } from '@jest/globals';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
+
+import { makeTempDir } from './helpers/temp-dir.js';
 import {
   generateManifest,
   hashFile,
@@ -72,7 +73,7 @@ function runUpgradeE2E(name, tempDir, { failBaselineCommit = false } = {}) {
 }
 
 beforeAll(() => {
-  tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-baseline-commit-e2e-'));
+  tmpRoot = makeTempDir('yos-baseline-commit-e2e-');
   yosDir = path.join(tmpRoot, 'yos-home');
   skillsDir = path.join(yosDir, '.claude', 'skills');
   fs.mkdirSync(skillsDir, { recursive: true });

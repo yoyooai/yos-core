@@ -6,6 +6,8 @@ import { execFileSync, execSync, spawnSync } from 'node:child_process';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
+
 const {
   desiredClaudeHooks,
   isCoreManaged,
@@ -69,7 +71,7 @@ const CORE_SHARD_SEQUENCE = [
 
 describe('desiredClaudeHooks', () => {
   it('omits assembler hooks until the assembler is materialized', () => {
-    const yosDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-unmaterialized-hooks-'));
+    const yosDir = makeTempDir('yos-unmaterialized-hooks-');
     const groups = desiredClaudeHooks({ yosDir }).SessionStart;
     assert.equal(groups.length, 3);
     for (const group of groups) {
@@ -80,7 +82,7 @@ describe('desiredClaudeHooks', () => {
   });
 
   it('real postinstall does not publish dead assembler hooks before init', () => {
-    const yosDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-postinstall-hooks-'));
+    const yosDir = makeTempDir('yos-postinstall-hooks-');
     fs.mkdirSync(path.join(yosDir, '.claude'), { recursive: true });
     fs.mkdirSync(path.join(yosDir, '.yos'), { recursive: true });
     fs.writeFileSync(path.join(yosDir, '.claude', 'settings.json'), JSON.stringify({ hooks: {} }));
@@ -103,7 +105,7 @@ describe('desiredClaudeHooks', () => {
   });
 
   it('fresh init deploy syncs exactly one assembler hook for startup, clear, and compact', () => {
-    const yosDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-init-hooks-'));
+    const yosDir = makeTempDir('yos-init-hooks-');
     fs.mkdirSync(path.join(yosDir, '.yos'), { recursive: true });
     fs.writeFileSync(path.join(yosDir, '.yos', 'config.json'), JSON.stringify({ runtime: 'claude' }));
     fs.writeFileSync(path.join(yosDir, '.env'), 'KEEP=1\n', { mode: 0o644 });
@@ -127,7 +129,7 @@ describe('desiredClaudeHooks', () => {
   });
 
   it('the real clear hook rebuilds changed user instructions in a sandbox', () => {
-    const yosDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-clear-hook-smoke-'));
+    const yosDir = makeTempDir('yos-clear-hook-smoke-');
     const templatesDir = path.join(__dirname, '..', '..', '..', 'templates');
     activateFreshSplitInstructions({ yosDir, templatesDir });
     const paths = instructionPaths('claude', { yosDir });
@@ -439,7 +441,7 @@ describe('persistInstalledSettingsAndSyncCoupledThreshold', () => {
   });
 
   it('reports a directory at settings.json without a stack or private path', () => {
-    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-settings-eisdir-'));
+    const tempRoot = makeTempDir('yos-settings-eisdir-');
     const yosDir = path.join(tempRoot, 'private-customer-yos');
     fs.mkdirSync(path.join(yosDir, '.claude', 'settings.json'), { recursive: true });
 
@@ -965,7 +967,7 @@ describe('component shard claim boundary (opt-in contract)', () => {
   const noopLog = () => {};
 
   function makeDeclaredYOSDir() {
-    const yosDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shard-claim-test-'));
+    const yosDir = makeTempDir('shard-claim-test-');
     const emitterDir = path.join(yosDir, '.claude', 'skills', 'role-manager');
     fs.mkdirSync(emitterDir, { recursive: true });
     fs.writeFileSync(path.join(emitterDir, 'emit-role.js'), 'export function emit() { return "ROLE"; }\n');
@@ -1032,7 +1034,7 @@ describe('component shard claim boundary (opt-in contract)', () => {
   });
 
   it('claims nothing when no declarations exist, even for shard-suffixed user paths', async () => {
-    const yosDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shard-claim-empty-'));
+    const yosDir = makeTempDir('shard-claim-empty-');
     const { desiredClaudeHooks: desired, claimedHookBaseKeys } = await import('../sync-settings-hooks.js');
 
     const installed = {
@@ -1064,7 +1066,7 @@ describe('component shard claim boundary (opt-in contract)', () => {
   });
 
   it('rejects absolute claim paths at declaration time so user hooks can never be claimed', async () => {
-    const yosDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shard-claim-abs-'));
+    const yosDir = makeTempDir('shard-claim-abs-');
     const shardsDir = path.join(yosDir, '.yos', 'shards.d');
     fs.mkdirSync(shardsDir, { recursive: true });
     fs.mkdirSync(path.join(yosDir, '.claude'), { recursive: true });

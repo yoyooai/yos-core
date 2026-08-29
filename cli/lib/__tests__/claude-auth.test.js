@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { after, afterEach, beforeEach, describe, it } from 'node:test';
 
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
+
 const tmpDirs = [];
 
-const fakeBinDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-claude-fakebin-'));
+const fakeBinDir = makeTempDir('yos-claude-fakebin-');
 const fakeClaudePath = path.join(fakeBinDir, 'claude');
 const envCapturePath = path.join(fakeBinDir, 'env.json');
 const fakeYOSDir = path.join(fakeBinDir, 'yos');
@@ -63,7 +64,7 @@ beforeEach(() => {
   originalClaudeCode = process.env.CLAUDECODE;
   originalClaudeCodeEntrypoint = process.env.CLAUDE_CODE_ENTRYPOINT;
 
-  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-claude-auth-home-'));
+  const tmpHome = makeTempDir('yos-claude-auth-home-');
   tmpDirs.push(tmpHome);
   fs.rmSync(fakeYOSDir, { recursive: true, force: true });
   fs.mkdirSync(fakeYOSDir, { recursive: true });

@@ -1,8 +1,9 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { describe, test, expect } from '@jest/globals';
+
+import { makeTempDir } from './helpers/temp-dir.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const BUILD_SCRIPT = path.join(ROOT, 'scripts', 'build-release.mjs');
@@ -20,7 +21,7 @@ describe('official release pack', () => {
   });
 
   test('runs verification before creating an archive', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-release-pack-'));
+    const tmpDir = makeTempDir('yos-release-pack-');
     const binDir = path.join(tmpDir, 'bin');
     const outputDir = path.join(tmpDir, 'output');
     const callsFile = path.join(tmpDir, 'calls.log');
@@ -43,7 +44,7 @@ describe('official release pack', () => {
   });
 
   test('does not pack when verification fails', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-release-pack-fail-'));
+    const tmpDir = makeTempDir('yos-release-pack-fail-');
     const binDir = path.join(tmpDir, 'bin');
     const callsFile = path.join(tmpDir, 'calls.log');
     fs.mkdirSync(binDir);

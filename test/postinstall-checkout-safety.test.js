@@ -20,12 +20,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from '@jest/globals';
 
+import { makeTempDir } from './helpers/temp-dir.js';
+
 const REPO_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const POSTINSTALL = path.join(REPO_ROOT, 'scripts', 'postinstall.js');
 
 /** A fake ~/yos that looks initialized and holds one hand-edited core skill. */
 function makeFakeYosDir() {
-  const yosDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-postinstall-test-'));
+  const yosDir = makeTempDir('yos-postinstall-test-');
   const skillDir = path.join(yosDir, '.claude', 'skills', 'comm-bridge');
   fs.mkdirSync(skillDir, { recursive: true });
   const sentinel = path.join(skillDir, 'SKILL.md');
@@ -66,7 +68,7 @@ describe('postinstall in a source checkout', () => {
   });
 
   test('does not create a skills tree that was not already there', () => {
-    const yosDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-postinstall-test-'));
+    const yosDir = makeTempDir('yos-postinstall-test-');
     fs.mkdirSync(path.join(yosDir, '.claude'), { recursive: true });
 
     const result = runPostinstall(yosDir);

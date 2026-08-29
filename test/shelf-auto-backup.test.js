@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, jest, test } from '@jest/globals';
 
+import { makeTempDir } from './helpers/temp-dir.js';
+
 import {
   createDefaultOperations,
   loadBackupConfig,
@@ -84,7 +86,7 @@ function runtime(times = ['2026-08-12T02:03:04.000Z']) {
 
 describe('automatic shelf backup configuration', () => {
   test('loads a non-secret config and normalizes the base prefix', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-config-'));
+    const root = makeTempDir('yos-auto-config-');
     const file = path.join(root, 'config.json');
     fs.writeFileSync(file, JSON.stringify(fixtureConfig(root, {
       cos: { bucket: 'backup-test-1234567890', region: 'ap-test', basePrefix: 'scheduled' },
@@ -97,7 +99,7 @@ describe('automatic shelf backup configuration', () => {
   });
 
   async function expectSecretConfigRejected(extra) {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-secret-'));
+    const root = makeTempDir('yos-auto-secret-');
     const file = path.join(root, 'config.json');
     fs.writeFileSync(file, JSON.stringify(fixtureConfig(root, extra)));
 
@@ -113,7 +115,7 @@ describe('automatic shelf backup configuration', () => {
   });
 
   test('rejects unknown configuration fields instead of trusting their names', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-unknown-config-'));
+    const root = makeTempDir('yos-auto-unknown-config-');
     const file = path.join(root, 'config.json');
     fs.writeFileSync(file, JSON.stringify(fixtureConfig(root, { harmlessLookingValue: 'secret material' })));
 
@@ -137,7 +139,7 @@ describe('automatic shelf backup configuration', () => {
   });
 
   test('rejects a group-writable config file', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-mode-'));
+    const root = makeTempDir('yos-auto-mode-');
     const file = path.join(root, 'config.json');
     fs.writeFileSync(file, JSON.stringify(fixtureConfig(root)));
     fs.chmodSync(file, 0o620);
@@ -146,7 +148,7 @@ describe('automatic shelf backup configuration', () => {
   });
 
   test('requires an alert command instead of silently logging failures', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-alert-'));
+    const root = makeTempDir('yos-auto-alert-');
     const file = path.join(root, 'config.json');
     const config = fixtureConfig(root);
     delete config.alertCommand;
@@ -158,7 +160,7 @@ describe('automatic shelf backup configuration', () => {
 
 describe('automatic shelf backup run', () => {
   test('uploads, reverse-verifies, restores the first run, and commits redacted state', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-success-'));
+    const root = makeTempDir('yos-auto-success-');
     const config = fixtureConfig(root);
     const operations = successfulOperations();
 
@@ -180,7 +182,7 @@ describe('automatic shelf backup run', () => {
   });
 
   test('restores on the first run and then only at the configured interval', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-interval-'));
+    const root = makeTempDir('yos-auto-interval-');
     const config = fixtureConfig(root, { restoreEvery: 2 });
     const operations = successfulOperations();
 
@@ -193,7 +195,7 @@ describe('automatic shelf backup run', () => {
   });
 
   test('a reverse-verification failure records failure, alerts, and never uploads success metadata', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-fail-'));
+    const root = makeTempDir('yos-auto-fail-');
     const config = fixtureConfig(root);
     const operations = successfulOperations({
       verifyShelf: jest.fn(async () => ({ pass: false, problems: [{ error: 'missing object' }] })),
@@ -209,7 +211,7 @@ describe('automatic shelf backup run', () => {
   });
 
   test('an unhealthy shelf stops before temporary credentials are minted', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-source-red-'));
+    const root = makeTempDir('yos-auto-source-red-');
     const config = fixtureConfig(root);
     const operations = successfulOperations({
       remoteAudit: jest.fn(async () => ({ pass: false, problems: [{ error: 'shelf mismatch' }] })),
@@ -222,7 +224,7 @@ describe('automatic shelf backup run', () => {
   });
 
   test('a shelf identity change during upload rejects the run', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-race-'));
+    const root = makeTempDir('yos-auto-race-');
     const config = fixtureConfig(root);
     const operations = successfulOperations({
       remoteAudit: jest.fn()
@@ -243,7 +245,7 @@ describe('automatic shelf backup run', () => {
   });
 
   test('failure evidence and alerts redact temporary credentials', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-redact-'));
+    const root = makeTempDir('yos-auto-redact-');
     const config = fixtureConfig(root);
     const operations = successfulOperations({
       uploadShelf: jest.fn(async () => {
@@ -267,7 +269,7 @@ describe('automatic shelf backup run', () => {
   });
 
   test('an alert failure cannot turn the original backup failure into success', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-alert-fail-'));
+    const root = makeTempDir('yos-auto-alert-fail-');
     const config = fixtureConfig(root);
     const operations = successfulOperations({
       uploadShelf: jest.fn(async () => { throw new Error('upload unavailable'); }),
@@ -278,7 +280,7 @@ describe('automatic shelf backup run', () => {
   });
 
   test('a failure-evidence write error still sends the original alert', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-state-write-'));
+    const root = makeTempDir('yos-auto-state-write-');
     const config = fixtureConfig(root);
     const statePath = path.join(config.stateDir, 'state.json');
     const operations = successfulOperations({
@@ -296,7 +298,7 @@ describe('automatic shelf backup run', () => {
   });
 
   test('failure events remove private roots and stack frames', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-private-path-'));
+    const root = makeTempDir('yos-auto-private-path-');
     const config = fixtureConfig(root);
     const operations = successfulOperations({
       uploadShelf: jest.fn(async () => {
@@ -312,7 +314,7 @@ describe('automatic shelf backup run', () => {
   });
 
   test('a live lock rejects a concurrent run before minting credentials', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-lock-'));
+    const root = makeTempDir('yos-auto-lock-');
     const config = fixtureConfig(root);
     fs.mkdirSync(path.join(config.stateDir, 'run.lock'), { recursive: true });
     fs.writeFileSync(path.join(config.stateDir, 'run.lock', 'owner.json'), JSON.stringify({ pid: process.pid }));
@@ -325,7 +327,7 @@ describe('automatic shelf backup run', () => {
   });
 
   test('a live process lock is never stolen just because its timestamp is old', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-live-old-'));
+    const root = makeTempDir('yos-auto-live-old-');
     const config = fixtureConfig(root, { lockStaleSeconds: 1 });
     const lock = path.join(config.stateDir, 'run.lock');
     fs.mkdirSync(lock, { recursive: true });
@@ -340,7 +342,7 @@ describe('automatic shelf backup run', () => {
   });
 
   test('a stale lock is recovered and the recovery is retained in the run evidence', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-stale-'));
+    const root = makeTempDir('yos-auto-stale-');
     const config = fixtureConfig(root, { lockStaleSeconds: 1 });
     const lock = path.join(config.stateDir, 'run.lock');
     fs.mkdirSync(lock, { recursive: true });
@@ -354,7 +356,7 @@ describe('automatic shelf backup run', () => {
   });
 
   test('a corrupt state file alerts and releases the lock', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-corrupt-state-'));
+    const root = makeTempDir('yos-auto-corrupt-state-');
     const config = fixtureConfig(root);
     fs.mkdirSync(config.stateDir, { recursive: true });
     const statePath = path.join(config.stateDir, 'state.json');
@@ -371,7 +373,7 @@ describe('automatic shelf backup run', () => {
   });
 
   test('off-site metadata does not claim the whole job passed before its own verification', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-meta-honesty-'));
+    const root = makeTempDir('yos-auto-meta-honesty-');
     const config = fixtureConfig(root);
     let uploadedEvidence;
     const operations = successfulOperations({
@@ -389,7 +391,7 @@ describe('automatic shelf backup run', () => {
   });
 
   test('a restored shelf with a different identity rejects the run', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-restore-id-'));
+    const root = makeTempDir('yos-auto-restore-id-');
     const config = fixtureConfig(root);
     const operations = successfulOperations({
       auditRestore: jest.fn(async () => ({
@@ -406,7 +408,7 @@ describe('automatic shelf backup run', () => {
   });
 
   test('retention produces candidates without issuing a delete operation', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-retention-'));
+    const root = makeTempDir('yos-auto-retention-');
     const config = fixtureConfig(root, { keepSuccessful: 2, restoreEvery: 99 });
     const operations = successfulOperations();
 
@@ -422,7 +424,7 @@ describe('automatic shelf backup run', () => {
 
 describe('automatic shelf backup command wiring', () => {
   test('credentials travel in SSH stdin, never command arguments', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-wiring-'));
+    const root = makeTempDir('yos-auto-wiring-');
     const config = fixtureConfig(root);
     const calls = [];
     const runProcess = jest.fn(async (request) => {
@@ -458,7 +460,7 @@ describe('automatic shelf backup command wiring', () => {
   });
 
   test('the credential command cannot inherit ambient Tencent or COS secrets', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-env-'));
+    const root = makeTempDir('yos-auto-env-');
     const config = fixtureConfig(root);
     let request;
     const operations = createDefaultOperations(config, {
@@ -480,7 +482,7 @@ describe('automatic shelf backup command wiring', () => {
   });
 
   test('refuses an expired credential before opening SSH', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-expired-'));
+    const root = makeTempDir('yos-auto-expired-');
     const config = fixtureConfig(root);
     const runProcess = jest.fn(async (request) => {
       if (request.label === 'mint_credentials') {
@@ -495,7 +497,7 @@ describe('automatic shelf backup command wiring', () => {
   });
 
   test('does not expose credential-command stderr when minting fails', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-mint-error-'));
+    const root = makeTempDir('yos-auto-mint-error-');
     const script = path.join(root, 'fail.mjs');
     const leaked = 'AKIDTHISMUSTNOTAPPEAR123456789';
     fs.writeFileSync(script, `process.stderr.write(${JSON.stringify(leaked)}); process.exit(23);\n`);
@@ -510,7 +512,7 @@ describe('automatic shelf backup command wiring', () => {
 
   test('a timed-out credential command cannot leave a child process running', async () => {
     if (process.platform === 'win32') return;
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-timeout-tree-'));
+    const root = makeTempDir('yos-auto-timeout-tree-');
     const marker = path.join(root, 'late-write');
     const script = path.join(root, 'hang.mjs');
     fs.writeFileSync(script, [

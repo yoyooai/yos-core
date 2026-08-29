@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { after, it } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'c4-db-message-migration-'));
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
+
+const tmpDir = makeTempDir('c4-db-message-migration-');
 const dataDir = path.join(tmpDir, 'comm-bridge');
 fs.mkdirSync(dataDir, { recursive: true });
 

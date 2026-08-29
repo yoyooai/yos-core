@@ -14,13 +14,14 @@
 import assert from 'node:assert/strict';
 import { after, describe, it } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
 
 import { fetchLatestTag, fetchInstallVersion, fetchRawFile } from '../github.js';
 import { downloadArchive } from '../download.js';
 import { resetMirrorFallbackNotices } from '../dist-origin.js';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 const MIRROR_ONLY_TAG = 'v9.9.9';
 const SENTINEL = 'SENTINEL-FROM-MIRROR';
@@ -51,7 +52,7 @@ const cleanups = [];
 
 /** Serve `files` ({ "url/path": string|Buffer }) from a child process. */
 function startMirror(files) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-mirror-'));
+  const dir = makeTempDir('yos-mirror-');
   for (const [urlPath, contents] of Object.entries(files)) {
     const target = path.join(dir, urlPath.replace(/^\/+/, ''));
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -80,7 +81,7 @@ function startMirror(files) {
 }
 
 function sentinelTarball() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-mirror-tarball-'));
+  const dir = makeTempDir('yos-mirror-tarball-');
   const inner = path.join(dir, 'yos-core-9.9.9');
   fs.mkdirSync(inner);
   fs.writeFileSync(path.join(inner, SENTINEL), 'from the mirror\n');
@@ -146,7 +147,7 @@ describe('mirror-first artifact downloads', () => {
       [`/yoyooai/yos-core/tarball/tags/${MIRROR_ONLY_TAG}.tar.gz`]: sentinelTarball(),
     });
     withEnv({ YOS_DIST_BASE: mirror.base, YOS_DIST_ONLY: '1' });
-    const dest = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-mirror-dest-'));
+    const dest = makeTempDir('yos-mirror-dest-');
     try {
       const result = downloadArchive('yoyooai/yos-core', '9.9.9', dest);
       assert.equal(result.success, true, result.error);
@@ -159,7 +160,7 @@ describe('mirror-first artifact downloads', () => {
 
   it('reports the mirror URL when a dist-only download fails', () => {
     withEnv({ YOS_DIST_BASE: 'http://127.0.0.1:1', YOS_DIST_ONLY: '1', YOS_GH_RETRY_DELAY_MS: '' });
-    const dest = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-mirror-dest-'));
+    const dest = makeTempDir('yos-mirror-dest-');
     try {
       const result = downloadArchive('yoyooai/yos-core', '9.9.9', dest);
       assert.equal(result.success, false);

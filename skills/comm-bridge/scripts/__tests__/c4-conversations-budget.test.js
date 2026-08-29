@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { describe, it } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { DEFAULT_SHARD_BUDGET, withinBudget } from '../../../activity-monitor/scripts/shard-registry.js';
+
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
 
 const RECEIVE_PATH = fileURLToPath(new URL('../c4-receive.js', import.meta.url));
 const SESSION_INIT_URL = pathToFileURL(fileURLToPath(new URL('../c4-session-init.js', import.meta.url))).href;
@@ -53,7 +54,7 @@ function receive(content, env) {
 }
 
 function withTmpDir(fn) {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'c4-conv-budget-'));
+  const tmpDir = makeTempDir('c4-conv-budget-');
   const env = { YOS_DIR: tmpDir };
   try {
     return fn({ tmpDir, env });

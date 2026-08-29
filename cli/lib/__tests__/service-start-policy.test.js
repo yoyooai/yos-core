@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 
 import { registerService } from '../service.js';
 import { RESTART_FLOOR } from '../restart-policy.js';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 const tmpDirs = [];
 
@@ -17,7 +18,7 @@ afterEach(() => {
  * A skill directory with an entry script, optionally with its own pm2 config.
  */
 function makeSkillDir({ withOwnEcosystem = false } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-start-policy-'));
+  const root = makeTempDir('yos-start-policy-');
   tmpDirs.push(root);
   const skillDir = path.join(root, 'skill');
   fs.mkdirSync(path.join(skillDir, 'src'), { recursive: true });

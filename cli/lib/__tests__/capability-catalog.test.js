@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
+
 const catalogModule = await import('../capability-catalog.js').catch((loadError) => ({ loadError }));
 const CORE_ROOT = path.resolve(import.meta.dirname, '..', '..', '..');
 const tmpDirs = [];
@@ -36,7 +38,7 @@ function writeProvider(root, relativeDir, { name, capabilityId, selfReportedSour
 
 describe('local capability catalog', () => {
   it('groups core and component providers without trusting their self-reported source', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-capability-catalog-'));
+    const root = makeTempDir('yos-capability-catalog-');
     tmpDirs.push(root);
     const coreDir = writeProvider(root, 'core/message', {
       name: 'core-message',
@@ -85,7 +87,7 @@ describe('local capability catalog', () => {
   });
 
   it('derives provenance and compatibility instead of trusting component self-reporting', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-capability-provenance-'));
+    const root = makeTempDir('yos-capability-provenance-');
     tmpDirs.push(root);
     const dir = writeProvider(root, 'components/untrusted', {
       name: 'untrusted',
@@ -113,7 +115,7 @@ describe('local capability catalog', () => {
 
   it('discovers only package core skills and recorded component directories', () => {
     assert.equal(typeof catalogModule.discoverLocalCapabilityProviders, 'function');
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-capability-discovery-'));
+    const root = makeTempDir('yos-capability-discovery-');
     tmpDirs.push(root);
     const coreSkillsDir = path.join(root, 'package-skills');
     const installedSkillsDir = path.join(root, 'installed-skills');
@@ -144,7 +146,7 @@ describe('local capability catalog', () => {
   });
 
   it('reads only SKILL.md and package.json from provider roots', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-capability-read-boundary-'));
+    const root = makeTempDir('yos-capability-read-boundary-');
     tmpDirs.push(root);
     const dir = writeProvider(root, 'component', {
       name: 'bounded', capabilityId: 'communication.message', selfReportedSource: 'component',

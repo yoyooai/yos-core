@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
-const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-runtime-base-url-'));
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
+
+const tmpRoot = makeTempDir('yos-runtime-base-url-');
 process.env.HOME = tmpRoot;
 process.env.YOS_DIR = path.join(tmpRoot, 'yos-home');
 fs.mkdirSync(process.env.YOS_DIR, { recursive: true });
@@ -13,7 +14,7 @@ fs.writeFileSync(path.join(process.env.YOS_DIR, '.env'), '', 'utf8');
 describe('runtime base URL support', () => {
   test('rejects runtime preparation when the current instruction marker is missing', async () => {
     const { prepareRuntimeInstruction } = await import('../../commands/runtime.js');
-    const yosDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-runtime-instructions-'));
+    const yosDir = makeTempDir('yos-runtime-instructions-');
     fs.writeFileSync(path.join(yosDir, 'AGENTS.md'), 'legacy instructions\n');
     assert.throws(
       () => prepareRuntimeInstruction('codex', { yosDir }),

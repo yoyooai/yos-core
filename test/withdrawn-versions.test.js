@@ -15,10 +15,11 @@
 
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, test } from '@jest/globals';
+
+import { makeTempDir } from './helpers/temp-dir.js';
 
 import {
   loadWithdrawn,
@@ -45,7 +46,7 @@ afterAll(() => {
   while (tmpDirs.length > 0) fs.rmSync(tmpDirs.pop(), { recursive: true, force: true });
 });
 const tmpDir = prefix => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const dir = makeTempDir(prefix);
   tmpDirs.push(dir);
   return dir;
 };

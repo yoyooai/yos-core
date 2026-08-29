@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 const origHome = process.env.HOME;
 const origTmpdir = process.env.TMPDIR;
@@ -11,7 +12,7 @@ const tmpDirs = [];
 const { merge3, isDiff3Available } = await import('../diff3.js');
 
 function makeTmpDir() {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-diff3-test-'));
+  const tmpDir = makeTempDir('yos-diff3-test-');
   tmpDirs.push(tmpDir);
   return tmpDir;
 }

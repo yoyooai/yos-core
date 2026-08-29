@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it, beforeEach } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
+
 const ORIG_YOS_DIR = process.env.YOS_DIR;
-const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'c4-db-cp-test-'));
+const TMP_DIR = makeTempDir('c4-db-cp-test-');
 process.env.YOS_DIR = TMP_DIR;
 
 const mod = await import(new URL('../c4-db.js', import.meta.url));

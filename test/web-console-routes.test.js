@@ -1,11 +1,12 @@
 import fs from 'node:fs';
 import net from 'node:net';
-import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, test } from '@jest/globals';
 import Database from '../skills/web-console/node_modules/better-sqlite3/lib/index.js';
 import WebSocket from '../skills/web-console/node_modules/ws/wrapper.mjs';
+
+import { makeTempDir } from './helpers/temp-dir.js';
 
 const SERVER_PATH = path.resolve('skills/web-console/scripts/server.js');
 const SQLITE_MODULE = path.resolve('skills/web-console/node_modules/better-sqlite3/lib/index.js');
@@ -80,7 +81,7 @@ db.close();
 }
 
 async function startServer({ maxUploadMb = 20 } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wc-routes-'));
+  const root = makeTempDir('wc-routes-');
   const dbPath = path.join(root, 'comm-bridge', 'c4.db');
   const skillsDir = path.join(root, 'skills');
   fs.mkdirSync(path.join(root, 'activity-monitor'), { recursive: true });

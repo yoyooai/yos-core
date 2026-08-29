@@ -5,6 +5,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 // This file names the legacy identifiers it is looking for, so scanning it would
@@ -154,7 +156,7 @@ describe('README compatibility claims match the code', () => {
   });
 
   it('detects legacy runtime variables in executable templates', () => {
-    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-compat-'));
+    const fixtureRoot = makeTempDir('yos-compat-');
     try {
       fs.mkdirSync(path.join(fixtureRoot, 'templates', 'pm2'), { recursive: true });
       fs.writeFileSync(

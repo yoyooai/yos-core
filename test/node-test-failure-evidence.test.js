@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { describe, expect, test } from '@jest/globals';
@@ -8,6 +7,8 @@ import {
   formatFailureReport,
   summarizeTapFailures,
 } from '../scripts/node-test-failure-report.js';
+
+import { makeTempDir } from './helpers/temp-dir.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const RUNNER = path.join(ROOT, 'scripts', 'run-node-tests.js');
@@ -20,7 +21,7 @@ const RUNNER = path.join(ROOT, 'scripts', 'run-node-tests.js');
  */
 
 function makeFixtureRoot(testBody) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-node-test-evidence-'));
+  const root = makeTempDir('yos-node-test-evidence-');
   const dir = path.join(root, 'cli', 'lib', '__tests__');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'fixture.test.js'), testBody);

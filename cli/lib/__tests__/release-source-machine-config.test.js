@@ -16,6 +16,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
+
 const ROOT = path.resolve(import.meta.dirname, '..', '..', '..');
 const dirs = [];
 
@@ -24,7 +26,7 @@ after(() => {
 });
 
 function machineWithEnvFile(contents) {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-machine-'));
+  const home = makeTempDir('yos-machine-');
   dirs.push(home);
   const yosDir = path.join(home, 'yos');
   fs.mkdirSync(yosDir, { recursive: true });

@@ -1,7 +1,8 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from '@jest/globals';
+
+import { makeTempDir } from './helpers/temp-dir.js';
 import {
   UploadRegistry,
   buildAnnotatedContent,
@@ -20,7 +21,7 @@ import {
 let tempRoot;
 
 beforeEach(() => {
-  tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wc-attachment-test-'));
+  tempRoot = makeTempDir('wc-attachment-test-');
 });
 
 afterEach(() => {

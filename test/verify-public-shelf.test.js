@@ -20,11 +20,12 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
-import os from 'node:os';
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test } from '@jest/globals';
+
+import { makeTempDir } from './helpers/temp-dir.js';
 
 import {
   LEGACY_0_1_13_INDEX_SHA256,
@@ -248,7 +249,7 @@ function run(baseUrl, extra = []) {
 }
 
 function restoreDir(shelf, { remove = null } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-restore-'));
+  const dir = makeTempDir('shelf-restore-');
   for (const [key, body] of shelf.bodies) {
     if (key === remove) continue;
     const target = path.join(dir, key);
@@ -280,7 +281,7 @@ describe('public shelf verifier', () => {
 
   test('running the verifier through a symlink still executes the gate', async () => {
     const { base } = await serve(makeShelf({ tamper: 'install.sh' }));
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-verifier-link-'));
+    const dir = makeTempDir('shelf-verifier-link-');
     const linkedScript = path.join(dir, 'verify-shelf.mjs');
     fs.symlinkSync(SCRIPT, linkedScript);
 
@@ -344,7 +345,7 @@ describe('public shelf verifier', () => {
   // extracts is not the same as one whose bytes are all still intact.
   test('a restored copy on disk passes when every byte survived', async () => {
     const shelf = makeShelf();
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-restore-'));
+    const dir = makeTempDir('shelf-restore-');
     for (const [key, body] of shelf.bodies) {
       const target = path.join(dir, key);
       fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -358,7 +359,7 @@ describe('public shelf verifier', () => {
 
   test('a restored copy with one corrupted file fails', async () => {
     const shelf = makeShelf();
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelf-restore-'));
+    const dir = makeTempDir('shelf-restore-');
     for (const [key, body] of shelf.bodies) {
       const target = path.join(dir, key);
       fs.mkdirSync(path.dirname(target), { recursive: true });

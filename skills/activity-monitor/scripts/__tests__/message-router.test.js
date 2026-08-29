@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { MessageRouter, messageForRoute, normalizeHealth } from '../message-router.js';
 
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
+
 async function withTmpDir(fn) {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'message-router-'));
+  const tmpDir = makeTempDir('message-router-');
   try {
     return await fn(tmpDir);
   } finally {

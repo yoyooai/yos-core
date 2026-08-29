@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { evaluateUpgrade, MAX_EVAL_FILES, MAX_EVAL_FILE_LINES } from '../claude-eval.js';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 /**
  * Why this file exists.
@@ -40,7 +41,7 @@ let skillDir;
 let tempDir;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-eval-'));
+  dir = makeTempDir('claude-eval-');
   skillDir = path.join(dir, 'installed');
   tempDir = path.join(dir, 'incoming');
   fs.mkdirSync(skillDir, { recursive: true });

@@ -22,8 +22,10 @@ import {
 } from '../tmux-helpers.js';
 import * as tmuxHelpers from '../tmux-helpers.js';
 
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
+
 function runAdapterStopInIsolation({ modulePath, exportName }) {
-  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-adapter-stop-'));
+  const fixtureRoot = makeTempDir('yos-adapter-stop-');
   const binDir = path.join(fixtureRoot, 'bin');
   const callsFile = path.join(fixtureRoot, 'tmux-calls.log');
   const runnerFile = path.join(fixtureRoot, 'runner.mjs');

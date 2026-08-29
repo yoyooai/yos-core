@@ -1,16 +1,17 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { runComponentRepair } from '../component-repair.js';
 
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
 function makeSkill(frontmatter, hookSource = '') {
-  const skillDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-component-repair-'));
+  const skillDir = makeTempDir('yos-component-repair-');
   fs.writeFileSync(path.join(skillDir, 'SKILL.md'), `---\n${frontmatter}\n---\n`);
   if (hookSource) {
     fs.mkdirSync(path.join(skillDir, 'hooks'), { recursive: true });
@@ -66,9 +67,17 @@ test('components without an explicit repair hook preserve the old no-op behavior
 });
 
 test('repair hook paths must remain inside the installed skill directory', () => {
-  const skillDir = makeSkill('name: repair-path-fixture');
-  const outsideHook = `${skillDir}-outside.js`;
-  const marker = `${skillDir}-outside-executed`;
+  // The bait has to sit outside the skill directory — that is the whole point —
+  // but it must not sit loose in os.tmpdir(), or every run leaves one behind
+  // (it did, until 2026-08-29). A managed parent gives it somewhere outside the
+  // skill directory that still gets cleaned up.
+  const outsideRoot = makeTempDir('yos-component-repair-outside-');
+  const skillDir = path.join(outsideRoot, 'skill');
+  fs.mkdirSync(skillDir, { recursive: true });
+  fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\nname: repair-path-fixture\n---\n');
+
+  const outsideHook = path.join(outsideRoot, 'outside.js');
+  const marker = path.join(outsideRoot, 'outside-executed');
   fs.writeFileSync(outsideHook, `import fs from 'node:fs'; fs.writeFileSync(${JSON.stringify(marker)}, 'executed');\n`);
 
   const assertRejectedWithoutExecution = (repairRef) => {

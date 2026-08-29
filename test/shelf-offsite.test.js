@@ -18,12 +18,13 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
-import os from 'node:os';
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, test } from '@jest/globals';
+
+import { makeTempDir } from './helpers/temp-dir.js';
 
 const SCRIPT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -39,7 +40,7 @@ let server = null;
 let tmpDirs = [];
 
 function tmpDir(prefix = 'offsite-') {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const dir = makeTempDir(prefix);
   tmpDirs.push(dir);
   return dir;
 }

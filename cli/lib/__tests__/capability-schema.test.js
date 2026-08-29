@@ -3,10 +3,11 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 
 import fs from 'node:fs';
-import os from 'node:os';
 import { afterEach } from 'node:test';
 
 import { parseSkillMd } from '../skill.js';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 const schemaModule = await import('../capability-schema.js').catch((loadError) => ({ loadError }));
 const FIXTURES = path.join(import.meta.dirname, 'fixtures', 'capabilities');
@@ -99,7 +100,7 @@ describe('capability declaration schema', () => {
   });
 
   it('rejects invalid operations, stability values, and health symlinks', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-capability-schema-'));
+    const root = makeTempDir('yos-capability-schema-');
     tmpDirs.push(root);
     fs.writeFileSync(path.join(root, 'outside.js'), 'process.exit(0);\n');
     fs.symlinkSync(path.join(root, 'outside.js'), path.join(root, 'health.js'));
@@ -130,7 +131,7 @@ describe('capability declaration schema', () => {
     // not advertised on the other. A typo must fail loudly: silently scoping a
     // capability to a runtime that does not exist would hide it everywhere,
     // which looks exactly like the capability not being there at all.
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-capability-runtimes-'));
+    const root = makeTempDir('yos-capability-runtimes-');
     tmpDirs.push(root);
     const base = {
       id: 'runtime.lifecycle',
@@ -167,7 +168,7 @@ describe('capability declaration schema', () => {
 
   it('uses a strict YAML entrypoint instead of turning malformed frontmatter into undeclared', () => {
     assert.equal(typeof schemaModule.parseCapabilitySkill, 'function');
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-capability-yaml-'));
+    const root = makeTempDir('yos-capability-yaml-');
     tmpDirs.push(root);
     fs.writeFileSync(path.join(root, 'SKILL.md'), '---\ncapabilities: [unterminated\n---\n');
     assert.throws(

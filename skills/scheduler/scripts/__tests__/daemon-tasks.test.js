@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { updateNextRunTime, processCompletedTasks, handleStaleRunningTasks, TASK_TIMEOUT } from '../daemon-tasks.js';
 import { now } from '../database.js';
 
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
+
 async function withDb(fn) {
   const originalYOSDir = process.env.YOS_DIR;
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scheduler-daemon-'));
+  const tmpDir = makeTempDir('scheduler-daemon-');
   try {
     process.env.YOS_DIR = tmpDir;
     const cacheBuster = `${Date.now()}-${Math.random().toString(16).slice(2)}`;

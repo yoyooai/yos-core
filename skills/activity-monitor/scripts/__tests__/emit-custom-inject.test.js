@@ -6,10 +6,12 @@ import { afterEach, describe, it } from 'node:test';
 
 import { customInjectDir, emitCustomInject } from '../emit-custom-inject.js';
 
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
+
 const tmpDirs = [];
 
 function makeYOSDir() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'custom-inject-test-'));
+  const dir = makeTempDir('custom-inject-test-');
   tmpDirs.push(dir);
   return dir;
 }

@@ -1,8 +1,9 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, test } from '@jest/globals';
+
+import { makeTempDir } from './helpers/temp-dir.js';
 
 import {
   loadApprovedTestBaselines,
@@ -43,7 +44,7 @@ describe('executed test baselines', () => {
   });
 
   test('the drift allowance sits inside the approval digest, so it cannot be widened quietly', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-test-drift-'));
+    const root = makeTempDir('yos-test-drift-');
     const policyPath = path.join(root, 'baselines.json');
     const tight = { jest: { minimumPassed: 10 }, node: { minimumPassed: 20 } };
     fs.writeFileSync(policyPath, JSON.stringify({ version: 1, baselines: tight, approvedDigest: digest(tight) }));
@@ -57,7 +58,7 @@ describe('executed test baselines', () => {
   });
 
   test('a negative drift allowance is not a valid declaration', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-test-drift-neg-'));
+    const root = makeTempDir('yos-test-drift-neg-');
     const policyPath = path.join(root, 'baselines.json');
     const bad = { jest: { minimumPassed: 10, driftAllowance: -1 }, node: { minimumPassed: 20 } };
     fs.writeFileSync(policyPath, JSON.stringify({ version: 1, baselines: bad, approvedDigest: digest(bad) }));
@@ -76,7 +77,7 @@ describe('executed test baselines', () => {
     expect(() => verifyNodeTapResult(tap, { minimumPassed: 1325 })).toThrow(/approved floor is 1325/);
   });
   test('rejects a baseline change until its approval digest is updated', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-test-baselines-'));
+    const root = makeTempDir('yos-test-baselines-');
     const policyPath = path.join(root, 'baselines.json');
     const baselines = {
       jest: { minimumPassed: 186 },

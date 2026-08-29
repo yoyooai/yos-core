@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
+
 import {
   DEFAULT_WEB_CONSOLE_PORT,
   probePort,
@@ -19,7 +21,7 @@ afterEach(() => {
 });
 
 function envFileWith(content) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-console-port-'));
+  const dir = makeTempDir('yos-console-port-');
   tmpDirs.push(dir);
   const file = path.join(dir, '.env');
   fs.writeFileSync(file, content);

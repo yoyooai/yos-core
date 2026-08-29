@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 
 import { MonitorOrchestrator } from '../monitor-orchestrator.js';
 
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
+
 describe('MonitorOrchestrator', () => {
   function createHarness(overrides = {}) {
-    const monitorDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-monitor-orchestrator-'));
+    const monitorDir = makeTempDir('yos-monitor-orchestrator-');
     fs.rmSync(monitorDir, { recursive: true, force: true });
 
     const calls = [];

@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { afterEach, describe, it } from 'node:test';
 import { acquireSource, inspectLocalSource, registerSourceResolver } from '../download.js';
 import { isLocalPathSpecifier, resolveTarget } from '../components.js';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 const tmpDirs = [];
 
@@ -16,7 +17,7 @@ afterEach(() => {
 });
 
 function makeTmpDir() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-local-source-test-'));
+  const dir = makeTempDir('yos-local-source-test-');
   tmpDirs.push(dir);
   return dir;
 }

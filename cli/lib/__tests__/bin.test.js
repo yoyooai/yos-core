@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 // We need to set YOS_DIR before importing bin.js (it reads BIN_DIR from config at import time)
-const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-bin-test-'));
+const tmpRoot = makeTempDir('yos-bin-test-');
 process.env.YOS_DIR = tmpRoot;
 
 const { linkBins, unlinkBins } = await import('../bin.js');

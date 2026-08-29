@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { createClaudeProbe } from '../heartbeat/claude-probe.js';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 /**
  * The Claude probe carried its own copy of the pending-state reader and so
@@ -26,7 +27,7 @@ let dir;
 let pendingFile;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-probe-'));
+  dir = makeTempDir('claude-probe-');
   pendingFile = path.join(dir, 'claude-heartbeat-pending.json');
 });
 

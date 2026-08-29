@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 describe('base URL support', () => {
   test('init command exports helpers for base-url parsing and validation', async () => {
@@ -73,7 +74,7 @@ describe('base URL support', () => {
   });
 
   test('writeCodexConfig writes openai_base_url when OPENAI_BASE_URL is set', async () => {
-    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-base-url-'));
+    const tmpRoot = makeTempDir('yos-base-url-');
     const originalHome = process.env.HOME;
     const originalOpenAiBaseUrl = process.env.OPENAI_BASE_URL;
 
@@ -100,7 +101,7 @@ describe('base URL support', () => {
   });
 
   test('writeCodexConfig writes openai_base_url when explicit opts.openaiBaseUrl is provided', async () => {
-    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-base-url-opt-'));
+    const tmpRoot = makeTempDir('yos-base-url-opt-');
     const originalHome = process.env.HOME;
     const originalOpenAiBaseUrl = process.env.OPENAI_BASE_URL;
 

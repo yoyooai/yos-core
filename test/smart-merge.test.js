@@ -1,9 +1,10 @@
 import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { smartSync, formatMergeResult } from '../cli/lib/smart-merge.js';
 import { generateManifest, saveManifest, saveOriginals, saveMergeBaseline, loadManifest, hashFile } from '../cli/lib/manifest.js';
+
+import { makeTempDir } from './helpers/temp-dir.js';
 
 let tmpRoot;
 
@@ -26,7 +27,7 @@ function fileExists(dir, relPath) {
 }
 
 beforeEach(() => {
-  tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-test-'));
+  tmpRoot = makeTempDir('yos-test-');
 });
 
 afterEach(() => {

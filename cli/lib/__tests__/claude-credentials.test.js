@@ -13,8 +13,9 @@
 import assert from 'node:assert/strict';
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 import {
   CLAUDE_SETTINGS_ENV_KEYS,
@@ -42,7 +43,7 @@ function writeYosEnv(body) {
 }
 
 beforeEach(() => {
-  home = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-cred-home-'));
+  home = makeTempDir('yos-cred-home-');
   yosDir = path.join(home, 'yos');
 });
 

@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 
 import { writeEnvEntries } from '../env.js';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 import {
   parseInitFlags,
   recordAdministratorAlertTarget,
@@ -48,7 +49,7 @@ describe('administrator alert configuration', () => {
   });
 
   test('installation can replace only blank administrator placeholders', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-admin-env-'));
+    const root = makeTempDir('yos-admin-env-');
     const envFile = path.join(root, '.env');
     fs.writeFileSync(envFile, [
       'EXISTING=value',
@@ -72,7 +73,7 @@ describe('administrator alert configuration', () => {
   });
 
   test('installation records an explicit target and warns when delivery has none', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-admin-record-'));
+    const root = makeTempDir('yos-admin-record-');
     const envFile = path.join(root, '.env');
     const warnings = [];
     fs.writeFileSync(envFile, 'YOS_ADMIN_CHANNEL=\nYOS_ADMIN_ENDPOINT=\n');
@@ -95,7 +96,7 @@ describe('administrator alert configuration', () => {
   });
 
   test('an explicit init target replaces the previous target without touching other settings', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-admin-replace-'));
+    const root = makeTempDir('yos-admin-replace-');
     const envFile = path.join(root, '.env');
     fs.writeFileSync(envFile, [
       'EXISTING=keep-me',
@@ -119,7 +120,7 @@ describe('administrator alert configuration', () => {
 
 
   test('template deployment persists the target into the generated installation env', () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-admin-deploy-'));
+    const home = makeTempDir('yos-admin-deploy-');
     const yosDir = path.join(home, 'yos');
     const initUrl = new URL('../../commands/init.js', import.meta.url).href;
     try {

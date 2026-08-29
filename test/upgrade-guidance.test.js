@@ -1,9 +1,10 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { step7_runPostUpgradeHook } from '../cli/lib/upgrade.js';
+
+import { makeTempDir } from './helpers/temp-dir.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const UPGRADE_GUIDE = path.join(
@@ -13,7 +14,7 @@ const UPGRADE_GUIDE = path.join(
 const HOOK_GUIDANCE = 'Post-upgrade hooks never report `failed`. Treat a `skipped` result with `no post-upgrade hook` as normal. Investigate every other `skipped` result, including `hook had issues`, `hook not found`, and `hook path escapes skill directory`, because the declared config migration did not complete.';
 
 function makeSkillDir(frontmatter) {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-upgrade-guidance-'));
+  const tempRoot = makeTempDir('yos-upgrade-guidance-');
   const skillDir = path.join(tempRoot, 'demo');
   fs.mkdirSync(skillDir, { recursive: true });
   fs.writeFileSync(

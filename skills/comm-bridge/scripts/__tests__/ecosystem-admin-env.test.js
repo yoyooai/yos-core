@@ -2,14 +2,15 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { it } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
 
 const ecosystemPath = fileURLToPath(new URL('../../../../templates/pm2/ecosystem.config.cjs', import.meta.url));
 
 it('loads the configured administrator target into alert-producing processes', () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-ecosystem-env-'));
+  const home = makeTempDir('yos-ecosystem-env-');
   try {
     const yosDir = path.join(home, 'yos');
     fs.mkdirSync(yosDir, { recursive: true });
@@ -43,7 +44,7 @@ it('loads the configured administrator target into alert-producing processes', (
 });
 
 it('keeps empty administrator targets on their own lines', () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-ecosystem-empty-env-'));
+  const home = makeTempDir('yos-ecosystem-empty-env-');
   try {
     const yosDir = path.join(home, 'yos');
     fs.mkdirSync(yosDir, { recursive: true });

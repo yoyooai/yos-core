@@ -16,9 +16,10 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 import {
   fetchMirrorIndex,
   mirrorRelativePath,
@@ -36,7 +37,7 @@ afterEach(() => resetMirrorIndexCache());
 
 /** A real file on disk, so the digest is computed rather than asserted. */
 function writeTemp(contents) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-integrity-test-'));
+  const dir = makeTempDir('yos-integrity-test-');
   const file = path.join(dir, 'archive.tar.gz');
   fs.writeFileSync(file, contents);
   return file;

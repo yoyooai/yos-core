@@ -7,6 +7,8 @@ import { afterEach, describe, it } from 'node:test';
 
 import { confirmInteractive } from '../prompts.js';
 
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
+
 const CLI = path.join(import.meta.dirname, '..', '..', 'yos.js');
 const COMPONENT_CMD = path.join(import.meta.dirname, '..', '..', 'commands', 'component.js');
 const tmpDirs = [];
@@ -33,7 +35,7 @@ describe('confirmInteractive', () => {
 });
 
 function makeFixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-notty-confirm-'));
+  const root = makeTempDir('yos-notty-confirm-');
   tmpDirs.push(root);
   const yosDir = path.join(root, 'yos-home');
   fs.mkdirSync(path.join(yosDir, '.yos'), { recursive: true });

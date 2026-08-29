@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 import {
   codexGlobalConfigPath,
@@ -24,7 +25,7 @@ import {
 const tmpDirs = [];
 
 function makeEnv() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-codex-hooks-test-'));
+  const root = makeTempDir('yos-codex-hooks-test-');
   tmpDirs.push(root);
   const homeDir = path.join(root, 'home');
   const yosDir = path.join(root, 'yos');

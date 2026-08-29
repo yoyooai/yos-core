@@ -3,10 +3,11 @@ import { spawn, spawnSync } from 'node:child_process';
 import { describe, it } from 'node:test';
 import fs from 'node:fs';
 import net from 'node:net';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
+
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
 
 const CLI_PATH = fileURLToPath(new URL('../c4-receive.js', import.meta.url));
 
@@ -36,7 +37,7 @@ function cliRawAsync(args, env = {}) {
 }
 
 function withTmpDir(fn) {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'c4-receive-'));
+  const tmpDir = makeTempDir('c4-receive-');
   fs.mkdirSync(path.join(tmpDir, 'activity-monitor'), { recursive: true });
   const env = { YOS_DIR: tmpDir };
   try {
@@ -47,7 +48,7 @@ function withTmpDir(fn) {
 }
 
 async function withTmpDirAsync(fn) {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'c4-receive-'));
+  const tmpDir = makeTempDir('c4-receive-');
   fs.mkdirSync(path.join(tmpDir, 'activity-monitor'), { recursive: true });
   const env = { YOS_DIR: tmpDir };
   try {

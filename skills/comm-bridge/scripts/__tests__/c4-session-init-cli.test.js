@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { describe, it } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
 
 const CLI_PATH = fileURLToPath(new URL('../c4-session-init.js', import.meta.url));
 const RECEIVE_PATH = fileURLToPath(new URL('../c4-receive.js', import.meta.url));
@@ -33,7 +34,7 @@ function checkpoint(args, env = {}) {
 }
 
 function withTmpDir(fn) {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'c4-session-init-'));
+  const tmpDir = makeTempDir('c4-session-init-');
   const env = { YOS_DIR: tmpDir };
   // Warm up DB
   checkpoint(['latest'], env);

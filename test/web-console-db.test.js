@@ -1,14 +1,15 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from '@jest/globals';
 import { openDb, SessionStore, PersistentUploadRegistry } from '../skills/web-console/scripts/db.js';
+
+import { makeTempDir } from './helpers/temp-dir.js';
 
 let tempDir;
 let db;
 
 beforeEach(() => {
-  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wc-db-test-'));
+  tempDir = makeTempDir('wc-db-test-');
   db = openDb(path.join(tempDir, 'test.db'));
 });
 

@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 const {
   buildCleanEnv, buildCompatEnv, parseManifest, parsePathManifest,
@@ -160,7 +161,7 @@ describe('parseRuntimeEnvManifest', () => {
 
 describe('loadRuntimeEnvManifest', () => {
   it('loads and parses manifest from .yos/ subdir', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-test-'));
+    const tmpDir = makeTempDir('yos-test-');
     tmpDirs.push(tmpDir);
     const yosSubdir = path.join(tmpDir, '.yos');
     fs.mkdirSync(yosSubdir);
@@ -499,7 +500,7 @@ describe('buildCompatEnv', () => {
 
 describe('deployManifestTemplate', () => {
   it('creates manifest from template when missing', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-deploy-'));
+    const tmpDir = makeTempDir('yos-deploy-');
     tmpDirs.push(tmpDir);
     const templatePath = path.join(tmpDir, 'runtime-env.manifest.example');
     fs.writeFileSync(templatePath, 'env TZ\n');
@@ -514,7 +515,7 @@ describe('deployManifestTemplate', () => {
   });
 
   it('does not overwrite existing manifest', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-deploy-'));
+    const tmpDir = makeTempDir('yos-deploy-');
     tmpDirs.push(tmpDir);
     const templatePath = path.join(tmpDir, 'runtime-env.manifest.example');
     fs.writeFileSync(templatePath, 'env NEW_VAR\n');
@@ -532,7 +533,7 @@ describe('deployManifestTemplate', () => {
   });
 
   it('returns template_missing when template does not exist', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-deploy-'));
+    const tmpDir = makeTempDir('yos-deploy-');
     tmpDirs.push(tmpDir);
     const status = deployManifestTemplate('/nonexistent/template', tmpDir);
     assert.equal(status, 'template_missing');

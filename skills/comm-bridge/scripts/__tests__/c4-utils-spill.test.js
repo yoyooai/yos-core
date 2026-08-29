@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
 
 // Set up an isolated temp YOS_DIR BEFORE importing c4-utils.js so that
 // c4-config.js (evaluated once at first import) picks up our temp path.
 const ORIG_YOS_DIR = process.env.YOS_DIR;
-const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'c4-utils-spill-test-'));
+const TMP_DIR = makeTempDir('c4-utils-spill-test-');
 process.env.YOS_DIR = TMP_DIR;
 
 // Dynamic import so the env var is set before c4-config.js evaluates.

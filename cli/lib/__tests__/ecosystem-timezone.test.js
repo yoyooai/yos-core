@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { describe, it } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 const ecosystemPath = fileURLToPath(
   new URL('../../../templates/pm2/ecosystem.config.cjs', import.meta.url)
@@ -20,7 +21,7 @@ const ecosystemPath = fileURLToPath(
 // last_check_human 03:41:37 while `date` on the same box said 11:41:37.
 
 function readEnvsWith(envLines, appNames, extraSetup) {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-ecosystem-tz-'));
+  const home = makeTempDir('yos-ecosystem-tz-');
   try {
     const yosDir = path.join(home, 'yos');
     fs.mkdirSync(yosDir, { recursive: true });

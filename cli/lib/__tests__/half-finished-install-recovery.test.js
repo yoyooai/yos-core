@@ -12,13 +12,14 @@
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { afterEach, describe, it } from 'node:test';
 
 import { describeExtractFailure, extractTarball } from '../download.js';
 import { refreshSplitInstructions } from '../runtime/instruction-builder.js';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 /** The thrown error itself is the subject here, so it has to be captured. */
 function captureThrow(fn) {
@@ -40,7 +41,7 @@ afterEach(() => {
 });
 
 function tmpDir(prefix) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const dir = makeTempDir(prefix);
   tmpDirs.push(dir);
   return dir;
 }

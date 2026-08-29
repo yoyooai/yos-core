@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { ToolPipeline, canTreatPaneAsRecovered } from '../tool-pipeline.js';
+
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
 
 /**
  * Why this file exists.
@@ -53,7 +54,7 @@ const PID = 1869;
 const T0 = 1_787_821_000_000;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tool-pipeline-'));
+  dir = makeTempDir('tool-pipeline-');
   files = {
     toolEvents: path.join(dir, 'tool-events.jsonl'),
     toolEventStreamState: path.join(dir, 'tool-event-stream-state.json'),

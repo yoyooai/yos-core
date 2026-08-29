@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
 
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-foreground-test-'));
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
+
+const tmpDir = makeTempDir('session-foreground-test-');
 
 after(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });

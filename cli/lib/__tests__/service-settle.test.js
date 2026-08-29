@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 
 import { judgeSettle, readServiceState, registerService } from '../service.js';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 const tmpDirs = [];
 
@@ -14,7 +15,7 @@ afterEach(() => {
 
 /** A skill directory with an entry script, so registerService gets that far. */
 function makeSkillDir() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-service-test-'));
+  const root = makeTempDir('yos-service-test-');
   tmpDirs.push(root);
   const skillDir = path.join(root, 'skill');
   fs.mkdirSync(path.join(skillDir, 'src'), { recursive: true });

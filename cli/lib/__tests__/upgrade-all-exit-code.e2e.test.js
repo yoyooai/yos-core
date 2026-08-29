@@ -5,6 +5,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { afterEach, describe, it } from 'node:test';
 
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
+
 const CLI = path.join(import.meta.dirname, '..', '..', 'yos.js');
 const tmpDirs = [];
 
@@ -15,7 +17,7 @@ afterEach(() => {
 });
 
 function makeFixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-exit-code-e2e-'));
+  const root = makeTempDir('yos-exit-code-e2e-');
   tmpDirs.push(root);
   const yosDir = path.join(root, 'yos-home');
   fs.mkdirSync(path.join(yosDir, '.yos'), { recursive: true });

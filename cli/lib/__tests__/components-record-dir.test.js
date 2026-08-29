@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 const tmpDirs = [];
 
@@ -13,7 +14,7 @@ afterEach(() => {
 });
 
 function makeTmpDir() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-record-dir-test-'));
+  const dir = makeTempDir('yos-record-dir-test-');
   tmpDirs.push(dir);
   return dir;
 }

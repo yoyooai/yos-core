@@ -1,12 +1,13 @@
 import { describe, it, mock, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 // ── Fake filesystem ──────────────────────────────────────────────────────────
 
-const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-launch-test-'));
+const tmpRoot = makeTempDir('yos-launch-test-');
 const fakeHome = path.join(tmpRoot, 'home');
 const fakeYOSDir = path.join(fakeHome, 'yos');
 

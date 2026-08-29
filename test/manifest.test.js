@@ -1,7 +1,8 @@
 import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
+
+import { makeTempDir } from './helpers/temp-dir.js';
 import {
   generateManifest,
   saveManifest,
@@ -27,7 +28,7 @@ function writeFile(dir, relPath, content) {
 }
 
 beforeEach(() => {
-  tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-manifest-test-'));
+  tmpRoot = makeTempDir('yos-manifest-test-');
 });
 
 afterEach(() => {

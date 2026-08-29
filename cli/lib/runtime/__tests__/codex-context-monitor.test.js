@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { CodexContextMonitor } from '../codex-context-monitor.js';
+
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
 
 /**
  * Why this file exists.
@@ -25,7 +26,7 @@ let dir;
 let sessionsDay;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-ctx-'));
+  dir = makeTempDir('codex-ctx-');
   sessionsDay = path.join(dir, 'sessions', '2026', '08', '27');
   fs.mkdirSync(sessionsDay, { recursive: true });
 });

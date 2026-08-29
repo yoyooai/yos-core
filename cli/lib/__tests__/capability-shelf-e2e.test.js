@@ -7,8 +7,10 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { after, before, describe, it } from 'node:test';
 
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
+
 const CLI = path.join(import.meta.dirname, '..', '..', 'yos.js');
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-capability-shelf-e2e-'));
+const root = makeTempDir('yos-capability-shelf-e2e-');
 const yosDir = path.join(root, 'yos');
 let published = true;
 let server;

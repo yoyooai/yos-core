@@ -1,9 +1,10 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { jest } from '@jest/globals';
 import { runVerification } from '../scripts/verify.js';
+
+import { makeTempDir } from './helpers/temp-dir.js';
 
 function run(command, args, cwd) {
   const result = spawnSync(command, args, { cwd, encoding: 'utf8' });
@@ -13,7 +14,7 @@ function run(command, args, cwd) {
 }
 
 function makeFixture({ untrackedFile, blockedTrackedFile } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-verify-wiring-'));
+  const root = makeTempDir('yos-verify-wiring-');
   fs.writeFileSync(
     path.join(root, 'package.json'),
     JSON.stringify({ name: 'yos-policy-fixture', version: '1.0.0' }, null, 2) + '\n',

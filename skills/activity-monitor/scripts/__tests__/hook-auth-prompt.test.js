@@ -5,11 +5,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
+
 // ── test setup ──────────────────────────────────────────────────────
 // The hook script uses os.homedir() which reads from passwd, not HOME env.
 // We set YOS_DIR to override the base path for log and config files.
 
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'auth-prompt-test-'));
+const tmpDir = makeTempDir('auth-prompt-test-');
 const logDir = path.join(tmpDir, 'activity-monitor');
 const configDir = path.join(tmpDir, '.yos');
 const configFile = path.join(configDir, 'config.json');

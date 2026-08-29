@@ -7,6 +7,8 @@ import { afterEach, describe, it } from 'node:test';
 
 import * as componentEngines from '../component-engines.js';
 
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
+
 const {
   checkNodeEngine,
   describeEngineMismatch,
@@ -77,7 +79,7 @@ describe('checking a component against the running node', () => {
   });
 
   it('reads the declared range from the component on disk', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-engines-read-'));
+    const dir = makeTempDir('yos-engines-read-');
     tmpDirs.push(dir);
     assert.equal(readDeclaredNodeRange(dir), null, 'no package.json at all');
 
@@ -102,7 +104,7 @@ describe('checking a component against the running node', () => {
 describe('checking a component against the running YOS core', () => {
   it('reads the existing package.json.yos contract instead of leaving it dead metadata', () => {
     assert.equal(typeof componentEngines.readDeclaredYosContract, 'function');
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-component-contract-'));
+    const dir = makeTempDir('yos-component-contract-');
     tmpDirs.push(dir);
     fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
       yos: {
@@ -140,7 +142,7 @@ describe('checking a component against the running YOS core', () => {
 
 describe('yos add refuses a component this machine cannot run', () => {
   function makeFixture(engines) {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-engines-e2e-'));
+    const root = makeTempDir('yos-engines-e2e-');
     tmpDirs.push(root);
     const yosDir = path.join(root, 'yos-home');
     fs.mkdirSync(path.join(yosDir, '.yos'), { recursive: true });

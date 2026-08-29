@@ -6,6 +6,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from '@jest/globals';
 
+import { makeTempDir } from './helpers/temp-dir.js';
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BUILD_DIST = path.join(ROOT, 'scripts', 'build-dist.mjs');
 const VENDOR_SPEC = JSON.parse(
@@ -31,7 +33,7 @@ function vendorUrls(spec = VENDOR_SPEC) {
 }
 
 function buildVendorCache(spec = VENDOR_SPEC) {
-  const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-dist-vendor-cache-'));
+  const cache = makeTempDir('yos-dist-vendor-cache-');
   for (const url of vendorUrls(spec)) {
     const key = `${crypto.createHash('sha256').update(url).digest('hex').slice(0, 16)}-${path.basename(url)}`;
     fs.writeFileSync(path.join(cache, key), `fixture for ${url}\n`);
@@ -40,7 +42,7 @@ function buildVendorCache(spec = VENDOR_SPEC) {
 }
 
 function buildScriptWithVendorSource(transform) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-dist-script-fixture-'));
+  const root = makeTempDir('yos-dist-script-fixture-');
   fs.cpSync(path.join(ROOT, 'scripts'), path.join(root, 'scripts'), { recursive: true });
   fs.symlinkSync(path.join(ROOT, 'cli'), path.join(root, 'cli'), 'dir');
   fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(root, 'node_modules'), 'dir');
@@ -65,7 +67,7 @@ function git(cwd, args) {
 }
 
 function buildFixture(tagCount = 1) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-dist-safety-repo-'));
+  const dir = makeTempDir('yos-dist-safety-repo-');
   git(dir, ['init', '-q', '-b', 'main']);
   fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
 
@@ -92,7 +94,7 @@ function runBuild(args, { buildDist = BUILD_DIST } = {}) {
 
 function expectUnsafeVendorSourceRejected(transform) {
   const repo = buildFixture();
-  const output = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-dist-unsafe-vendor-source-'));
+  const output = makeTempDir('yos-dist-unsafe-vendor-source-');
   const { buildDist, spec } = buildScriptWithVendorSource(transform);
   const result = runBuild([
     '--production',
@@ -158,7 +160,7 @@ describe('distribution publication safety', () => {
 
   test('test-only mode defaults to retaining fifty versions', () => {
     const repo = buildFixture();
-    const output = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-dist-test-only-'));
+    const output = makeTempDir('yos-dist-test-only-');
     const result = runBuild([
       '--test-only',
       '--output', output,
@@ -174,7 +176,7 @@ describe('distribution publication safety', () => {
 
   test('production index records the verifiable source of every downloaded vendor artifact', () => {
     const repo = buildFixture();
-    const output = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-dist-vendor-provenance-'));
+    const output = makeTempDir('yos-dist-vendor-provenance-');
     const cache = buildVendorCache();
     const result = runBuild([
       '--production',

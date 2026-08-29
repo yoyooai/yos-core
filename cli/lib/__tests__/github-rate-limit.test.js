@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 const origEnv = {};
 for (const key of ['YOS_GH_RETRY_DELAY_MS', 'GITHUB_TOKEN', 'GH_TOKEN', 'PATH']) {
@@ -155,7 +156,7 @@ describe('withRateLimitRetryAsync', () => {
 
 describe('fetchRawFile wiring (fake curl on PATH)', () => {
   function installFakeCurl({ failuresBeforeSuccess, status }) {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-fake-curl-'));
+    const dir = makeTempDir('yos-fake-curl-');
     tmpDirs.push(dir);
     const stateFile = path.join(dir, 'calls');
     const script = `#!/bin/sh
@@ -203,7 +204,7 @@ describe('GitHub API authentication order (fake curl on PATH)', () => {
     publicFailuresBeforeSuccess = 0,
     publicStatus = '500',
   } = {}) {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-github-order-'));
+    const dir = makeTempDir('yos-github-order-');
     tmpDirs.push(dir);
     const callsFile = path.join(dir, 'curl-calls');
     const publicCallsFile = path.join(dir, 'public-calls');

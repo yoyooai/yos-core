@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { describe, it } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import Database from 'better-sqlite3';
+
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
 
 const CLI_PATH = fileURLToPath(new URL('../cli.js', import.meta.url));
 
@@ -28,7 +29,7 @@ function cliRaw(args, env = {}) {
 }
 
 function withTmpDir(fn) {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scheduler-cli-'));
+  const tmpDir = makeTempDir('scheduler-cli-');
   const dbPath = path.join(tmpDir, 'scheduler', 'scheduler.db');
   const env = { YOS_DIR: tmpDir, TZ: 'UTC' };
   try {

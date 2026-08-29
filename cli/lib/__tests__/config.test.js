@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { afterEach, describe, it } from 'node:test';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 const tempRoots = [];
 
@@ -39,7 +40,7 @@ function runConfigProbe({ home, yosDir }) {
 
 describe('YOS configuration namespace', () => {
   it('defaults to ~/yos and stores product metadata in .yos', () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-config-home-'));
+    const home = makeTempDir('yos-config-home-');
     tempRoots.push(home);
 
     const result = runConfigProbe({ home });
@@ -49,8 +50,8 @@ describe('YOS configuration namespace', () => {
   });
 
   it('honors an explicit YOS_DIR override', () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-config-home-'));
-    const yosDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-config-root-'));
+    const home = makeTempDir('yos-config-home-');
+    const yosDir = makeTempDir('yos-config-root-');
     tempRoots.push(home, yosDir);
 
     const result = runConfigProbe({ home, yosDir });

@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { after, beforeEach, describe, it } from 'node:test';
+
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
 
 import {
   createToolEventStreamState,
@@ -10,7 +11,7 @@ import {
   rotateToolEventStream,
 } from '../tool-event-stream.js';
 
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tool-event-stream-test-'));
+const tmpDir = makeTempDir('tool-event-stream-test-');
 const eventsFile = path.join(tmpDir, 'tool-events.jsonl');
 
 after(() => {

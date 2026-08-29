@@ -26,6 +26,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, test } from '@jest/globals';
 
+import { makeTempDir } from './helpers/temp-dir.js';
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BUILD_DIST = path.join(ROOT, 'scripts', 'build-dist.mjs');
 
@@ -48,7 +50,7 @@ function git(cwd, args) {
 
 /** A repo with one commit and one tag per version, each with its own install.sh. */
 function buildFixture() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-dist-fixture-'));
+  const dir = makeTempDir('yos-dist-fixture-');
   git(dir, ['init', '-q', '-b', 'main']);
   fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
 
@@ -72,7 +74,7 @@ function buildFixture() {
 
 beforeAll(() => {
   fixture = buildFixture();
-  output = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-dist-out-test-'));
+  output = makeTempDir('yos-dist-out-test-');
   // Retention 3 of 4 tags, so exactly one tag must be reported as dropped.
   buildLog = execFileSync(process.execPath, [
     BUILD_DIST,

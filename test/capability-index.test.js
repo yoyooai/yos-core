@@ -1,10 +1,11 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, test } from '@jest/globals';
 
 import { deriveCapabilityIndex } from '../scripts/lib/capability-index.mjs';
 import { buildLocalCapabilityCatalog } from '../cli/lib/capability-catalog.js';
+
+import { makeTempDir } from './helpers/temp-dir.js';
 
 function write(root, relative, contents) {
   const target = path.join(root, relative);
@@ -14,7 +15,7 @@ function write(root, relative, contents) {
 
 describe('derived shelf capability index', () => {
   test('derives providers from mirrored release metadata without copying artifact facts', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-capability-index-'));
+    const root = makeTempDir('yos-capability-index-');
     write(root, 'yoyooai/yos-components/raw/feishu-v0.1.4/channels/001_feishu/SKILL.md', `---\nname: feishu\ncapabilities:\n  - id: communication.message\n    title: Messages\n    operations: [send, receive]\n    keywords: [chat]\n    stability: stable\n---\n`);
     write(root, 'yoyooai/yos-components/raw/feishu-v0.1.4/channels/001_feishu/package.json', JSON.stringify({
       name: 'yos-feishu', version: '0.1.4', yos: { id: 'channel.feishu', core: '>=0.1.0-alpha.1 <0.2.0' }, engines: { node: '>=20.20.0' },
@@ -37,14 +38,14 @@ describe('derived shelf capability index', () => {
 
   test('is stable regardless of registry key order', () => {
     const index = { schemaVersion: 1, buildId: 'e'.repeat(64), repos: [], files: [] };
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-capability-index-empty-'));
+    const root = makeTempDir('yos-capability-index-empty-');
     const a = deriveCapabilityIndex({ index, registry: { components: { z: {}, a: {} } }, outputRoot: root });
     const b = deriveCapabilityIndex({ index, registry: { components: { a: {}, z: {} } }, outputRoot: root });
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));
   });
 
   test('uses one provider-neutral title in shelf and local catalogs regardless of provider order', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-capability-title-'));
+    const root = makeTempDir('yos-capability-title-');
     const providers = [
       { name: 'feishu', id: 'channel.feishu', title: '飞书消息', tag: 'feishu-v0.1.4' },
       { name: 'weixin', id: 'channel.weixin', title: '微信消息', tag: 'weixin-v0.1.3' },

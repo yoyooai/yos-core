@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { ClaudeContextMonitor } from '../claude-context-monitor.js';
 import { ClaudeAdapter } from '../claude.js';
+
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
 
 /**
  * Why this file exists.
@@ -29,7 +30,7 @@ let dir;
 let statuslineFile;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-ctx-'));
+  dir = makeTempDir('claude-ctx-');
   statuslineFile = path.join(dir, 'statusline.json');
 });
 

@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
+
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
 
 import {
   DEFAULT_FLAG_FRESH_TOLERANCE_MS,
@@ -23,7 +24,7 @@ import {
 const tmpDirs = [];
 
 function makeTmpdir() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shard-seq-test-'));
+  const dir = makeTempDir('shard-seq-test-');
   tmpDirs.push(dir);
   return dir;
 }

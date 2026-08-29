@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
-const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-runtime-setup-test-'));
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
+
+const tmpRoot = makeTempDir('yos-runtime-setup-test-');
 const fakeHome = path.join(tmpRoot, 'home');
 const fakeYOSDir = path.join(tmpRoot, 'yos');
 

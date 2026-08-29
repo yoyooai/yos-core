@@ -7,6 +7,8 @@ import { afterEach, describe, it } from 'node:test';
 
 import { assertCommandDirectory, inspectYosDirectory } from '../install-directory.js';
 
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
+
 const ROOT = path.resolve(import.meta.dirname, '..', '..', '..');
 const tmpDirs = [];
 
@@ -15,7 +17,7 @@ afterEach(() => {
 });
 
 function tmpDir() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-dir-identity-'));
+  const dir = makeTempDir('yos-dir-identity-');
   tmpDirs.push(dir);
   return dir;
 }

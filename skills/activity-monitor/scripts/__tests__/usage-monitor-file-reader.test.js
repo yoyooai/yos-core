@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
+
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
 import {
   readClaudeUsageFromMonitorFiles,
   readCodexUsageFromMonitorFile
 } from '../usage-monitor-file-reader.js';
 
 function withTmpDir(fn) {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'usage-monitor-reader-'));
+  const tmpDir = makeTempDir('usage-monitor-reader-');
   try {
     return fn(tmpDir);
   } finally {

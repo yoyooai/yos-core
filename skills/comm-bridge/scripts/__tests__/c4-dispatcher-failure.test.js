@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { after, describe, it } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'c4-dispatcher-failure-'));
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
+
+const tmpDir = makeTempDir('c4-dispatcher-failure-');
 const original = {
   YOS_DIR: process.env.YOS_DIR,
   C4_DISPATCHER_DISABLE_MAIN: process.env.C4_DISPATCHER_DISABLE_MAIN

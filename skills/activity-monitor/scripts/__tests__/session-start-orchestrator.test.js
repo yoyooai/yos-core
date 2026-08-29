@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -18,12 +17,14 @@ import {
 import { CORE_SHARDS } from '../shard-registry.js';
 import { enqueueStartupPrompt, isOnboardingPending } from '../session-start-prompt.js';
 
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
+
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const C4_SESSION_INIT = path.resolve(SCRIPT_DIR, '../../../comm-bridge/scripts/c4-session-init.js');
 const SESSION_START_PROMPT = path.resolve(SCRIPT_DIR, '../session-start-prompt.js');
 
 function tempStdout() {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-start-orch-'));
+  const tmpDir = makeTempDir('session-start-orch-');
   const filePath = path.join(tmpDir, 'stdout.txt');
   const fd = fs.openSync(filePath, 'w+');
   return {
@@ -377,7 +378,7 @@ describe('session-start-orchestrator', () => {
 
   it('imports c4-session-init without CLI side effects', () => {
     const result = spawnSync(process.execPath, ['-e', `import(${JSON.stringify(C4_SESSION_INIT)})`], {
-      env: { ...process.env, YOS_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'c4-import-')) },
+      env: { ...process.env, YOS_DIR: makeTempDir('c4-import-') },
       encoding: 'utf8',
     });
     assert.equal(result.status, 0);
@@ -386,7 +387,7 @@ describe('session-start-orchestrator', () => {
 
   it('imports session-start-prompt without CLI side effects', () => {
     const result = spawnSync(process.execPath, ['-e', `import(${JSON.stringify(SESSION_START_PROMPT)})`], {
-      env: { ...process.env, YOS_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'prompt-import-')) },
+      env: { ...process.env, YOS_DIR: makeTempDir('prompt-import-') },
       encoding: 'utf8',
     });
     assert.equal(result.status, 0);
@@ -473,7 +474,7 @@ describe('authoritative injection order (shard chain)', () => {
   });
 
   it('six core shards launched concurrently in reverse order inject in chain order', async () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shard-chain-order-'));
+    const tmpDir = makeTempDir('shard-chain-order-');
     const outPath = path.join(tmpDir, 'stdout.txt');
     const fd = fs.openSync(outPath, 'w+');
     const chain = CORE_SHARDS.map((core, index) => ({

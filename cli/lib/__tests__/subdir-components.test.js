@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { afterEach, describe, it } from 'node:test';
 import { extractTarball } from '../download.js';
 import { buildTagName, matchTagVersion, selectInstallVersion } from '../github.js';
 import { resolveTarget } from '../components.js';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 const tmpDirs = [];
 
@@ -17,7 +18,7 @@ afterEach(() => {
 });
 
 function makeTmpDir() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-subdir-test-'));
+  const dir = makeTempDir('yos-subdir-test-');
   tmpDirs.push(dir);
   return dir;
 }

@@ -1,9 +1,10 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { describe, expect, test } from '@jest/globals';
+
+import { makeTempDir } from './helpers/temp-dir.js';
 
 import {
   countActiveTests,
@@ -11,6 +12,7 @@ import {
   loadApprovedSkipAllowlist,
   listTrackedFiles,
   verifyCriticalTestFiles,
+  verifyTempDirPolicy,
   verifyTestBaselineGuard,
   verifyTestPolicy,
 } from '../scripts/test-policy.js';
@@ -32,7 +34,7 @@ function git(root, args) {
 }
 
 function makeRepository() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-test-policy-'));
+  const root = makeTempDir('yos-test-policy-');
   git(root, ['init', '--quiet']);
   return root;
 }
@@ -91,7 +93,7 @@ describe('test policy', () => {
   });
 
   test('rejects an allowlist change until its approval digest is updated', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-test-allowlist-'));
+    const root = makeTempDir('yos-test-allowlist-');
     const policyPath = path.join(root, 'allowlist.json');
     const entries = [{
       path: 'test/legacy.test.js',
@@ -109,7 +111,7 @@ describe('test policy', () => {
   });
 
   test('fails closed without a Git worktree or an available Git command', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-test-no-git-'));
+    const root = makeTempDir('yos-test-no-git-');
     expect(() => listTrackedFiles(root)).toThrow(/Git worktree is required/);
 
     fs.writeFileSync(path.join(root, '.git'), 'gitdir: elsewhere\n');
@@ -119,7 +121,7 @@ describe('test policy', () => {
   });
 
   test('rejects unapproved critical manifest changes, missing files, and files with no cases', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-critical-tests-'));
+    const root = makeTempDir('yos-critical-tests-');
     write(path.join(root, 'test', 'empty.test.js'), '// no tests here\n');
     write(path.join(root, 'test', 'protected.test.js'), "test('one', () => {});\ntest('two', () => {});\n");
     const approvedFiles = [{ path: 'test/protected.test.js', minimumTests: 2 }];
@@ -148,7 +150,7 @@ describe('test policy', () => {
   });
 
   test('rejects a removed, wrapped, late, or misplaced executed-test data gate', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-test-baseline-wiring-'));
+    const root = makeTempDir('yos-test-baseline-wiring-');
     const baselines = {
       jest: { minimumPassed: 186 },
       node: { minimumPassed: 1063 },
@@ -228,5 +230,112 @@ describe('test policy', () => {
 
   test('the checked-in repository satisfies the complete policy', () => {
     expect(() => verifyTestPolicy({ root: ROOT })).not.toThrow();
+  });
+});
+
+// On 2026-08-29 the suite was found to have left 19599 directories and 6.2G in
+// /tmp, because eight test files created temp directories inline with no
+// teardown. Deleting them was the easy half; these tests are the half that stops
+// it coming back.
+describe('temp directory policy', () => {
+  // The forbidden call is assembled rather than written out. The check does not
+  // strip strings or comments — deliberately, see verifyTempDirPolicy — so a
+  // literal copy of it in this file would flag this file.
+  const TMPDIR_CALL = `os.${'tmpdir'}()`;
+
+  function makeRepositoryWithTest(source) {
+    const root = makeRepository();
+    write(path.join(root, 'test', 'helpers', 'temp-dir.js'), 'export function makeTempDir() {}\n');
+    write(path.join(root, 'test', 'fixture.test.js'), source);
+    git(root, ['add', '.']);
+    return root;
+  }
+
+  test('rejects a test file that takes a temp directory straight off the system temp root', () => {
+    const root = makeRepositoryWithTest(
+      `const dir = fs.mkdtempSync(path.join(${TMPDIR_CALL}, 'leaky-'));\n`,
+    );
+
+    expect(() => verifyTempDirPolicy({ root })).toThrow(/must use makeTempDir/);
+    expect(() => verifyTempDirPolicy({ root })).toThrow(/test\/fixture\.test\.js:1/);
+  });
+
+  test('accepts the same file once it goes through the helper', () => {
+    const root = makeRepositoryWithTest(
+      "import { makeTempDir } from './helpers/temp-dir.js';\nconst dir = makeTempDir('leaky-');\n",
+    );
+
+    expect(() => verifyTempDirPolicy({ root })).not.toThrow();
+  });
+
+  // Nesting inside a directory the test already owns is not a leak: the parent's
+  // cleanup takes the child with it. Flagging this would push authors back to
+  // os.tmpdir() to get around the check.
+  test('allows a temp directory nested inside one the test already owns', () => {
+    const root = makeRepositoryWithTest(
+      "const child = fs.mkdtempSync(path.join(ownedRoot, 'child-'));\n",
+    );
+
+    expect(() => verifyTempDirPolicy({ root })).not.toThrow();
+  });
+
+  test('refuses to pass when the helper it points authors at is gone', () => {
+    const root = makeRepository();
+    write(path.join(root, 'test', 'fixture.test.js'), "test('ok', () => {});\n");
+    git(root, ['add', '.']);
+
+    expect(() => verifyTempDirPolicy({ root })).toThrow(/temp-dir helper is missing/);
+  });
+
+  test('the complete policy runs the temp directory check, so deleting the wiring goes red', () => {
+    const source = fs.readFileSync(path.join(ROOT, 'scripts', 'test-policy.js'), 'utf8');
+    expect(source).toMatch(/verifyTempDirPolicy\(\{ root, gitCommand \}\)/);
+    expect(() => verifyTempDirPolicy({ root: ROOT })).not.toThrow();
+  });
+
+  // Using the helper only cleans up if something calls cleanupTempDirs. Under
+  // node:test the helper installs its own exit handler, so it is self-contained;
+  // under Jest the teardown lives in jest.config.js. Removing that one line
+  // would put every Jest temp directory back in /tmp with nothing going red, so
+  // the line is asserted here.
+  test('the Jest teardown stays wired into jest.config.js', () => {
+    const config = fs.readFileSync(path.join(ROOT, 'jest.config.js'), 'utf8');
+    expect(config).toMatch(/setupFilesAfterEnv/);
+    expect(config).toMatch(/test\/setup\/cleanup-temp-dirs\.js/);
+
+    const setup = fs.readFileSync(path.join(ROOT, 'test', 'setup', 'cleanup-temp-dirs.js'), 'utf8');
+    expect(setup).toMatch(/afterAll/);
+    expect(setup).toMatch(/cleanupTempDirs\(\)/);
+  });
+
+  test('the helper cleans up what it handed out, and reports what it removed', async () => {
+    const { makeTempDir: make, cleanupTempDirs, pendingTempDirs } = await import('./helpers/temp-dir.js');
+    const first = make('yos-temp-dir-selftest-');
+    const second = make('yos-temp-dir-selftest-');
+
+    expect(fs.existsSync(first)).toBe(true);
+    expect(pendingTempDirs()).toEqual(expect.arrayContaining([first, second]));
+
+    const removed = cleanupTempDirs();
+
+    expect(removed).toEqual(expect.arrayContaining([first, second]));
+    expect(fs.existsSync(first)).toBe(false);
+    expect(fs.existsSync(second)).toBe(false);
+    expect(pendingTempDirs()).not.toEqual(expect.arrayContaining([first, second]));
+  });
+
+  test('cleanup never fails the suite over a directory that is already gone', async () => {
+    const { makeTempDir: make, cleanupTempDirs } = await import('./helpers/temp-dir.js');
+    const dir = make('yos-temp-dir-vanished-');
+    fs.rmSync(dir, { recursive: true, force: true });
+
+    expect(() => cleanupTempDirs()).not.toThrow();
+  });
+
+  test('a prefix that could escape the temp root is refused', async () => {
+    const { makeTempDir: make } = await import('./helpers/temp-dir.js');
+
+    expect(() => make('../escape-')).toThrow(/path separator/);
+    expect(() => make('')).toThrow(/non-empty prefix/);
   });
 });

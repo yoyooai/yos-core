@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 const {
   CONFIGURE_HOOK_TIMEOUT_MS,
@@ -10,10 +11,6 @@ const {
   resolveHookPath,
   runConfigureHook,
 } = await import('../configure-hook.js');
-
-function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'yos-configure-hook-'));
-}
 
 describe('configure-hook', () => {
   it('uses a bounded timeout for configure hooks', () => {
@@ -36,7 +33,7 @@ describe('configure-hook', () => {
   });
 
   it('pipes collected config as stdin JSON with component env vars', () => {
-    const root = makeTempDir();
+    const root = makeTempDir('yos-configure-hook-');
     const skillDir = path.join(root, 'skill');
     const dataDir = path.join(root, 'data');
     const hookDir = path.join(skillDir, 'hooks');
@@ -78,7 +75,7 @@ describe('configure-hook', () => {
   });
 
   it('fails when configure hook is declared but missing', () => {
-    const root = makeTempDir();
+    const root = makeTempDir('yos-configure-hook-');
     const result = runConfigureHook({
       componentName: 'missing',
       skillDir: root,

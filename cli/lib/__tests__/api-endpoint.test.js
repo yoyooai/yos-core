@@ -12,14 +12,15 @@
 import assert from 'node:assert/strict';
 import { before, after, beforeEach, describe, test } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLI_DIR = path.resolve(HERE, '..', '..');
 
-const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-api-endpoint-'));
+const tmpRoot = makeTempDir('yos-api-endpoint-');
 const yosDir = path.join(tmpRoot, 'yos');
 const claudeSettings = path.join(tmpRoot, '.claude', 'settings.json');
 const codexConfig = path.join(tmpRoot, '.codex', 'config.toml');

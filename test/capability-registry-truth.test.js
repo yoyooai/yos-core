@@ -5,6 +5,8 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
+import { makeTempDir } from './helpers/temp-dir.js';
+
 import {
   buildLocalCapabilityCatalog,
   discoverLocalCapabilityProviders,
@@ -123,7 +125,7 @@ describe('the command reads the runtime off the machine it is running on', () =>
   });
 
   const listWithConfig = config => {
-    const yosDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-cli-'));
+    const yosDir = makeTempDir('yos-cli-');
     tmpDirs.push(yosDir);
     // The path is part of the contract being tested: config.json lives under
     // $YOS_DIR/.yos, not $HOME/.yos. Getting that wrong makes the filter look
@@ -186,7 +188,7 @@ describe('capability health probes report the truth about this machine', () => {
   });
 
   const tmpYosDir = () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-probe-'));
+    const dir = makeTempDir('yos-probe-');
     tmpDirs.push(dir);
     return dir;
   };
@@ -280,7 +282,7 @@ describe('a probe runs from the copy of the skill that can actually run it', () 
   });
 
   const tmpDir = prefix => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+    const dir = makeTempDir(prefix);
     tmpDirs.push(dir);
     return dir;
   };

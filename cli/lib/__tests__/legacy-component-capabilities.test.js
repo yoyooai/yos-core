@@ -7,6 +7,8 @@ import { afterEach, describe, it } from 'node:test';
 
 import { parseSkillMd } from '../skill.js';
 
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
+
 const schemaModule = await import('../capability-schema.js').catch((loadError) => ({ loadError }));
 const CLI = path.join(import.meta.dirname, '..', '..', 'yos.js');
 const FIXTURE = path.join(import.meta.dirname, 'fixtures', 'capabilities', 'legacy-component');
@@ -18,7 +20,7 @@ afterEach(() => {
 
 describe('legacy component capability compatibility', () => {
   it('keeps a component without capabilities installable and reports it as undeclared', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-legacy-capability-'));
+    const root = makeTempDir('yos-legacy-capability-');
     tmpDirs.push(root);
     const yosDir = path.join(root, 'yos-home');
     fs.mkdirSync(path.join(yosDir, '.yos'), { recursive: true });

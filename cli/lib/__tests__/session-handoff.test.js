@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
-const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-session-handoff-test-'));
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
+
+const tmpRoot = makeTempDir('yos-session-handoff-test-');
 const fakeYOSDir = path.join(tmpRoot, 'yos');
 const argvPath = path.join(tmpRoot, 'argv.json');
 

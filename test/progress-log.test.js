@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from '@jest/globals';
@@ -11,6 +10,8 @@ import {
   verifyProgressLog,
 } from '../scripts/progress-log.js';
 import { runVerification } from '../scripts/verify.js';
+
+import { makeTempDir } from './helpers/temp-dir.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -34,7 +35,7 @@ const ROW_13 = '| `0.1.13` | 2026-08-09 | `181e1d3` | 卸载时把我们写进�
 const ROW_12 = '| `0.1.12` | 2026-08-09 | `82598c0` | `--yes` 一路传到底，说了不问就真的不问 |';
 
 function fixture(logSource, version = '0.1.13') {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-progress-'));
+  const root = makeTempDir('yos-progress-');
   fs.mkdirSync(path.join(root, 'docs'), { recursive: true });
   if (logSource !== null) {
     fs.writeFileSync(path.join(root, PROGRESS_LOG_PATH), logSource);

@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import Database from 'better-sqlite3';
 
 import { generateId, now } from '../database.js';
+
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
 
 describe('generateId', () => {
   it('starts with task- prefix', () => {
@@ -40,7 +41,7 @@ describe('now', () => {
 describe('getDb', () => {
   it('creates data directory and initializes schema', async () => {
     const originalYOSDir = process.env.YOS_DIR;
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scheduler-db-'));
+    const tmpDir = makeTempDir('scheduler-db-');
     const dbPath = path.join(tmpDir, 'scheduler', 'scheduler.db');
     try {
       process.env.YOS_DIR = tmpDir;
@@ -83,7 +84,7 @@ describe('getDb', () => {
 describe('cleanupHistory', () => {
   it('removes entries older than retention period', async () => {
     const originalYOSDir = process.env.YOS_DIR;
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scheduler-cleanup-'));
+    const tmpDir = makeTempDir('scheduler-cleanup-');
     try {
       process.env.YOS_DIR = tmpDir;
 
@@ -131,7 +132,7 @@ describe('cleanupHistory', () => {
 
   it('returns 0 when nothing to clean', async () => {
     const originalYOSDir = process.env.YOS_DIR;
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scheduler-cleanup-empty-'));
+    const tmpDir = makeTempDir('scheduler-cleanup-empty-');
     try {
       process.env.YOS_DIR = tmpDir;
 

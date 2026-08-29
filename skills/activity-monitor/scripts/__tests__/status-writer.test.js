@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
+
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
 
 import {
   buildStatusPayload,
@@ -12,7 +13,7 @@ import {
 } from '../status-writer.js';
 
 function tempStatusFile() {
-  return path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'yos-status-writer-')), 'agent-status.json');
+  return path.join(makeTempDir('yos-status-writer-'), 'agent-status.json');
 }
 
 describe('status-writer', () => {

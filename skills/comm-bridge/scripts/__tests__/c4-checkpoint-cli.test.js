@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { describe, it } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
 
 const CLI_PATH = fileURLToPath(new URL('../c4-checkpoint.js', import.meta.url));
 
@@ -21,7 +22,7 @@ function cli(args, env = {}) {
  * This avoids "[C4-DB] Database initialized" polluting stdout in later calls.
  */
 function withTmpDir(fn) {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'c4-checkpoint-cli-'));
+  const tmpDir = makeTempDir('c4-checkpoint-cli-');
   const env = { YOS_DIR: tmpDir };
   // Warm up: initialize DB so subsequent calls have clean stdout.
   cli(['latest'], env);

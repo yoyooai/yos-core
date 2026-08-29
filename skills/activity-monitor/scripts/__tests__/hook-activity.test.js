@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { after, beforeEach, describe, it } from 'node:test';
 
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hook-activity-test-'));
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
+
+const tmpDir = makeTempDir('hook-activity-test-');
 const monitorDir = path.join(tmpDir, 'activity-monitor');
 const eventsFile = path.join(monitorDir, 'tool-events.jsonl');
 

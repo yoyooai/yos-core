@@ -5,6 +5,8 @@ import { spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { describe, expect, test } from '@jest/globals';
 
+import { makeTempDir } from './helpers/temp-dir.js';
+
 import {
   buildSystemdUnits,
   installAndVerifySystemdUnits,
@@ -33,7 +35,7 @@ function config(root) {
 
 describe('shelf automatic backup systemd installer', () => {
   async function expectBusyServiceRejected(activeState, status) {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-running-service-'));
+    const root = makeTempDir('yos-auto-running-service-');
     const outputDir = path.join(root, 'units');
     const calls = [];
     const runCommand = (command, args) => {
@@ -70,7 +72,7 @@ describe('shelf automatic backup systemd installer', () => {
   }
 
   async function expectSignalRestoresInstallation(signal) {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-system-signal-'));
+    const root = makeTempDir('yos-auto-system-signal-');
     const outputDir = path.join(root, 'units');
     const stateDir = path.join(root, 'state');
     const restoreDir = path.join(root, 'restore');
@@ -124,7 +126,7 @@ describe('shelf automatic backup systemd installer', () => {
   }
 
   test('builds a persistent oneshot timer without embedding credential values', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-units-'));
+    const root = makeTempDir('yos-auto-units-');
     const configPath = config(root);
     const units = await buildSystemdUnits({
       configPath,
@@ -146,7 +148,7 @@ describe('shelf automatic backup systemd installer', () => {
   });
 
   test('writes units atomically but does not invoke systemctl', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-install-'));
+    const root = makeTempDir('yos-auto-install-');
     const outputDir = path.join(root, 'units');
     const result = await installSystemdUnits({
       configPath: config(root),
@@ -168,7 +170,7 @@ describe('shelf automatic backup systemd installer', () => {
   });
 
   test('builds a system unit for the selected unprivileged operator without weakening the sandbox', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-system-unit-'));
+    const root = makeTempDir('yos-auto-system-unit-');
     const messageDir = path.join(root, 'comm-bridge');
     const units = await buildSystemdUnits({
       configPath: config(root),
@@ -192,7 +194,7 @@ describe('shelf automatic backup systemd installer', () => {
   });
 
   test('system installation enables the timer and proves the real backup service can run', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-system-install-'));
+    const root = makeTempDir('yos-auto-system-install-');
     const outputDir = path.join(root, 'units');
     const messageDir = path.join(root, 'comm-bridge');
     fs.mkdirSync(messageDir);
@@ -239,7 +241,7 @@ describe('shelf automatic backup systemd installer', () => {
   });
 
   test('refuses an alert write path the selected operator cannot write before installing units', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-alert-path-'));
+    const root = makeTempDir('yos-auto-alert-path-');
     const outputDir = path.join(root, 'units');
     const messageDir = path.join(root, 'comm-bridge');
     fs.mkdirSync(messageDir);
@@ -293,7 +295,7 @@ describe('shelf automatic backup systemd installer', () => {
   });
 
   test('a failed real trigger removes a fresh system installation', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-system-fail-'));
+    const root = makeTempDir('yos-auto-system-fail-');
     const outputDir = path.join(root, 'units');
     const calls = [];
     const runCommand = (command, args) => {
@@ -325,7 +327,7 @@ describe('shelf automatic backup systemd installer', () => {
   });
 
   test('a failed replacement restores the previous units and their enabled state', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-system-restore-'));
+    const root = makeTempDir('yos-auto-system-restore-');
     const outputDir = path.join(root, 'units');
     const stateDir = path.join(root, 'state');
     const restoreDir = path.join(root, 'restore');
@@ -383,7 +385,7 @@ describe('shelf automatic backup systemd installer', () => {
   });
 
   test('the CLI refuses legacy user-mode generation instead of installing an unproven timer', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-user-cli-'));
+    const root = makeTempDir('yos-auto-user-cli-');
     await expect(runCli([
       '--config', config(root),
       '--repo', process.cwd(),
@@ -394,7 +396,7 @@ describe('shelf automatic backup systemd installer', () => {
   });
 
   test('the system installer API also refuses user mode when called without the CLI', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-user-api-'));
+    const root = makeTempDir('yos-auto-user-api-');
     await expect(installAndVerifySystemdUnits({
       configPath: config(root),
       repoDir: process.cwd(),
@@ -405,7 +407,7 @@ describe('shelf automatic backup systemd installer', () => {
   });
 
   test('the CLI refuses a system unit directory that systemctl would not load', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-wrong-unit-dir-'));
+    const root = makeTempDir('yos-auto-wrong-unit-dir-');
     await expect(runCli([
       '--system',
       '--user', 'backup-operator',
@@ -420,7 +422,7 @@ describe('shelf automatic backup systemd installer', () => {
   });
 
   test('the CLI requires root before touching the system unit directory', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-needs-root-'));
+    const root = makeTempDir('yos-auto-needs-root-');
     await expect(runCli([
       '--system',
       '--user', 'backup-operator',
@@ -434,7 +436,7 @@ describe('shelf automatic backup systemd installer', () => {
   });
 
   test('writes units accepted by systemd-analyze', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-systemd-'));
+    const root = makeTempDir('yos-auto-systemd-');
     const outputDir = path.join(root, 'units');
     const repoDir = path.join(root, 'repo-plain');
     fs.mkdirSync(repoDir);
@@ -478,7 +480,7 @@ describe('shelf automatic backup systemd installer', () => {
   // encoding that survives that field, so installation must refuse the path
   // rather than emit a unit that only looks installed.
   test('refuses a repo path systemd WorkingDirectory= cannot express', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-reject-'));
+    const root = makeTempDir('yos-auto-reject-');
     const outputDir = path.join(root, 'units');
     const repoDir = path.join(root, 'repo with spaces');
     fs.mkdirSync(repoDir);
@@ -499,7 +501,7 @@ describe('shelf automatic backup systemd installer', () => {
   });
 
   async function expectUnitRejected(override) {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-auto-unit-bad-'));
+    const root = makeTempDir('yos-auto-unit-bad-');
     await expect(buildSystemdUnits({
       configPath: config(root),
       repoDir: process.cwd(),

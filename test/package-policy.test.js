@@ -1,6 +1,7 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+
+import { makeTempDir } from './helpers/temp-dir.js';
 
 import {
   findBlockedPackageEntries,
@@ -34,7 +35,7 @@ describe('release package policy', () => {
   });
 
   test('content digest is order-independent and changes with file bytes', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-package-policy-'));
+    const root = makeTempDir('yos-package-policy-');
     fs.writeFileSync(path.join(root, 'a.txt'), 'alpha');
     fs.writeFileSync(path.join(root, 'b.txt'), 'beta');
 

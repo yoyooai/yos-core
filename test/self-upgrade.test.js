@@ -1,7 +1,8 @@
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
+
+import { makeTempDir } from './helpers/temp-dir.js';
 
 // YOS_DIR is baked into config.js at import time — point it at a temp dir
 // BEFORE importing self-upgrade.js so SKILLS_DIR lands inside the sandbox.
@@ -12,7 +13,7 @@ let generateManifest;
 let saveManifest;
 
 beforeAll(async () => {
-  tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-selfup-test-'));
+  tmpRoot = makeTempDir('yos-selfup-test-');
   process.env.YOS_DIR = tmpRoot;
   skillsDir = path.join(tmpRoot, '.claude', 'skills');
   ({ syncCoreSkills } = await import('../cli/lib/self-upgrade.js'));

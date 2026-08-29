@@ -1,9 +1,10 @@
 import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { generateManifest, saveMergeBaseline } from '../cli/lib/manifest.js';
+
+import { makeTempDir } from './helpers/temp-dir.js';
 
 const DRIVER = path.join(import.meta.dirname, 'helpers', 'run-self-upgrade-driver.mjs');
 
@@ -48,7 +49,7 @@ function runScenario(scenario) {
 }
 
 beforeEach(() => {
-  tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-self-upgrade-717-'));
+  tmpRoot = makeTempDir('yos-self-upgrade-717-');
   yosDir = path.join(tmpRoot, 'yos');
   skillsDir = path.join(yosDir, '.claude', 'skills');
   packageDir = path.join(tmpRoot, 'new-package');

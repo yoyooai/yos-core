@@ -17,10 +17,11 @@
 
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from '@jest/globals';
+
+import { makeTempDir } from './helpers/temp-dir.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const INSTALL_SH = path.join(ROOT, 'scripts', 'install.sh');
@@ -42,7 +43,7 @@ function extractRecorder() {
  * @returns {string} the resulting ~/yos/.env ('' when never created)
  */
 function recordInto(distBase, { seedEnv = null } = {}) {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-mirror-record-'));
+  const home = makeTempDir('yos-mirror-record-');
   if (seedEnv !== null) {
     fs.mkdirSync(path.join(home, 'yos'), { recursive: true });
     fs.writeFileSync(path.join(home, 'yos', '.env'), seedEnv, 'utf8');

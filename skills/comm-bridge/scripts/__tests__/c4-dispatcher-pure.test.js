@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it, after } from 'node:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
 
 import {
   DELIVERY_DELAY_BASE,
@@ -12,7 +13,7 @@ import {
 
 // Set YOS_DIR to a temp dir BEFORE importing the dispatcher so the DB
 // initialises in an isolated location and the background main() loop is harmless.
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'c4-disp-test-'));
+const tmpDir = makeTempDir('c4-disp-test-');
 const origYOSDir = process.env.YOS_DIR;
 const origDisableMain = process.env.C4_DISPATCHER_DISABLE_MAIN;
 process.env.YOS_DIR = tmpDir;

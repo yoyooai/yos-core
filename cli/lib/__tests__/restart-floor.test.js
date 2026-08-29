@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, it } from 'node:test';
 
 import { RESTART_FLOOR, applyRestartFloor, parseUptimeMs } from '../restart-policy.js';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 const require = createRequire(import.meta.url);
 const TEMPLATE_PATH = path.resolve(
@@ -78,7 +79,7 @@ describe('the restart floor', () => {
  * involved — so it is the one that has to hold the floor on its own.
  */
 function loadTemplateApps(componentFiles) {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-eco-test-'));
+  const home = makeTempDir('yos-eco-test-');
   tmpDirs.push(home);
 
   const skillDir = path.join(home, 'yos', '.claude', 'skills', 'demo');

@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 const { rollback, step7_runPostUpgradeHook, step8_startService } = await import('../upgrade.js');
 const { step11_startCoreServices } = await import('../self-upgrade.js');
 const { restartRuntimeServices } = await import('../../commands/runtime.js');
 
 function makeSkillDir(frontmatter) {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-upgrade-hook-'));
+  const tmpDir = makeTempDir('yos-upgrade-hook-');
   const skillDir = path.join(tmpDir, 'demo');
   fs.mkdirSync(skillDir, { recursive: true });
   fs.writeFileSync(path.join(skillDir, 'SKILL.md'), `---\nname: demo\n${frontmatter}---\n`, 'utf8');
@@ -165,7 +166,7 @@ describe('step7_runPostUpgradeHook', () => {
 
 describe('step8_startService', () => {
   it('retries deleted services through ecosystem restart instead of pm2 start <name>', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-upgrade-step8-'));
+    const tmpDir = makeTempDir('yos-upgrade-step8-');
     const skillDir = path.join(tmpDir, 'demo');
     fs.mkdirSync(skillDir, { recursive: true });
     fs.writeFileSync(path.join(skillDir, 'SKILL.md'), `---\nname: demo\nlifecycle:\n  service:\n    name: yos-demo\n---\n`, 'utf8');
@@ -197,7 +198,7 @@ describe('step8_startService', () => {
   });
 
   it('persists the PM2 dump (save: true) on a normal upgrade restart (#1696)', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-upgrade-step8-save-'));
+    const tmpDir = makeTempDir('yos-upgrade-step8-save-');
     const skillDir = path.join(tmpDir, 'demo');
     const ecosystemPath = path.join(skillDir, 'ecosystem.config.cjs');
     fs.mkdirSync(skillDir, { recursive: true });
@@ -229,7 +230,7 @@ describe('step8_startService', () => {
   });
 
   it('persists the PM2 dump (save: true) when restarting from ecosystem after the process disappeared (#1696)', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-upgrade-step8-fallback-save-'));
+    const tmpDir = makeTempDir('yos-upgrade-step8-fallback-save-');
     const skillDir = path.join(tmpDir, 'demo');
     const ecosystemPath = path.join(skillDir, 'ecosystem.config.cjs');
     fs.mkdirSync(skillDir, { recursive: true });
@@ -264,7 +265,7 @@ describe('step8_startService', () => {
 
 describe('component upgrade rollback', () => {
   it('restores from skillDir/.backup/<timestamp> and preserves backup metadata', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-upgrade-rollback-'));
+    const tmpDir = makeTempDir('yos-upgrade-rollback-');
     const skillDir = path.join(tmpDir, 'skills', 'demo');
     const backupDir = path.join(skillDir, '.backup', 'run-1');
 
@@ -300,7 +301,7 @@ describe('component upgrade rollback', () => {
   });
 
   it('persists the PM2 dump (save: true) when restarting the service after rollback (#1696)', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-upgrade-rollback-save-'));
+    const tmpDir = makeTempDir('yos-upgrade-rollback-save-');
     const skillDir = path.join(tmpDir, 'skills', 'demo');
     const ecosystemPath = path.join(skillDir, 'ecosystem.config.cjs');
     fs.mkdirSync(skillDir, { recursive: true });
@@ -361,7 +362,7 @@ describe('step11_startCoreServices', () => {
   });
 
   it('uses the module default restart helper when no restart dep is injected', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-step11-default-'));
+    const tmpDir = makeTempDir('yos-step11-default-');
     const binDir = path.join(tmpDir, 'bin');
     const logPath = path.join(tmpDir, 'pm2.log');
     const ecosystemPath = path.join(tmpDir, 'ecosystem.config.cjs');
@@ -400,7 +401,7 @@ describe('step11_startCoreServices', () => {
   });
 
   it('fails before saving when pm2 jlist lacks activity-monitor package-root env', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-step11-jlist-missing-'));
+    const tmpDir = makeTempDir('yos-step11-jlist-missing-');
     const binDir = path.join(tmpDir, 'bin');
     const logPath = path.join(tmpDir, 'pm2.log');
     const ecosystemPath = path.join(tmpDir, 'ecosystem.config.cjs');

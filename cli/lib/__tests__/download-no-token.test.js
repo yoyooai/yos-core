@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 const origEnv = {};
 for (const key of ['YOS_GH_RETRY_DELAY_MS', 'GITHUB_TOKEN', 'GH_TOKEN', 'PATH']) {
@@ -33,7 +34,7 @@ afterEach(() => {
 // Fake curl that always fails with the given status; fake gh that reports no
 // auth, so getGitHubToken() resolves to null on its first (cached) probe.
 function installFailingCurl({ status }) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-download-fake-'));
+  const dir = makeTempDir('yos-download-fake-');
   tmpDirs.push(dir);
   const callsFile = path.join(dir, 'calls');
   const script = `#!/bin/sh
@@ -55,7 +56,7 @@ exit 22
 }
 
 function makeDestDir() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-download-dest-'));
+  const dir = makeTempDir('yos-download-dest-');
   tmpDirs.push(dir);
   return dir;
 }

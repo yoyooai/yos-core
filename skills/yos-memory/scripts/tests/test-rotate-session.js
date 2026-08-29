@@ -5,8 +5,10 @@ import path from 'path';
 import os from 'os';
 import { execFileSync } from 'child_process';
 
+import { makeTempDir } from '../../../../test/helpers/temp-dir.js';
+
 // Temp dir for integration tests (child_process gets YOS_DIR via env)
-const TEST_BASE = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-rotate-test-'));
+const TEST_BASE = makeTempDir('yos-rotate-test-');
 const SESSIONS_DIR = path.join(TEST_BASE, 'memory', 'sessions');
 const CURRENT_FILE = path.join(SESSIONS_DIR, 'current.md');
 const SCRIPT_PATH = path.resolve(import.meta.dirname, '..', 'rotate-session.js');

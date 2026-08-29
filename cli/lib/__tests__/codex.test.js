@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { after, afterEach, beforeEach, describe, it } from 'node:test';
+
+import { makeTempDir } from '../../../test/helpers/temp-dir.js';
 
 const tmpDirs = [];
 
@@ -12,7 +13,7 @@ const tmpDirs = [];
 // by FAKE_CODEX_STATUS so checkAuth()'s glue path can be asserted directly.
 // NOTE: kept OUT of tmpDirs — the per-test afterEach drains tmpDirs, which would
 // delete this binary before later tests run. Cleaned once via after() below.
-const fakeBinDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-codex-fakebin-'));
+const fakeBinDir = makeTempDir('yos-codex-fakebin-');
 const fakeCodexPath = path.join(fakeBinDir, 'codex');
 fs.writeFileSync(
   fakeCodexPath,
@@ -51,7 +52,7 @@ afterEach(() => {
 
 describe('Codex auth checks', () => {
   it('uses the configured custom base URL for API key auth checks', async () => {
-    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-codex-auth-test-'));
+    const tmpHome = makeTempDir('yos-codex-auth-test-');
     tmpDirs.push(tmpHome);
     process.env.HOME = tmpHome;
 
@@ -81,7 +82,7 @@ describe('Codex auth checks', () => {
   });
 
   it('API key auth checks return failure on 401', async () => {
-    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-codex-auth-test-'));
+    const tmpHome = makeTempDir('yos-codex-auth-test-');
     tmpDirs.push(tmpHome);
     process.env.HOME = tmpHome;
 
@@ -102,7 +103,7 @@ describe('Codex auth checks', () => {
   });
 
   it('API key auth checks return uncertain on 429 and 5xx', async () => {
-    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-codex-auth-test-'));
+    const tmpHome = makeTempDir('yos-codex-auth-test-');
     tmpDirs.push(tmpHome);
     process.env.HOME = tmpHome;
 
@@ -123,7 +124,7 @@ describe('Codex auth checks', () => {
   });
 
   it('API key auth checks return uncertain on network errors', async () => {
-    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-codex-auth-test-'));
+    const tmpHome = makeTempDir('yos-codex-auth-test-');
     tmpDirs.push(tmpHome);
     process.env.HOME = tmpHome;
 
@@ -149,7 +150,7 @@ describe('Codex auth checks', () => {
   // non-throwing execFile call must NOT be read as authenticated. This is the
   // exact false-pass on the runtime-switch / health-probe gate that the PR fixes.
   it('chatgpt/no-auth: returns not_logged_in when codex login status exits 0 with "Not logged in" on stderr', async () => {
-    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-codex-auth-test-'));
+    const tmpHome = makeTempDir('yos-codex-auth-test-');
     tmpDirs.push(tmpHome);
     process.env.HOME = tmpHome; // no ~/.codex/auth.json → falls to login-status branch
     process.env.FAKE_CODEX_STATUS = 'Not logged in';
@@ -162,7 +163,7 @@ describe('Codex auth checks', () => {
   });
 
   it('chatgpt/no-auth: returns ok when codex login status reports "Logged in" on stderr (exit 0)', async () => {
-    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-codex-auth-test-'));
+    const tmpHome = makeTempDir('yos-codex-auth-test-');
     tmpDirs.push(tmpHome);
     process.env.HOME = tmpHome;
     process.env.FAKE_CODEX_STATUS = 'Logged in using ChatGPT';
@@ -175,7 +176,7 @@ describe('Codex auth checks', () => {
   });
 
   it('chatgpt/no-auth: returns uncertain when codex login status output is unparseable', async () => {
-    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-codex-auth-test-'));
+    const tmpHome = makeTempDir('yos-codex-auth-test-');
     tmpDirs.push(tmpHome);
     process.env.HOME = tmpHome;
     process.env.FAKE_CODEX_STATUS = 'Unexpected status text';
@@ -188,7 +189,7 @@ describe('Codex auth checks', () => {
   });
 
   it('chatgpt/no-auth: returns uncertain when codex login status cannot run', async () => {
-    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'yos-codex-auth-test-'));
+    const tmpHome = makeTempDir('yos-codex-auth-test-');
     tmpDirs.push(tmpHome);
     process.env.HOME = tmpHome;
     process.env.FAKE_CODEX_EXIT = '127';
